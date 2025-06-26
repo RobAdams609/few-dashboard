@@ -1,0 +1,73 @@
+body, h1, p { margin: 0; padding: 0; }
+body { background: #111; color: #fff; font-family: sans-serif; }
+
+/* Top banner */
+.banner {
+  text-align: center;
+  padding: 1rem 0;
+  background: #000;
+  border-bottom: 2px solid #444;
+}
+.logo {
+  max-height: 80px;
+  display: block;
+  margin: 0 auto 0.5rem;
+}
+.team-name {
+  font-size: 2rem;
+  letter-spacing: 0.1em;
+}
+.rule {
+  font-size: 1.2rem;
+  opacity: 0.8;
+  margin-top: 0.25rem;
+}
+
+/* Agent headshots */
+.agent-headshots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: center;
+  padding: 1rem 0;
+}
+.agent-headshot {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid #444;
+}
+
+/* Metrics */
+#metrics {
+  text-align: center;
+  margin: 2rem 0;
+}
+
+/* Bottom ticker */
+.ticker-container {
+  position: fixed;
+  bottom: 0;
+  width: 100%;
+  background: #000;
+  border-top: 2px solid #444;
+  overflow: hidden;
+  height: 2.5rem;
+}
+.ticker {
+  white-space: nowrap;
+  display: inline-block;
+  padding-left: 100%;
+  animation: scroll-left linear infinite;
+  line-height: 2.5rem;
+}
+.ticker span {
+  display: inline-block;
+  margin-right: 3rem;
+  font-weight: bold;
+}
+@keyframes scroll-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-100%); }
+}
