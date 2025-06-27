@@ -71,3 +71,30 @@ body { background: #111; color: #fff; font-family: sans-serif; }
   from { transform: translateX(0); }
   to   { transform: translateX(-100%); }
 }
+/* Pin the live ticker to the bottom of the viewport */
+.ticker-container {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background-color: #111;
+  padding: 10px 0;
+  overflow: hidden;
+  z-index: 999;
+}
+.ticker {
+  white-space: nowrap;
+  animation: scroll 10s linear infinite;
+}
+.ticker span {
+  display: inline-block;
+  margin-right: 2em;
+  font-size: 1rem;
+  color: #fff;
+}
+
+/* Simple keyframes for horizontal scroll */
+@keyframes scroll {
+  0%   { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
