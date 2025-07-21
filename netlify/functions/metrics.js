@@ -1,28 +1,20 @@
-const axios = require("axios");
+exports.handler = async function(event, context) {
+    // Mock data for demo. Replace this with real Ringy API call and format.
+    const sales = [
+        { agent: "Joseph", amount: 208 },
+        { agent: "Ajani", amount: 300 },
+        { agent: "Marie", amount: 275 }
+    ];
 
-exports.handler = async () => {
-  try {
-    const sold = await axios.post(
-      "https://app.ringy.com/api/public/external/get-lead-sold-products",
-      {
-        apiKey: process.env.RINGY_SOLD_KEY,
-        startDate: new Date().toISOString().slice(0,10) + " 00:00:00",
-        endDate:   new Date().toISOString().slice(0,10) + " 23:59:59",
-        limit: 500
-      }
-    );
-
-    const totalSales = sold.data.length;
-    const totalAV    = sold.data.reduce((sum,i) => sum + i.amount, 0);
+    const metrics = {
+        sales: sales.length,
+        av: sales.reduce((acc, s) => acc + s.amount * 12, 0),
+        calls: 87,
+        talkTime: 122 // minutes
+    };
 
     return {
-      statusCode: 200,
-      body: JSON.stringify({ totalSales, totalAV })
+        statusCode: 200,
+        body: JSON.stringify({ sales, metrics })
     };
-  } catch (e) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: e.message })
-    };
-  }
 };
