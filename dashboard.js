@@ -1,47 +1,44 @@
-const rules = [
-    "1. Outwork everyone. Grind now, shine later.",
-    "2. Discipline over motivation. Show up daily.",
-    "3. Average is overcrowded. Be uncommon.",
-    "4. Get comfortable being uncomfortable. Lean into discomfort & grow.",
-    "5. You’re owed nothing. Earn everything.",
-    "6. Attack the day or the day attacks you.",
-    "7. No zero days. One step forward, always.",
-    "8. Sacrifice leisure for legacy.",
-    "9. Hunt results. Track, reflect, improve.",
-    "10. Confidence comes from earned competence.",
-    "11. Be the standard. Don’t follow one."
-];
+const rules = ['1. Do not be entitled. Earn everything. Choose hard work over handouts… always.', '2. To get, give. Give without remembering, receive without forgetting.', '3. Bring The Few Energy. Exude grit, gratitude, and go every day.', '4. Get comfortable being uncomfortable. Learn, grow, and lead.', '5. If you risk nothing, you risk everything. Risk results in reward.', '6. Luck favors hard workers. Stay receptive, ready, and resilient.', '7. Your goal is growth to the grave. Live in the moment and grow.', '8. Plan your day. No plan? No progress.', '9. Choose effort over excuses and emotions.', '10. Restore the dignity of hard work. Be the example.', 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.'];
 
 let currentView = 0;
-const views = ['sales', 'calls', 'talkTime', 'av'];
+const views = ['sales', 'av', 'calls', 'talkTime'];
 
 function getRandomRule() {
     const rule = rules[Math.floor(Math.random() * rules.length)];
     document.getElementById("rule-of-day").textContent = rule;
 }
 
-function renderView(view, data) {
+function renderLeaderboard(metric, agentStats) {
     const container = document.getElementById("metrics-view");
     container.innerHTML = "";
 
-    if (view === 'sales') {
-        container.innerHTML = `Sales Today: ${data.sales}<br>AV Today: $${data.av}`;
-    } else if (view === 'calls') {
-        container.innerHTML = `Calls Today: ${data.calls}`;
-    } else if (view === 'talkTime') {
-        container.innerHTML = `Talk Time: ${data.talkTime} mins`;
-    }
+    const sorted = Object.entries(agentStats).sort((a, b) => b[1][metric] - a[1][metric]);
+
+    sorted.forEach(([agent, stats], index) => {
+        const div = document.createElement("div");
+        let label = "";
+
+        if (index === 0) label = "🥇 ";
+        else if (index === 1) label = "🥈 ";
+        else if (index === 2) label = "🥉 ";
+        else if (index >= sorted.length - 3) label = "💩 ";
+
+        div.innerHTML = `${label}${agent} – ${metric === 'av' ? '$' + stats[metric] : stats[metric]}`;
+        if (index < 3) div.style.color = 'lightgreen';
+        container.appendChild(div);
+    });
 }
 
 function updateTicker(sales) {
     const ticker = document.getElementById("ticker");
-    ticker.textContent = sales.map(s => `🔥 ${s.agent} sold $${s.amount * 12} 🔥`).join(" | ");
+    ticker.textContent = sales.map(s => `🔥 ${s.agent} sold ${s.amount * 12} 🔥`).join(" | ");
 }
 
 async function fetchMetrics() {
     const res = await fetch("/.netlify/functions/metrics");
     const data = await res.json();
-    renderView(views[currentView], data.metrics);
+
+    renderLeaderboard(views[currentView], data.agentStats);
     updateTicker(data.sales);
 }
 
