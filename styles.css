@@ -1,1 +1,31 @@
-body { background-color: #111; color: #fff; font-family: Arial; }
+body {
+  margin: 0;
+  font-family: sans-serif;
+  background: #111;
+  color: #fff;
+}
+header {
+  background: #222;
+  padding: 1rem;
+  text-align: center;
+}
+.logo {
+  max-height: 60px;
+}
+.rule-banner {
+  margin-top: 1rem;
+  font-size: 1.25rem;
+  color: #ccc;
+}
+.metrics {
+  padding: 2rem;
+  text-align: center;
+}
+.ticker {
+  background: #000;
+  padding: 1rem;
+  font-weight: bold;
+  font-size: 1.1rem;
+  white-space: nowrap;
+  overflow: hidden;
+}
