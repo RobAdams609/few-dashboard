@@ -1,61 +1,87 @@
-const fetch = require('node-fetch');
+// metrics.js (ESM-compatible version)
+import fetch from 'node-fetch';
 
-exports.handler = async function () {
-  const soldKey = process.env.RINGY_SOLD_KEY;
-  const recordingKey = process.env.RINGY_RECORDING_KEY;
+const RINGY_GET_LEAD_KEY = process.env.RINGY_GET_LEAD_KEY;
+const RINGY_RECORDING_KEY = process.env.RINGY_RECORDING_KEY;
+const RINGY_SOLD_KEY = process.env.RINGY_SOLD_KEY;
 
-  const today = new Date().toISOString().split("T")[0];
-
+export default async (req, res) => {
   try {
-    // --- SALES & AV ---
-    const soldRes = await fetch(`https://app.ringy.com/api/public/external/get-lead-sold-products?apiKey=${soldKey}&startDate=${today}&endDate=${today}&limit=1000`);
-    const soldData = await soldRes.json();
-    const sales = soldData.data || [];
+    const [leadsRes, recordingsRes, soldRes] = await Promise.all([
+      fetch('https://app.ringy.com/api/public/external/get-leads', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: RINGY_GET_LEAD_KEY,
+          startDate: getToday(),
+          endDate: getToday()
+        }),
+      }),
+      fetch('https://app.ringy.com/api/public/external/get-recordings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: RINGY_RECORDING_KEY,
+          startDate: getToday(),
+          endDate: getToday()
+        }),
+      }),
+      fetch('https://app.ringy.com/api/public/external/get-lead-sold-products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: RINGY_SOLD_KEY,
+          startDate: getToday(),
+          endDate: getToday()
+        }),
+      }),
+    ]);
 
-    const agentStats = {};
+    const [leads, recordings, sold] = await Promise.all([
+      leadsRes.json(),
+      recordingsRes.json(),
+      soldRes.json(),
+    ]);
 
-    const saleDetails = sales.map(s => {
-      const agent = (s.sold_by_user_name || "Unknown").toLowerCase().split(" ")[0];
-      const amount = parseFloat(s.sale_price || 0);
-      const av = amount * 12;
+    const agentStats = processAgentData({ leads, recordings, sold });
 
-      if (!agentStats[agent]) agentStats[agent] = { sales: 0, av: 0, calls: 0, talkTime: 0 };
-      agentStats[agent].sales += 1;
-      agentStats[agent].av += av;
-
-      return { agent: s.sold_by_user_name, amount };
-    });
-
-    // --- CALLS & TALK TIME ---
-    const callRes = await fetch(`https://app.ringy.com/api/public/external/get-recordings?apiKey=${recordingKey}&startDate=${today}&endDate=${today}&limit=1000`);
-    const callData = await callRes.json();
-    const calls = callData.data || [];
-
-    calls.forEach(call => {
-      const agent = (call.user_name || "Unknown").toLowerCase().split(" ")[0];
-      const talkTime = parseFloat(call.talk_time || 0);
-      if (!agentStats[agent]) agentStats[agent] = { sales: 0, av: 0, calls: 0, talkTime: 0 };
-      agentStats[agent].calls += 1;
-      agentStats[agent].talkTime += talkTime / 60; // convert to minutes
-    });
-
-    Object.values(agentStats).forEach(agent => {
-      agent.talkTime = Math.round(agent.talkTime);
-      agent.av = Math.round(agent.av);
-    });
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify({
-        sales: saleDetails,
-        agentStats
-      })
-    };
-
-  } catch (err) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Failed to fetch metrics", details: err.message })
-    };
+    return res.status(200).json({ agentStats });
+  } catch (error) {
+    console.error('Fetched metrics:', error);
+    return res.status(500).json({ errorType: 'Error', errorMessage: error.message });
   }
 };
+
+function getToday() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function processAgentData({ leads, recordings, sold }) {
+  // Build real agentStats from fetched data
+  // This should match the structure your dashboard expects
+  const stats = {};
+
+  sold?.forEach(item => {
+    const name = item?.user_name;
+    const av = parseInt(item?.amount) * 12;
+    if (!stats[name]) stats[name] = { av: 0, sales: 0 };
+    stats[name].av += av;
+    stats[name].sales += 1;
+  });
+
+  recordings?.forEach(item => {
+    const name = item?.user_name;
+    const talkTime = parseInt(item?.talk_time || 0);
+    if (!stats[name]) stats[name] = { talkTime: 0, calls: 0 };
+    stats[name].talkTime = (stats[name].talkTime || 0) + talkTime;
+    stats[name].calls = (stats[name].calls || 0) + 1;
+  });
+
+  return Object.entries(stats).map(([name, data]) => ({
+    name,
+    av: data.av || 0,
+    sales: data.sales || 0,
+    talkTime: data.talkTime || 0,
+    calls: data.calls || 0,
+  }));
+}
