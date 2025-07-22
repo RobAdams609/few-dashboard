@@ -26,6 +26,11 @@ function renderLeaderboard(metric, agentStats) {
   const container = document.getElementById("metrics-view");
   container.innerHTML = "";
 
+  if (!agentStats || Object.keys(agentStats).length === 0) {
+    container.innerHTML = "<p>No agent data available.</p>";
+    return;
+  }
+
   const sorted = Object.entries(agentStats).sort((a, b) => b[1][metric] - a[1][metric]);
 
   sorted.forEach(([agent, stats], index) => {
@@ -46,16 +51,31 @@ function renderLeaderboard(metric, agentStats) {
 function updateTicker(agentStats) {
   const ticker = document.getElementById("ticker");
   ticker.style.fontSize = "1.4em";
+
+  if (!agentStats || Object.keys(agentStats).length === 0) {
+    ticker.textContent = "No sales yet today.";
+    return;
+  }
+
   const sorted = Object.entries(agentStats).sort((a, b) => b[1].av - a[1].av);
   ticker.textContent = sorted.map(([agent, stats]) => `🔥 ${agent} – $${stats.av} 🔥`).join(" | ");
 }
 
 async function fetchMetrics() {
-  const res = await fetch("/.netlify/functions/metrics");
-  const data = await res.json();
+  try {
+    const res = await fetch("/.netlify/functions/metrics");
+    const data = await res.json();
 
-  renderLeaderboard(views[currentView], data.agentStats);
-  updateTicker(data.agentStats);
+    console.log("Fetched metrics:", data);
+    if (!data.agentStats) throw new Error("Missing agentStats in response");
+
+    renderLeaderboard(views[currentView], data.agentStats);
+    updateTicker(data.agentStats);
+  } catch (err) {
+    console.error("Dashboard error:", err);
+    document.getElementById("metrics-view").innerHTML = "<p>Error loading metrics. Check console.</p>";
+    document.getElementById("ticker").textContent = "⚠️ Metrics fetch failed.";
+  }
 }
 
 setInterval(() => {
