@@ -15,15 +15,54 @@ const rules = [
 let currentView = 0;
 const views = ['sales', 'av', 'calls', 'talkTime'];
 
-function getDailyRule() {
-  const today = new Date();
-  const index = today.getDate() % rules.length;
-  const rule = rules[index];
-  document.getElementById("rule-of-day").textContent = rule;
+function getTimedRule() {
+  const now = new Date();
+  const hourBlock = Math.floor(now.getHours() / 3);
+  const index = hourBlock % rules.length;
+  document.getElementById("rule-of-day").textContent = rules[index];
 }
 
 function renderLeaderboard(metric, agentStats) {
   const container = document.getElementById("metrics-view");
   container.innerHTML = "";
 
-  const sorted = Object.entrie
+  const sorted = Object.entries(agentStats).sort((a, b) => b[1][metric] - a[1][metric]);
+
+  sorted.forEach(([agent, stats], index) => {
+    const div = document.createElement("div");
+    let label = "";
+
+    if (index === 0) label = "🥇 ";
+    else if (index === 1) label = "🥈 ";
+    else if (index === 2) label = "🥉 ";
+    else if (index >= sorted.length - 3) label = "💩 ";
+
+    div.innerHTML = `${label}${agent} – ${metric === 'av' ? '$' + stats[metric] : stats[metric]}`;
+    if (index < 3) div.style.color = 'lightgreen';
+    container.appendChild(div);
+  });
+}
+
+function updateTicker(agentStats) {
+  const ticker = document.getElementById("ticker");
+  ticker.style.fontSize = "1.4em";
+  const sorted = Object.entries(agentStats).sort((a, b) => b[1].av - a[1].av);
+  ticker.textContent = sorted.map(([agent, stats]) => `🔥 ${agent} – $${stats.av} 🔥`).join(" | ");
+}
+
+async function fetchMetrics() {
+  const res = await fetch("/.netlify/functions/metrics");
+  const data = await res.json();
+
+  renderLeaderboard(views[currentView], data.agentStats);
+  updateTicker(data.agentStats);
+}
+
+setInterval(() => {
+  currentView = (currentView + 1) % views.length;
+  fetchMetrics();
+}, 30000);
+
+getTimedRule();
+fetchMetrics();
+setInterval(fetchMetrics, 60000);
