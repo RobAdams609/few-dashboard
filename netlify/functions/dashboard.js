@@ -3,12 +3,12 @@ exports.handler = async function(event, context) {
     statusCode: 200,
     body: JSON.stringify({
       agentStats: [
-        { name: "Rob", av: 2400, calls: 120, talkTime: 230, sales: 6 },
-        { name: "Phil", av: 1300, calls: 75, talkTime: 190, sales: 3 },
-        { name: "Ajani", av: 3100, calls: 140, talkTime: 260, sales: 8 }
+        { name: "Ajani", sales: 8, av: 2800, calls: 60, talkTime: 2400 },
+        { name: "Rob", sales: 6, av: 2400, calls: 45, talkTime: 1800 },
+        { name: "Phil", sales: 3, av: 1200, calls: 30, talkTime: 900 }
       ],
       salesTicker: "Phil closed $1,200 • Ajani closed $2,800 • Rob closed $2,400",
       principleOfTheDay: "2. Consistency beats intensity."
-    }),
+    })
   };
-};
+}

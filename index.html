@@ -1,1 +1,117 @@
-<!DOCTYPE html><html><head><title>Dashboard</title></head><body><h1>Dashboard Loaded</h1></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>The Few – Live Dashboard</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: #111;
+      color: #eee;
+      font-family: Arial, sans-serif;
+      text-align: center;
+    }
+    .banner {
+      background-color: #222;
+      padding: 1rem 0;
+    }
+    .logo {
+      width: 80px;
+    }
+    .principle {
+      font-size: 1.2rem;
+      margin-top: 0.5rem;
+    }
+    .leaderboard {
+      margin: 1rem 0;
+      font-size: 1.4rem;
+    }
+    .ticker {
+      background-color: #000;
+      padding: 0.7rem;
+      font-weight: bold;
+      color: white;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+  </style>
+</head>
+<body>
+  <div class="banner">
+    <img src="logo.png" alt="The Few Logo" class="logo" />
+    <div class="principle" id="rule-of-day"></div>
+  </div>
+  <div class="leaderboard" id="metrics-view">Loading stats...</div>
+  <div class="ticker" id="sales-ticker">Loading sales ticker...</div>
+
+  <script>
+    const rules = [
+      "1. Do not be entitled. Earn everything. Choose hard work over handouts… always.",
+      "2. To get, give. Give without remembering, receive without forgetting.",
+      "3. Bring The Few Energy. Exude grit, gratitude, and go every day.",
+      "4. Get comfortable being uncomfortable. Learn, grow, and lead.",
+      "5. If you risk nothing, you risk everything. Risk results in reward.",
+      "6. Luck favors hard workers. Stay receptive, ready, and resilient.",
+      "7. Your goal is growth to the grave. Live in the moment and grow.",
+      "8. Plan your day. No plan? No progress.",
+      "9. Choose effort over excuses and emotions.",
+      "10. Restore the dignity of hard work. Be the example.",
+      "Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt."
+    ];
+
+    let currentView = 0;
+    const views = ['sales', 'av', 'calls', 'talkTime'];
+
+    function getTimedRule() {
+      const now = new Date();
+      const hourBlock = Math.floor(now.getHours() / 3);
+      const index = hourBlock % rules.length;
+      document.getElementById("rule-of-day").textContent = rules[index];
+    }
+
+    function renderLeaderboard(metric, agentStats) {
+      const container = document.getElementById("metrics-view");
+      container.innerHTML = "";
+
+      if (!agentStats || Object.keys(agentStats).length === 0) {
+        container.innerHTML = "<p>No agent data available.</p>";
+        return;
+      }
+
+      const sorted = agentStats.sort((a, b) => b[metric] - a[metric]);
+      sorted.forEach((agent, index) => {
+        const div = document.createElement("div");
+        div.innerHTML = `#${index + 1} ${agent.name} – ${agent[metric]}`;
+        if (index < 3) div.style.fontWeight = "bold";
+        container.appendChild(div);
+      });
+    }
+
+    function updateTicker(text) {
+      const ticker = document.getElementById("sales-ticker");
+      ticker.textContent = text;
+    }
+
+    async function fetchMetrics() {
+      try {
+        const res = await fetch("./.netlify/functions/dashboard");
+        const data = await res.json();
+        renderLeaderboard(views[currentView], data.agentStats);
+        updateTicker(data.salesTicker);
+        document.getElementById("rule-of-day").textContent = data.principleOfTheDay;
+      } catch (err) {
+        console.error("Failed to fetch dashboard data", err);
+      }
+    }
+
+    setInterval(() => {
+      currentView = (currentView + 1) % views.length;
+      fetchMetrics();
+    }, 30000);
+
+    fetchMetrics();
+    getTimedRule();
+  </script>
+</body>
+</html>
