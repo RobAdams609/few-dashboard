@@ -2,111 +2,42 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>The Few Dashboard</title>
-  <style>
-    body {
-      background-color: #111;
-      color: #fff;
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin: 0;
-      padding: 0;
-    }
-    .logo {
-      width: 200px;
-      margin: 20px auto;
-    }
-    .principle {
-      font-size: 1.3rem;
-      margin: 10px;
-      padding: 10px;
-      background: #222;
-      border-left: 4px solid #0f0;
-      text-align: center;
-    }
-    .metrics {
-      display: flex;
-      justify-content: center;
-      margin: 30px auto;
-      gap: 50px;
-    }
-    .metric {
-      background: #222;
-      padding: 20px;
-      border-radius: 8px;
-    }
-    .leaderboard {
-      margin: 30px auto;
-      max-width: 600px;
-      text-align: left;
-    }
-    .ticker {
-      background: #333;
-      padding: 10px;
-      font-weight: bold;
-      position: fixed;
-      bottom: 0;
-      width: 100%;
-      font-size: 1.1rem;
-    }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>The Few Dashboard</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        .top-rule {
+            background-color: #222;
+            padding: 20px;
+            font-size: 20px;
+        }
+        .metrics {
+            margin-top: 20px;
+            font-size: 18px;
+        }
+        .ticker {
+            background-color: black;
+            color: white;
+            font-weight: bold;
+            padding: 10px;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+        }
+    </style>
 </head>
 <body>
-  <img src="logo.png" alt="The Few Logo" class="logo" />
-  <div class="principle" id="principle">Loading principle...</div>
-  <div class="metrics" id="metrics">
-    <div class="metric"><strong>Sales:</strong> <span id="sales">0</span></div>
-    <div class="metric"><strong>AV:</strong> $<span id="av">0</span></div>
-  </div>
-  <div class="leaderboard" id="leaderboard">Loading leaderboard...</div>
-  <div class="ticker" id="ticker">Loading ticker...</div>
+    <img src="logo.png" alt="The Few Logo" style="width:150px;margin-top:20px;" />
+    <div class="top-rule" id="rule-of-day">Loading principle...</div>
+    <div class="metrics" id="metrics-view">Loading metrics...</div>
+    <div class="ticker" id="sales-ticker">Loading ticker...</div>
 
-  <script>
-    const principles = [
-      "1. Do not be entitled. Earn everything.",
-      "2. To get, give.",
-      "3. Bring The Few Energy. Exude grit, gratitude, and go.",
-      "4. Get comfortable being uncomfortable.",
-      "5. If you risk nothing, you risk everything.",
-      "6. Luck favors hard workers.",
-      "7. Your goal is growth to the grave.",
-      "8. Plan your day. If you have no plan, expect no progress.",
-      "9. Choose effort over your excuses and emotions.",
-      "10. Restore the dignity of hard work.",
-      "Bonus: You are who you hunt with."
-    ];
-
-    function updatePrinciple() {
-      const now = new Date();
-      const block = Math.floor(now.getHours() / 3);
-      const index = block % principles.length;
-      document.getElementById("principle").innerText = principles[index];
-    }
-
-    async function fetchData() {
-      try {
-        const res = await fetch("/.netlify/functions/dashboard");
-        const data = await res.json();
-
-        document.getElementById("sales").innerText = data.agentStats.reduce((sum, a) => sum + a.sales, 0);
-        document.getElementById("av").innerText = data.agentStats.reduce((sum, a) => sum + a.av, 0);
-
-        document.getElementById("leaderboard").innerHTML = data.agentStats
-          .map(a => `<div><strong>${a.name}:</strong> $${a.av} AV • ${a.calls} Calls • ${a.talkTime} min Talk • ${a.sales} Sales</div>`)
-          .join("");
-
-        document.getElementById("ticker").innerText = data.salesTicker;
-
-      } catch (e) {
-        console.error("Failed to load dashboard data", e);
-      }
-    }
-
-    updatePrinciple();
-    fetchData();
-    setInterval(fetchData, 60000);
-  </script>
+    <script src="script.js"></script>
 </body>
 </html>
