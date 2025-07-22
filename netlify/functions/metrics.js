@@ -7,7 +7,7 @@ exports.handler = async function () {
   const today = new Date().toISOString().split("T")[0];
 
   try {
-    // SALES & AV
+    // --- SALES & AV ---
     const soldRes = await fetch(`https://app.ringy.com/api/public/external/get-lead-sold-products?apiKey=${soldKey}&startDate=${today}&endDate=${today}&limit=1000`);
     const soldData = await soldRes.json();
     const sales = soldData.data || [];
@@ -26,7 +26,7 @@ exports.handler = async function () {
       return { agent: s.sold_by_user_name, amount };
     });
 
-    // CALLS & TALK TIME
+    // --- CALLS & TALK TIME ---
     const callRes = await fetch(`https://app.ringy.com/api/public/external/get-recordings?apiKey=${recordingKey}&startDate=${today}&endDate=${today}&limit=1000`);
     const callData = await callRes.json();
     const calls = callData.data || [];
@@ -39,9 +39,9 @@ exports.handler = async function () {
       agentStats[agent].talkTime += talkTime / 60; // convert to minutes
     });
 
-    // Round talkTime
     Object.values(agentStats).forEach(agent => {
       agent.talkTime = Math.round(agent.talkTime);
+      agent.av = Math.round(agent.av);
     });
 
     return {
