@@ -26,41 +26,4 @@ function renderLeaderboard(metric, agentStats) {
   const container = document.getElementById("metrics-view");
   container.innerHTML = "";
 
-  const sorted = Object.entries(agentStats).sort((a, b) => b[1][metric] - a[1][metric]);
-
-  sorted.forEach(([agent, stats], index) => {
-    const div = document.createElement("div");
-    let label = "";
-
-    if (index === 0) label = "🥇 ";
-    else if (index === 1) label = "🥈 ";
-    else if (index === 2) label = "🥉 ";
-    else if (index >= sorted.length - 3) label = "💩 ";
-
-    div.innerHTML = `${label}${agent} – ${metric === 'av' ? '$' + stats[metric] : stats[metric]}`;
-    if (index < 3) div.style.color = 'lightgreen';
-    container.appendChild(div);
-  });
-}
-
-function updateTicker(sales) {
-  const ticker = document.getElementById("ticker");
-  ticker.textContent = sales.map(s => `🔥 ${s.agent} sold $${s.amount * 12} 🔥`).join(" | ");
-}
-
-async function fetchMetrics() {
-  const res = await fetch("/.netlify/functions/metrics");
-  const data = await res.json();
-
-  renderLeaderboard(views[currentView], data.agentStats);
-  updateTicker(data.sales);
-}
-
-setInterval(() => {
-  currentView = (currentView + 1) % views.length;
-  fetchMetrics();
-}, 30000);
-
-getDailyRule();
-fetchMetrics();
-setInterval(fetchMetrics, 60000);
+  const sorted = Object.entrie
