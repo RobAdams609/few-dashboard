@@ -1,43 +1,14 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-    <title>The Few Dashboard</title>
-    <style>
-        body {
-            background-color: #121212;
-            color: white;
-            font-family: Arial, sans-serif;
-            text-align: center;
-        }
-        .top-rule {
-            background-color: #222;
-            padding: 20px;
-            font-size: 20px;
-        }
-        .metrics {
-            margin-top: 20px;
-            font-size: 18px;
-        }
-        .ticker {
-            background-color: black;
-            color: white;
-            font-weight: bold;
-            padding: 10px;
-            position: fixed;
-            bottom: 0;
-            width: 100%;
-        }
-    </style>
+  <title>The Few Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <img src="logo.png" alt="The Few Logo" style="width:150px;margin-top:20px;" />
-    <div class="top-rule" id="rule-of-day">Loading principle...</div>
-    <div class="metrics" id="metrics-view">Loading metrics...</div>
-    <div class="ticker" id="sales-ticker">Loading ticker...</div>
-
-    <script src="script.js"></script>
+  <img src="logo.png" alt="The Few Logo" />
+  <div id="rule-of-day"></div>
+  <div id="metrics-view"></div>
+  <div id="ticker"></div>
+  <script src="script.js"></script>
 </body>
 </html>
