@@ -1,65 +1,40 @@
-
-const rules = [
-  "1. Do not be entitled. Earn everything. Choose hard work over handouts… always.",
-  "2. To get, give. Give without remembering, receive without forgetting.",
-  "3. Bring The Few Energy. Exude grit, gratitude, and go every day.",
-  "4. Get comfortable being uncomfortable. Learn, grow, and lead.",
-  "5. If you risk nothing, you risk everything. Risk results in reward.",
-  "6. Luck favors hard workers. Stay receptive, ready, and resilient.",
-  "7. Your goal is growth to the grave. Live in the moment and grow.",
-  "8. Plan your day. No plan? No progress.",
-  "9. Choose effort over excuses and emotions.",
-  "10. Restore the dignity of hard work. Be the example.",
-  "Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt."
-];
-
 const agentStats = [
   { name: "Ajani", av: 2800, calls: 60, talkTime: 2400, sales: 8 },
   { name: "Rob", av: 2400, calls: 45, talkTime: 1800, sales: 6 },
   { name: "Phil", av: 1200, calls: 30, talkTime: 900, sales: 3 }
 ];
 
-const ticker = document.getElementById("sales-ticker");
-const rule = document.getElementById("rule-of-day");
+const rules = [
+  "1. Do not be entitled. Earn everything.",
+  "2. Give without remembering. Receive without forgetting.",
+  "3. Bring The Few Energy. Go every day.",
+  "4. Get comfortable being uncomfortable.",
+  "5. Risk = reward.",
+  "6. Luck favors hard workers.",
+  "7. Growth to the grave. Live in the moment.",
+  "8. No plan? No progress.",
+  "9. Choose effort over excuses.",
+  "10. Dignity of hard work. Be the example.",
+  "Bonus: Everybody wants to eat, but FEW will hunt."
+];
 
-function updateRule() {
-  const hour = new Date().getHours();
-  const ruleIndex = Math.floor(hour / 3) % rules.length;
-  rule.textContent = rules[ruleIndex];
+function render() {
+  const sortedStats = agentStats.sort((a, b) => b.av - a.av);
+  const metricsView = document.getElementById("metrics-view");
+  const salesCount = sortedStats.reduce((sum, a) => sum + a.sales, 0);
+  const totalAV = sortedStats.reduce((sum, a) => sum + a.av, 0);
+  document.getElementById("sales-count").textContent = `Sales: ${salesCount}`;
+  document.getElementById("total-av").textContent = `AV: $${totalAV}`;
+
+  metricsView.innerHTML = sortedStats.map(a =>
+    `<p><strong>${a.name}:</strong> $${a.av} AV • ${a.calls} Calls • ${a.talkTime} min Talk • ${a.sales} Sales</p>`
+  ).join("");
+
+  document.getElementById("ticker").textContent =
+    sortedStats.map(a => `${a.name} closed $${a.av}`).join(" • ");
+
+  const ruleIndex = Math.floor(Date.now() / 1000 / 60 / 60) % rules.length;
+  document.getElementById("rule-of-day").textContent = rules[ruleIndex];
 }
 
-function updateMetrics(metric) {
-  const container = document.getElementById(metric);
-  container.innerHTML = "";
-  const sorted = [...agentStats].sort((a, b) => b[metric] - a[metric]);
-
-  sorted.forEach((agent, i) => {
-    const div = document.createElement("div");
-    div.className = "agent-stats";
-    div.innerHTML = `<strong>#${i + 1} ${agent.name}</strong> – ${agent[metric]}`;
-    container.appendChild(div);
-  });
-}
-
-function updateTicker() {
-  const entries = agentStats.map(agent => `${agent.name} closed $${agent.av.toLocaleString()}`);
-  ticker.textContent = entries.join(" • ");
-}
-
-function rotateMetrics() {
-  const metrics = ["sales", "av", "calls", "talkTime"];
-  let current = 0;
-  metrics.forEach(metric => document.getElementById(metric).style.display = "none");
-
-  setInterval(() => {
-    metrics.forEach(metric => document.getElementById(metric).style.display = "none");
-    updateMetrics(metrics[current]);
-    document.getElementById(metrics[current]).style.display = "block";
-    current = (current + 1) % metrics.length;
-  }, 30000);
-}
-
-updateRule();
-updateMetrics("sales");
-updateTicker();
-rotateMetrics();
+render();
