@@ -1,0 +1,19 @@
+[functions]
+  node_bundler = "esbuild"
+  directory = "netlify/functions"
+  included_files = ["public/headshots/*"]
+
+# Allow preflight; real allow-list enforced in function CORS
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Vary = "Origin"
+
+# Route /api/* to functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
