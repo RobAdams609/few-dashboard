@@ -1,218 +1,134 @@
-/* -----------------------------------------------------------
-   FEW Dashboard — single-file client logic
-   - Loads Rule-of-the-Day from /rules.json (your file)
-   - Loads roster & headshots from /headshots/roster.json
-   - Loads today's metrics from /api/board (if available)
-   - Always shows roster; fills zeros when no stats
-   - Rotates views every 45s: Roster → Sales LB → AV LB
------------------------------------------------------------ */
+// === Config ===
+const ROTATION_MS = 45_000;
+const DATA_REFRESH_MS = 30_000;
+const HEALTH_REFRESH_MS = 60_000;
+const TIMEZONE = 'America/New_York';
+const DEBUG = new URLSearchParams(location.search).has('debug');
+const dbg = (...args) => { if (DEBUG) console.log('[DBG]', ...args); };
 
-const $ = (sel) => document.querySelector(sel);
-const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+const DEFAULT_ROSTER = [
+  { name: 'Robert Adams' },
+  { name: 'Philip Baxter' },
+  { name: 'Ajani' },
+  { name: 'Anna' },
+  { name: 'Eli' },
+  { name: 'Fabricio' },
+  { name: 'Fraitzline' },
+  { name: 'Joseph' },
+  { name: 'Marie Saint Cyr' },
+  { name: 'Michelle Landis' },
+  { name: 'Alrens' }
+];
 
-const el = {
-  ticker: $('#rule-ticker-text'),
-  label:  $('#viewLabel'),
-  thead:  $('#table thead'),
-  tbody:  $('#table tbody'),
+const STATE = {
+  roster: [],
+  callsByKey: new Map(),
+  salesByKey: new Map(),
+  seenSaleHashes: new Set(),
+  views: [
+    { id: 'roster', label: 'Today — Roster' },
+    { id: 'lb-sales', label: 'Today — Leaderboard (Sales)', metric: 'sales' },
+    { id: 'lb-av', label: 'Today — Leaderboard (Submitted AV)', metric: 'av' }
+  ],
+  viewIndex: 0,
+  rules: []
 };
 
-const COLS = {
-  agent:  $('.col-agent'),
-  calls:  $('.col-calls'),
-  talk:   $('.col-talk'),
-  sales:  $('.col-sales'),
-  av:     $('.col-av'),
-};
+const $ = s => document.querySelector(s);
+function fmtNumber(n){ return (n||0).toLocaleString('en-US'); }
+function fmtCurrency(n){ return (n||0).toLocaleString('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}); }
+function normalizeKey(s){ return (s||'').toString().toLowerCase().replace(/[^a-z]/g,''); }
+function nameToFile(name){ return name.toLowerCase().trim().replace(/[^a-z0-9]+/g,'-') + '.jpg'; }
+function ensureHeadshotPath(p){ if(!p) return null; return p.includes('/') ? p : `headshots/${p}`; }
 
-let VIEW = 0; // 0: roster, 1: sales leaderboard, 2: AV leaderboard
-const ROTATE_MS = 45_000;
-
-let roster = [];   // [{name,email,photo}]
-let today = [];    // [{name,display,calls,talkMin,sales,av}]
-let merged = [];   // roster + today merged
-
-/* ---------- Utilities ---------- */
-
-// ET-based day index (for "daily" rule selection)
-function etDayIndex() {
-  // y-m-d string in America/New_York, then divide epoch days
-  const ymd = new Intl.DateTimeFormat('en-CA', { timeZone:'America/New_York' })
-                  .format(new Date()); // "YYYY-MM-DD"
-  return Math.floor(Date.parse(ymd) / 86400000);
-}
-
-function money(n){
-  const v = Math.round(n||0);
-  return '$' + v.toLocaleString();
-}
-function mins(n){
-  return Math.round(n||0).toLocaleString();
-}
-
-// Safe fetch JSON
-async function getJSON(path, opts={}){
-  const res = await fetch(path, { credentials:'include', ...opts });
-  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
-  return res.json();
-}
-
-/* ---------- Data loaders ---------- */
-
-async function loadRulesTicker(){
-  try{
-    const data = await getJSON('/rules.json');
-    const rules = Array.isArray(data) ? data : (data.rules || []);
-    if (rules.length){
-      const idx = etDayIndex() % rules.length;
-      el.ticker.textContent = `RULE OF THE DAY — ${rules[idx]}`;
-    } else {
-      el.ticker.textContent = 'RULE OF THE DAY — (no rules found)';
-    }
-  }catch{
-    el.ticker.textContent = 'RULE OF THE DAY — (failed to load rules.json)';
-  }
-}
+async function fetchJSON(path){ try{ const r=await fetch(path,{cache:'no-store'}); if(!r.ok) throw new Error(r.status); return await r.json(); }catch(e){ dbg('fetchJSON fail', path, e); return null; } }
+function nowET(){ try{ return new Intl.DateTimeFormat('en-US',{dateStyle:'medium',timeStyle:'short',timeZone:TIMEZONE}).format(new Date()); }catch{ return new Date().toLocaleString(); } }
+function getDeterministicIndex(len,hours=3){ const slot=Math.floor(Date.now()/(hours*3600_000)); return len?slot%len:0; }
 
 async function loadRoster(){
-  try{
-    const data = await getJSON('/headshots/roster.json');
-    // Expect { agents: [ {name,email,photo} ] }
-    const list = Array.isArray(data) ? data : (data.agents || []);
-    roster = list.map(a => ({
-      name: a.name || '',
-      email: (a.email||'').toLowerCase(),
-      photo: a.photo || null
-    }));
-  }catch{
-    roster = [];
+  const json = await fetchJSON('headshots/roster.json');
+  let list = [];
+  if (Array.isArray(json)) list = json;
+  else if (json && Array.isArray(json.agents)) list = json.agents;
+  else list = DEFAULT_ROSTER;
+
+  STATE.roster = list.map(e=>({
+    name: e.name || 'Unknown',
+    email: e.email || '',
+    photo: ensureHeadshotPath(e.photo || nameToFile(e.name||'unknown'))
+  }));
+  dbg('roster size', STATE.roster.length);
+}
+
+function readCallDurationMin(rec){ const dSec = rec.duration_seconds ?? rec.duration ?? rec.talk_time_seconds ?? 0; return (dSec||0)/60; }
+function readCallUser(rec){ return rec.user_name || rec.user || rec.agent || rec.owner || rec.email || ''; }
+function readSaleUser(rec){ return rec.user_name || rec.seller || rec.agent || rec.owner || rec.email || ''; }
+function readSaleMonthlyAmount(rec){ const raw = rec.monthly_premium ?? rec.premium ?? rec.amount_monthly ?? rec.amount ?? rec.pmt ?? rec.monthly ?? 0; const n=Number(raw); return isFinite(n)?n:0; }
+function saleHash(r){ const u=normalizeKey(readSaleUser(r)); const a=readSaleMonthlyAmount(r).toFixed(2); const t=r.timestamp||r.ts||r.created_at||r.date||JSON.stringify(r).length; return `${u}|${a}|${t}`; }
+
+async function loadCalls(){
+  const payload = await fetchJSON('/api/calls_diag?days=7');
+  const rows = (payload?.records || payload?.data || payload || []).filter(Boolean);
+  dbg('calls count', rows.length);
+  const map = new Map();
+  for (const r of rows){
+    const key = normalizeKey(readCallUser(r));
+    if (!key) continue;
+    const obj = map.get(key) || { calls:0, talkMin:0 };
+    obj.calls += 1; obj.talkMin += readCallDurationMin(r);
+    map.set(key, obj);
   }
+  STATE.callsByKey = map;
 }
 
-async function loadTodayBoard(){
-  try{
-    const b = await getJSON('/api/board');
-    // Expect { agents: [ { display, email?, calls, talkMin, sales, av } ] }
-    const list = (b && b.agents) ? b.agents : [];
-    today = list.map(a => ({
-      name: a.display || a.name || '',
-      email: (a.email||'').toLowerCase(),
-      calls: a.calls || 0,
-      talk:  a.talkMin || a.talk || 0,
-      sales: a.sales || 0,
-      av:    a.av || 0
-    }));
-  }catch{
-    today = [];
+async function loadSales(){
+  const payload = await fetchJSON('/api/sales_diag?days=30');
+  const rows = (payload?.records || payload?.data || payload || []).filter(Boolean);
+  dbg('sales count', rows.length);
+  const map = new Map();
+  const pops = [];
+  for (const r of rows){
+    const key = normalizeKey(readSaleUser(r));
+    if(!key) continue;
+    const monthly = readSaleMonthlyAmount(r);
+    const av = monthly * 12;
+    const obj = map.get(key) || { sales:0, av:0 };
+    obj.sales += 1; obj.av += av; map.set(key, obj);
+    const h = saleHash(r); if(!STATE.seenSaleHashes.has(h)){ STATE.seenSaleHashes.add(h); pops.push({key,av}); }
   }
+  STATE.salesByKey = map;
+  if (pops.length){ const last=pops[pops.length-1]; celebrateSale(lookupNameByKey(last.key) || 'Unknown', last.av); }
 }
 
-/* ---------- Merge + Render ---------- */
-
-function initials(name=''){
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  const chars = (parts[0]?.[0]||'') + (parts[1]?.[0]||'');
-  return chars.toUpperCase();
+async function loadRules(){
+  const json = await fetchJSON('rules.json');
+  STATE.rules = Array.isArray(json) ? json.filter(Boolean).map(String) : [];
+  $('#tickerText').textContent = STATE.rules.join('  •  ') || 'Add rules to public/rules.json';
+  const idx = getDeterministicIndex(STATE.rules.length, 3);
+  const chosen = STATE.rules[idx] || 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.';
+  $('#principle').textContent = chosen.replace(/^Bonus\)\s*/, 'Bonus: ');
 }
 
-function rowHTML(a, show){
-  // show = { calls:true/false, talk:true/false, sales:true/false, av:true/false }
-  return `
-    <tr>
-      <td class="col-agent">
-        <div class="agent">
-          <span class="avatar">${a.photo ? `<img src="/headshots/${a.photo}" alt="">` : initials(a.name)}</span>
-          <span>${a.name}</span>
-        </div>
-      </td>
-      <td class="col-calls ${show.calls ? '' : 'hide'}">${(a.calls||0).toLocaleString()}</td>
-      <td class="col-talk ${show.talk ? '' : 'hide'}">${mins(a.talk)}</td>
-      <td class="col-sales ${show.sales ? '' : 'hide'}">${(a.sales||0).toLocaleString()}</td>
-      <td class="col-av ${show.av ? '' : 'hide'}">${money((a.av||0))}</td>
-    </tr>
-  `;
+async function pingHealth(){
+  let ok=false; try{ const r=await fetch('/api/health',{cache:'no-store'}); ok=r.ok; }catch{}
+  const dot=$('#healthDot'), text=$('#healthText');
+  if (dot&&text){ dot.style.background = ok ? 'var(--green)' : 'var(--red)'; text.textContent = ok ? 'OK' : 'API issue'; }
 }
 
-function applyHeaderVisibility(show){
-  COLS.calls.classList.toggle('hide', !show.calls);
-  COLS.talk.classList.toggle('hide', !show.talk);
-  COLS.sales.classList.toggle('hide', !show.sales);
-  COLS.av.classList.toggle('hide', !show.av);
-}
+function lookupNameByKey(key){ const hit=STATE.roster.find(r=>normalizeKey(r.name)===key || normalizeKey(r.email)===key); return hit?.name || null; }
+function dataForAgent(a){ const key=normalizeKey(a.email||a.name); const c=STATE.callsByKey.get(key)||{calls:0,talkMin:0}; const s=STATE.salesByKey.get(key)||{sales:0,av:0}; return { name:a.name, photo:a.photo, calls:c.calls|0, talkMin:c.talkMin||0, sales:s.sales|0, av:s.av||0 } }
 
-function render(){
-  let show;
-  let rows = [];
+function buildHead(cols){ const tr=$('#tableHead'); tr.innerHTML=''; cols.forEach(c=>{ const th=document.createElement('th'); th.textContent=c; tr.appendChild(th); }); }
+function makeInitials(name){ const el=document.createElement('div'); el.className='initials'; const parts=(name||'').trim().split(/\s+/); el.textContent=(parts[0]?.[0]||'').toUpperCase()+(parts[1]?.[0]||'').toUpperCase(); return el; }
 
-  if (VIEW === 0){
-    el.label.textContent = 'Today — Roster';
-    show = {calls:true, talk:true, sales:true, av:true};
-    // roster order; merged keeps zeros if no stat
-    rows = merged.map(a => rowHTML(a, show));
-  } else if (VIEW === 1){
-    el.label.textContent = 'Today — Leaderboard (Sales)';
-    show = {calls:false, talk:false, sales:true, av:false};
-    rows = [...merged]
-      .sort((a,b)=>(b.sales||0)-(a.sales||0))
-      .map(a => rowHTML(a, show));
-  } else {
-    el.label.textContent = 'Today — Leaderboard (Submitted AV)';
-    show = {calls:false, talk:false, sales:false, av:true};
-    rows = [...merged]
-      .sort((a,b)=>(b.av||0)-(a.av||0))
-      .map(a => rowHTML(a, show));
-  }
+function renderRoster(){ $('#viewLabel').textContent='Today — Roster'; buildHead(['Agent','Calls','Talk Time (min)','Sales','Submitted AV (12×)']); const tb=$('#tableBody'); tb.innerHTML=''; if(!STATE.roster.length){ $('#emptyState').hidden=false; return;} $('#emptyState').hidden=true; for(const a of STATE.roster){ const d=dataForAgent(a); const tr=document.createElement('tr'); const tdA=document.createElement('td'); tdA.className='agentcell'; const img=document.createElement('img'); img.src=d.photo; img.alt=d.name; img.onerror=()=>{ img.replaceWith(makeInitials(d.name)); }; const nm=document.createElement('span'); nm.textContent=d.name; tdA.appendChild(img); tdA.appendChild(nm); const t1=document.createElement('td'); t1.textContent=fmtNumber(d.calls); const t2=document.createElement('td'); t2.textContent=Math.round(d.talkMin).toString(); const t3=document.createElement('td'); t3.textContent=fmtNumber(d.sales); const t4=document.createElement('td'); t4.textContent=fmtCurrency(Math.round(d.av)); [tdA,t1,t2,t3,t4].forEach(x=>tr.appendChild(x)); tb.appendChild(tr);} }
 
-  applyHeaderVisibility(show);
-  el.tbody.innerHTML = rows.join('');
-}
+function renderLeaderboard(metric){ const label=metric==='sales'?'Sales':'Submitted AV (12×)'; $('#viewLabel').textContent=`Today — Leaderboard (${label})`; buildHead(['Agent',label]); const tb=$('#tableBody'); tb.innerHTML=''; if(!STATE.roster.length){ $('#emptyState').hidden=false; return;} $('#emptyState').hidden=true; const rows=STATE.roster.map(a=>dataForAgent(a)); rows.sort((a,b)=> metric==='sales'? b.sales-a.sales : b.av-a.av); rows.forEach((d,i)=>{ const tr=document.createElement('tr'); if(i<3) tr.classList.add('top'); const tdA=document.createElement('td'); tdA.className='agentcell'; const img=document.createElement('img'); img.src=d.photo; img.alt=d.name; img.onerror=()=>{ img.replaceWith(makeInitials(d.name)); }; const nm=document.createElement('span'); nm.textContent=d.name; tdA.appendChild(img); tdA.appendChild(nm); const tdV=document.createElement('td'); tdV.textContent = metric==='sales' ? fmtNumber(d.sales) : fmtCurrency(Math.round(d.av)); tr.appendChild(tdA); tr.appendChild(tdV); tb.appendChild(tr); }); }
 
-function mergeRosterAndToday(){
-  const byEmail = new Map();
-  for (const t of today){
-    const key = (t.email||t.name||'').toLowerCase();
-    byEmail.set(key, t);
-  }
-  merged = roster.map(r => {
-    const key = (r.email||r.name||'').toLowerCase();
-    const t = byEmail.get(key);
-    return {
-      name: r.name,
-      email: r.email,
-      photo: r.photo,
-      calls: t?.calls || 0,
-      talk:  t?.talk  || 0,
-      sales: t?.sales || 0,
-      av:    t?.av    || 0,
-    };
-  });
-}
+function render(){ const v=STATE.views[STATE.viewIndex%STATE.views.length]; if(v.id==='roster') return renderRoster(); if(v.id==='lb-sales') return renderLeaderboard('sales'); if(v.id==='lb-av') return renderLeaderboard('av'); }
+function nextView(){ STATE.viewIndex=(STATE.viewIndex+1)%STATE.views.length; render(); }
+function celebrateSale(name,av){ const el=document.querySelector('#salePop'); if(!el) return; el.textContent=`SALE: ${name} — ${fmtCurrency(Math.round(av))}`; el.hidden=false; clearTimeout(el._t); el._t=setTimeout(()=>{ el.hidden=true; },5000); }
 
-/* ---------- Rotation ---------- */
+function loops(){ render(); setInterval(nextView, ROTATION_MS); const refresh=async()=>{ await Promise.all([loadCalls(), loadSales()]); render(); }; refresh(); setInterval(refresh, DATA_REFRESH_MS); pingHealth(); setInterval(pingHealth, HEALTH_REFRESH_MS); setInterval(()=>{ const ts=document.querySelector('#timestamp'); if(ts) ts.textContent=nowET(); },10_000); }
 
-function startRotation(){
-  setInterval(() => {
-    VIEW = (VIEW + 1) % 3; // 0 → 1 → 2 → 0
-    render();
-  }, ROTATE_MS);
-}
-
-/* ---------- Boot ---------- */
-
-(async function boot(){
-  await Promise.all([
-    loadRulesTicker(),
-    loadRoster()
-  ]);
-  await loadTodayBoard();
-  mergeRosterAndToday();
-  render();
-  startRotation();
-
-  // refresh stats every 60s (lightweight)
-  setInterval(async () => {
-    await loadTodayBoard();
-    mergeRosterAndToday();
-    render();
-  }, 60_000);
-})();
+(async function init(){ const ts=document.querySelector('#timestamp'); if(ts) ts.textContent=nowET(); await loadRoster(); await loadRules(); await Promise.all([loadCalls(), loadSales()]); render(); loops(); })();
