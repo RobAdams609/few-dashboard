@@ -2,43 +2,43 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1, user-scalable=no"
-  />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>The Few — Live Board</title>
   <link rel="stylesheet" href="/dashboard.css" />
 </head>
 <body>
-  <!-- Rule of the day (from rules.json) -->
-  <div id="rule-ticker" class="ticker" aria-live="polite">
-    <span class="ticker-label">RULE OF THE DAY —</span>
-    <span id="rule-ticker-text">Loading…</span>
+  <!-- Rule of the day ticker -->
+  <div id="rule-ticker" class="ticker">
+    <span id="rule-ticker-text">RULE OF THE DAY — …</span>
   </div>
 
   <!-- Big headline -->
-  <header id="banner">
-    <h1 class="title">
-      THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT
-    </h1>
-    <p id="subtitle" class="subtitle">
-      <!-- will be set from Bonus rule if present -->
-    </p>
-  </header>
+  <div id="banner">
+    <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
+    <div id="principle" class="subtitle">Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt.</div>
+  </div>
 
   <!-- View label -->
-  <div id="view-label" class="view-label">Today — Roster</div>
+  <div id="viewLabel" class="view-label">Today — Roster</div>
 
-  <!-- Main table -->
+  <!-- Table -->
   <div id="view">
     <table id="table">
-      <thead id="thead"></thead>
-      <tbody id="tbody"></tbody>
+      <thead>
+        <tr>
+          <th class="col-agent">Agent</th>
+          <th class="col-calls">Calls</th>
+          <th class="col-talk">Talk Time (min)</th>
+          <th class="col-sales">Sales</th>
+          <th class="col-av">Submitted AV (12x)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
     </table>
   </div>
 
-  <!-- Hidden ARIA region for any future pop / announcements -->
-  <div id="sale-pop" aria-live="polite" class="sr-only"></div>
+  <!-- Sale celebration pop (kept hidden for now, wired later if needed) -->
+  <div id="sale-pop" aria-live="polite"></div>
 
   <script src="/dashboard.js"></script>
 </body>
