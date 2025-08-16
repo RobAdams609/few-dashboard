@@ -1,44 +1,40 @@
 <!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>The Few — Live Board</title>
-  <link rel="stylesheet" href="/dashboard.css" />
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>The Few — Live Board</title>
+    <link rel="stylesheet" href="/dashboard.css" />
+  </head>
+  <body>
+    <!-- Rule of the day ticker -->
+    <div id="rule-ticker" class="ticker"><span id="rule-ticker-text"></span></div>
 
-  <!-- Rule of the day ticker -->
-  <div id="rule-ticker" class="ticker">
-    <span id="rule-ticker-text"></span>
-  </div>
+    <!-- Big headline -->
+    <div id="banner">
+      <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
+      <div id="principle" class="subtitle"></div>
+    </div>
 
-  <!-- Big headline -->
-  <div id="banner">
-    <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
-    <div id="principle" class="subtitle"></div>
-  </div>
+    <!-- Rotating view label -->
+    <div id="viewLabel" class="view-label">Today — Roster</div>
 
-  <!-- Table -->
-  <div id="view">
-    <table id="table">
-      <thead>
-        <tr>
-          <th>Agent</th>
-          <th>Calls</th>
-          <th>Talk Time (min)</th>
-          <th>Sales</th>
-          <th>AV (12×)</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
+    <!-- Table -->
+    <div id="view">
+      <table id="table">
+        <thead>
+          <tr>
+            <th class="col-agent">Agent</th>
+            <th>Calls</th>
+            <th>Talk Time (min)</th>
+            <th>Sales</th>
+            <th>Submitted AV (12×)</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
 
-  <!-- Sale celebration pop -->
-  <div id="sale-pop" aria-live="polite"></div>
-
-  <script src="/dashboard.js"></script>
-</body>
+    <script src="/dashboard.js"></script>
+  </body>
 </html>
-<script src="/dashboard.js?v=4"></script>
