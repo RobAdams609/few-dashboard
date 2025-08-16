@@ -1,41 +1,61 @@
 <!doctype html>
 <html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>The Few — Live Board</title>
-  <link rel="stylesheet" href="/dashboard.css" />
-</head>
-<body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>The Few — Live Board</title>
+    <link rel="stylesheet" href="/dashboard.css" />
 
-  <!-- Rule of the day ticker -->
-  <div id="rule-ticker" class="ticker">
-    <span id="rule-ticker-text"></span>
-  </div>
+    <!-- tiny bit of page-scoped style just for the pulse -->
+    <style>
+      .pulse {
+        animation: pulseGlow 2.2s ease-in-out infinite;
+      }
+      @keyframes pulseGlow {
+        0%   { text-shadow: 0 0 10px rgba(255,255,180,.35); transform: scale(1.00); }
+        50%  { text-shadow: 0 0 28px rgba(255,255,200,.70); transform: scale(1.015); }
+        100% { text-shadow: 0 0 10px rgba(255,255,180,.35); transform: scale(1.00); }
+      }
+      .mode-label { text-align:center; margin: 6px 0 12px; color:#ffd36e; font-weight:700; }
+      .avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; margin-right:10px; vertical-align:middle; }
+      .agent-cell { display:flex; align-items:center; gap:10px; }
+      .initials {
+        width:28px; height:28px; border-radius:50%;
+        background:#2a2f45; border:1px solid #4050a8; color:#dfe7ff;
+        display:inline-flex; align-items:center; justify-content:center;
+        font-size:.8rem; font-weight:700;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Rule of the day (daily, not every 3h) -->
+    <div id="rule-ticker" class="ticker"><span id="rule-ticker-text"></span></div>
 
-  <!-- Big headline -->
-  <div id="banner">
-    <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
-    <div id="principle" class="subtitle"></div>
-    <div id="view-label" class="view-label">Today — Roster</div>
-  </div>
+    <!-- Big headline -->
+    <div id="banner">
+      <div class="title pulse">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
+      <div id="principle" class="subtitle"></div>
+    </div>
 
-  <!-- Table -->
-  <div id="view">
-    <table id="table">
-      <thead>
-        <tr>
-          <th>Agent</th>
-          <th>Calls</th>
-          <th>Talk Time (min)</th>
-          <th>Sales</th>
-          <th>Submitted AV (12×)</th>
-        </tr>
-      </thead>
-      <tbody id="table-body"></tbody>
-    </table>
-  </div>
+    <!-- Current view label (changes when we rotate views) -->
+    <div id="mode" class="mode-label">Today — Roster</div>
 
-  <script src="/dashboard.js"></script>
-</body>
+    <!-- The table -->
+    <div id="view">
+      <table id="table">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Calls</th>
+            <th>Talk Time (min)</th>
+            <th>Sales</th>
+            <th>Submitted AV (12×)</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+
+    <script src="/dashboard.js?v=restore_rot_1"></script>
+  </body>
 </html>
