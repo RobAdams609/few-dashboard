@@ -6,17 +6,19 @@
     <title>The Few — Live Board</title>
     <link rel="stylesheet" href="/dashboard.css" />
 
-    <!-- tiny bit of page-scoped style just for the pulse -->
+    <!-- headline pulse: slower + gold at the peak -->
     <style>
+      .title { transition: color .2s ease; }
       .pulse {
-        animation: pulseGlow 2.2s ease-in-out infinite;
+        animation: pulseGold 5.5s ease-in-out infinite; /* slower */
+        will-change: transform, text-shadow, color;
       }
-      @keyframes pulseGlow {
-        0%   { text-shadow: 0 0 10px rgba(255,255,180,.35); transform: scale(1.00); }
-        50%  { text-shadow: 0 0 28px rgba(255,255,200,.70); transform: scale(1.015); }
-        100% { text-shadow: 0 0 10px rgba(255,255,180,.35); transform: scale(1.00); }
+      @keyframes pulseGold {
+        0%   { color:#fff;      text-shadow:0 0 12px rgba(255,215,120,.25); transform:scale(1.00); }
+        50%  { color:#ffd36e;   text-shadow:0 0 32px rgba(255,210,100,.85); transform:scale(1.02); }
+        100% { color:#fff;      text-shadow:0 0 12px rgba(255,215,120,.25); transform:scale(1.00); }
       }
-      .mode-label { text-align:center; margin: 6px 0 12px; color:#ffd36e; font-weight:700; }
+      .mode-label { text-align:center; margin:6px 0 12px; color:#ffd36e; font-weight:700; }
       .avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; margin-right:10px; vertical-align:middle; }
       .agent-cell { display:flex; align-items:center; gap:10px; }
       .initials {
@@ -28,7 +30,7 @@
     </style>
   </head>
   <body>
-    <!-- Rule of the day (daily, not every 3h) -->
+    <!-- Rule of the day (daily) -->
     <div id="rule-ticker" class="ticker"><span id="rule-ticker-text"></span></div>
 
     <!-- Big headline -->
@@ -37,25 +39,17 @@
       <div id="principle" class="subtitle"></div>
     </div>
 
-    <!-- Current view label (changes when we rotate views) -->
+    <!-- Current view label (changes when rotating) -->
     <div id="mode" class="mode-label">Today — Roster</div>
 
-    <!-- The table -->
+    <!-- Table -->
     <div id="view">
       <table id="table">
-        <thead>
-          <tr>
-            <th>Agent</th>
-            <th>Calls</th>
-            <th>Talk Time (min)</th>
-            <th>Sales</th>
-            <th>Submitted AV (12×)</th>
-          </tr>
-        </thead>
+        <thead id="thead"></thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
 
-    <script src="/dashboard.js?v=restore_rot_1"></script>
+    <script src="/dashboard.js?v=rot_v2"></script>
   </body>
 </html>
