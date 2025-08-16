@@ -1,66 +1,63 @@
-// /api/calls_diag — quick diagnostic summary of recent call recordings
+const { rangeForDays } = require("./_util.js");
+
+// Accept many env names (your screenshots):
+const API_KEY = (
+  process.env.RINGY_CALLS_API_KEY ||
+  process.env.RINGY_API_KEY_RECORDINGS ||
+  process.env.RINGY_API_KEY_CALL_DETAIL ||
+  process.env.RINGY_API_KEY_CALLS ||
+  process.env.RINGY_API_KEY // generic fallback
+);
+
+// Endpoint priority: explicit override → recordings → calls
+const ENDPOINT = (
+  process.env.RINGY_CALLS_ENDPOINT ||
+  process.env.RINGY_RECORDINGS_URL ||
+  process.env.RINGY_CALL_DETAIL_URL ||
+  "https://app.ringy.com/api/public/external/get-call-recordings"
+);
+
 exports.handler = async (event) => {
   try {
-    const RECS_URL =
-      process.env.RINGY_RECORDINGS_URL ||
-      "https://app.ringy.com/api/public/external/get-call-recordings";
-    const apiKey = process.env.RINGY_API_KEY_RECORDINGS;
+    if (!API_KEY) throw new Error("Missing Ringy API key for calls (set RINGY_API_KEY_RECORDINGS or RINGY_API_KEY_CALL_DETAIL)");
+    const params = event.queryStringParameters || {};
+    const days = Number(params.days || 7);
+    const limit = Math.min(Number(params.limit || 5000), 5000);
+    const { startDate, endDate } = rangeForDays(days);
 
-    // read ?days= from query (default 7, clamp 1..30)
-    const qs = event.queryStringParameters || {};
-    const days = Math.max(1, Math.min(30, Number(qs.days || 7)));
+    const body = { apiKey: API_KEY, startDate, endDate, limit };
 
-    // UTC window
-    const now = new Date();
-    const end = now;
-    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-
-    const pad = (n) => String(n).padStart(2, "0");
-    const fmt = (d) =>
-      `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
-      `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-
-    const body = {
-      apiKey,
-      startDate: fmt(start),
-      endDate: fmt(end),
-      limit: 5000,
-    };
-
-    const r = await fetch(RECS_URL, {
+    const res = await fetch(ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
     });
 
-    if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      throw new Error(`Ringy responded ${r.status} ${r.statusText}: ${text}`);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Ringy calls ${res.status}: ${txt}`);
     }
 
-    const data = await r.json();
+    const json = await res.json();
+    const records = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : (json?.records || []);
 
     return {
       statusCode: 200,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
+      headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
       body: JSON.stringify({
-        startUtc: body.startDate,
-        endUtc: body.endDate,
-        count: Array.isArray(data) ? data.length : 0,
-        sample: Array.isArray(data) ? data.slice(0, 3) : data,
+        source: "ringy",
+        endpoint: ENDPOINT,
+        startDate,
+        endDate,
+        count: records.length,
+        records,
       }),
     };
-  } catch (e) {
+  } catch (err) {
     return {
-      statusCode: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-      body: JSON.stringify({ error: String(e) }),
+      statusCode: 502,
+      headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+      body: JSON.stringify({ error: String(err.message || err) }),
     };
   }
 };
