@@ -6,14 +6,12 @@
   node_bundler = "esbuild"
   external_node_modules = []
 
-# Route /api/* to serverless functions
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
   status = 200
 
-# CORS for functions (include POST for JSON)
-[headers]
+[[headers]]
   for = "/api/*"
   [headers.values]
     Access-Control-Allow-Origin = "*"
