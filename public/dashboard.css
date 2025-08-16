@@ -1,102 +1,85 @@
 :root{
-  --bg:#0b1321;        /* deep navy */
-  --panel:#0f1a30;
-  --line:#1f3b7a;      /* blue line */
+  --bg:#0d1320;
+  --panel:#0f1628;
+  --line:#213b7a;
   --text:#e8eefc;
-  --muted:#9fb3d9;
-  --pop:#ffd84d;       /* golden yellow */
-  --good:#6fe39c;
+  --muted:#9fb3d6;
+  --gold:#ffd34d;
+  --gold-dim:#a88410;
+  --accent:#5ea6ff;
+  --row:#0f172a;
 }
 
 *{box-sizing:border-box}
 html,body{height:100%}
 body{
-  margin:0;
-  background:var(--bg);
-  color:var(--text);
-  font-family: system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif;
+  margin:0;background:var(--bg);color:var(--text);
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 
-/* Ticker */
 .ticker{
-  border-bottom:2px solid var(--line);
-  padding:10px 14px;
-  font-weight:700;
-  letter-spacing:.2px;
+  overflow:hidden;white-space:nowrap;border-bottom:1px solid var(--line);
+  padding:10px 0;background:linear-gradient(180deg,#0d1320,#0d1320);
+  font-weight:700;letter-spacing:.5px
 }
-.ticker::before{content:"RULE OF THE DAY — "; color:var(--pop)}
+.ticker span{display:inline-block;padding-left:100%;
+  animation:marquee 30s linear infinite}
+@keyframes marquee{0%{transform:translateX(0)}100%{transform:translateX(-100%)}}
 
-/* Banner */
-#banner{
-  padding:24px 16px 12px;
-  border-bottom:2px solid var(--line);
-  text-align:center;
-}
-#banner .title{
-  font-weight:900;
-  font-size:clamp(28px,6vw,60px);
-  text-shadow:0 0 14px rgba(255,216,77,.25);
+#banner{padding:28px 12px 8px}
+.title{
+  text-align:center;font-weight:900;line-height:1.1;
+  font-size: clamp(28px,4.2vw,64px);
+  text-shadow: 0 0 20px rgba(255,211,77,.15);
 }
 .subtitle{
-  margin-top:10px;
-  color:var(--muted);
-  font-weight:600;
-  text-align:center;
+  text-align:center;margin-top:10px;color:var(--muted);
+  font-size: clamp(12px,1.4vw,18px);
 }
 
-/* View label */
-.view-label{
-  text-align:center;
-  padding:10px 0;
-  color:var(--pop);
-  font-weight:700;
+.pulse-gold{
+  color:var(--text);
+  animation:pulse 6s ease-in-out infinite;
+}
+@keyframes pulse{
+  0%,100% { text-shadow: 0 0 8px rgba(255,211,77,.25), 0 0 24px rgba(255,211,77,.10); }
+  50%     { text-shadow: 0 0 12px rgba(255,211,77,.55), 0 0 40px rgba(255,211,77,.25); }
 }
 
-/* Table */
+.view-title{
+  text-align:center;margin:12px 0 6px 0;color:var(--gold);
+  font-weight:800;letter-spacing:.4px
+}
+
 #view{padding:0 8px 24px}
-table{
-  width:100%;
-  border-collapse:separate;
-  border-spacing:0;
-  background:transparent;
-}
-thead th{
-  position:sticky; top:0;
-  background:var(--panel);
-  border-bottom:2px solid var(--line);
-  padding:12px 10px;
-  font-size:14px;
-  text-align:left;
-}
-tbody td{
-  border-bottom:1px solid rgba(255,255,255,.06);
-  padding:12px 10px;
-  font-size:15px;
-  vertical-align:middle;
-}
-.col-agent{width:44%}
 
-/* Agent cell */
+table{width:100%;border-collapse:separate;border-spacing:0 8px}
+thead th{
+  text-align:left;color:var(--muted);font-size:14px;padding:10px 12px;
+  border-bottom:1px solid var(--line)
+}
+tbody tr{
+  background:var(--panel);
+  border:1px solid rgba(94,166,255,.08);
+  box-shadow:0 4px 24px rgba(0,0,0,.25);
+}
+tbody td{padding:14px 12px;font-size:16px}
+tbody td.num{text-align:right;font-variant-numeric:tabular-nums}
+tbody tr:hover{outline:1px solid rgba(94,166,255,.25)}
+
 .agent{
-  display:flex; align-items:center; gap:10px;
+  display:flex;align-items:center;gap:10px;font-weight:700
 }
 .avatar{
-  width:36px; height:36px;
-  border-radius:50%;
-  background:#122240 center/cover no-repeat;
-  border:1px solid rgba(255,255,255,.15);
-  flex:0 0 36px;
-  display:flex; align-items:center; justify-content:center;
-  font-weight:800; color:var(--pop); font-size:12px;
+  width:36px;height:36px;border-radius:50%;object-fit:cover;background:#0b1020;border:1px solid #1b2540
 }
-.name{font-weight:700}
-.email{display:block; color:var(--muted); font-size:12px}
-
-/* numbers */
-td.num{text-align:right; font-variant-numeric:tabular-nums}
-
-/* compact on small screens */
-@media (max-width:720px){
-  .email{display:none}
-  .col-agent{width:auto}
+.initials{
+  width:36px;height:36px;border-radius:50%;display:grid;place-items:center;
+  background:#14203a;border:1px solid #1b2a49;color:#b7c6e7;font-weight:800
 }
+
+.badge{
+  display:inline-block;background:#12203c;border:1px solid #1b2f55;border-radius:8px;
+  padding:3px 8px;font-size:12px;color:#b7c6e7
+}
+.only-two-cols th:nth-child(2), .only-two-cols td:nth-child(2){text-align:right}
