@@ -1,22 +1,38 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>The Few — Live Board</title>
   <link rel="stylesheet" href="/dashboard.css" />
 </head>
 <body>
+  <!-- Top scrolling rule-of-the-day ticker -->
+  <div id="rule-ticker" class="ticker">
+    <span id="rule-ticker-text"></span>
+  </div>
+
+  <!-- Banner -->
   <div id="banner">
     <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
     <div id="principle"></div>
   </div>
 
+  <!-- Main table -->
   <div id="view">
-    <table id="table"><thead></thead><tbody></tbody></table>
+    <table id="table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Calls</th>
+          <th>Talk Time (min)</th>
+          <th>Sales</th>
+          <th>AV (12×)</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
   </div>
-
- <div id="rule-ticker" class="ticker"><span id="rule-ticker-text"></span></div>
 
   <script src="/dashboard.js"></script>
 </body>
