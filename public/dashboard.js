@@ -1,9 +1,27 @@
-// ====== SIMPLE, STABLE BOARD ======
-// - Shows Today — Roster
-// - Rotates every 45s to Today — Leaderboard (Submitted AV)
-// - Rule of the day changes once per day (ET)
-// - Uses /headshots/roster.json and /api/board (no extra prompts)
+/* ---------- Configuration ---------- */
+const VIEWS = [
+  { id: 'roster', label: 'Today — Roster' },
+  { id: 'av',     label: 'Today — Leaderboard (Submitted AV)' },
+  { id: 'sales',  label: 'Today — Leaderboard (Sales)' }
+];
+const ROTATE_MS = 45_000; // rotate every 45s
 
+/* ---------- State ---------- */
+let roster = [];        // [{name,email,photo}]
+let board = [];         // [{email,calls,talkMin,sales,av12x}]
+let viewIdx = 0;
+
+/* ---------- Helpers ---------- */
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => [...document.querySelectorAll(sel)];
+
+function fmtMoney(n=0){ return `$${(Math.round((n||0))).toLocaleString()}`; }
+function initials(name=''){
+  const parts = name.trim().split(/\s+/);
+  return (parts[0]?.[0]||'').toUpperCase() + (parts[1]?.[0]||'').toUpperCase();
+}
+
+/* ---------- Daily rule + principle (once/day, not 3h) ---------- */
 const PRINCIPLES = [
   "1) Own the first 10 minutes.",
   "2) Speed to lead beats price.",
@@ -17,139 +35,115 @@ const PRINCIPLES = [
   "10) Prospect daily, even on wins.",
   "Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
 ];
-
-const ROSTER_URL = "/headshots/roster.json";
-const BOARD_URL  = "/api/board";
-
-const els = {
-  ruleTicker: document.getElementById("rule-ticker-text"),
-  principle:  document.getElementById("principle"),
-  viewLabel:  document.getElementById("view-label"),
-  tbody:      document.getElementById("table-body"),
-};
-
-// ---- helpers
-const fmtInt     = (n)=> (n||0).toLocaleString();
-const fmtMoney   = (n)=> '$' + (Math.round(n||0)).toLocaleString();
-const initialsOf = (name)=> name.split(/\s+/).map(w=>w[0]).join('').toUpperCase().slice(0,2);
-
-// ET “day index” so the rule flips once per day US/Eastern
-function dayIndexET() {
-  const nowET = new Date( new Date().toLocaleString('en-US', { timeZone:'America/New_York' }) );
-  return Math.floor(nowET.getTime() / 86400000);
+function setPrincipleDaily(){
+  // rotate by DAY so it changes once per day
+  const todayIdx = Math.floor(Date.now()/(24*60*60*1000)) % PRINCIPLES.length;
+  $("#principle").textContent = PRINCIPLES[ todayIdx ];
+  $("#rule-ticker-text").textContent = `RULE OF THE DAY — ${PRINCIPLES[todayIdx]}`;
 }
 
-function setRuleOfTheDay() {
-  const idx = dayIndexET() % PRINCIPLES.length;
-  // ticker uses “RULE OF THE DAY — …”
-  els.ruleTicker.textContent = `RULE OF THE DAY — ${PRINCIPLES[idx]}`;
-  // small subtitle under the banner reuses Bonus line (nice tone)
-  els.principle.textContent  = "Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt.";
-}
+/* ---------- Data ---------- */
 
-// ---- data
-let roster = [];         // [{name,email,photo}]
-let board  = { agents:[] }; // payload from /api/board
-let byEmail = new Map(); // email -> metrics
-
-async function fetchRoster() {
-  const r = await fetch(ROSTER_URL);
-  const j = await r.json();
-  roster = (j.agents || []).filter(a => a && a.email);
-}
-
-async function fetchBoard() {
-  const r = await fetch(BOARD_URL, { credentials: 'include' });
-  board = await r.json();
-
-  // build a fast lookup by email (defensive on field names)
-  byEmail.clear();
-  const list = Array.isArray(board.agents) ? board.agents : [];
-  for (const a of list) {
-    const email = (a.email || a.agentEmail || "").toLowerCase();
-    const calls = a.calls ?? a.callCount ?? 0;
-    const talk  = a.talkMin ?? a.talk ?? 0;
-    const sales = a.sales ?? a.deals ?? 0;
-    // try to find a monthly amount or av, then convert to 12×
-    const monthly = a.monthly ?? a.amount ?? 0;
-    const av12 = a.av12 ?? a.av ?? (monthly * 12);
-    byEmail.set(email, { calls, talk, sales, av12 });
+// Roster is always the source of truth for which rows appear
+async function loadRoster(){
+  try{
+    const r = await fetch('/headshots/roster.json', { cache: 'no-store' });
+    const j = await r.json();
+    roster = (j?.agents||[]).filter(a => !!a?.name && !!a?.email);
+  }catch(e){
+    console.error('roster load failed', e);
+    roster = [];
   }
 }
 
-function rowHTML(agent, metrics){
-  const { name, photo } = agent;
-  const { calls, talk, sales, av12 } = metrics;
-
-  const img = photo
-    ? `<img class="avatar" src="/headshots/${photo}" alt="${name}" />`
-    : `<div class="avatar-fallback">${initialsOf(name)}</div>`;
-
-  return `
-  <tr>
-    <td class="agent-cell">
-      <div class="agent">
-        ${img}
-        <div class="agent-name">${name}</div>
-      </div>
-    </td>
-    <td>${fmtInt(calls)}</td>
-    <td>${fmtInt(talk)}</td>
-    <td>${fmtInt(sales)}</td>
-    <td>${fmtMoney(av12)}</td>
-  </tr>`;
+// /api/board should return per-agent stats. We fall back to zeros if it’s missing.
+async function loadBoardToday(){
+  try{
+    const r = await fetch('/api/board', { cache:'no-store', credentials:'include' });
+    if(!r.ok) throw new Error(await r.text());
+    const j = await r.json();
+    // Normalize to: email, calls, talkMin, sales, av12x
+    const rows = (j?.agents || j || []);
+    board = rows.map(x => ({
+      email: (x.email||'').toLowerCase(),
+      calls: +x.calls || 0,
+      talkMin: +x.talkMin || +x.talk_mins || 0,
+      sales: +x.sales || 0,
+      av12x: +x.av12x || +x.av || 0
+    }));
+  }catch(e){
+    console.warn('board fetch failed; rendering zeros', e);
+    board = [];
+  }
 }
 
-function renderRosterToday() {
-  els.viewLabel.textContent = "Today — Roster";
-  const rows = roster.map(a => {
-    const m = byEmail.get((a.email||"").toLowerCase()) || { calls:0, talk:0, sales:0, av12:0 };
-    return rowHTML(a, m);
-  }).join("");
-  els.tbody.innerHTML = rows;
+/* ---------- Rendering ---------- */
+
+function rowFor(agent, stats){
+  const tr = document.createElement('tr');
+  const imgOrInit = agent.photo
+    ? `<img class="avatar" src="/headshots/${agent.photo}" alt="${agent.name}">`
+    : `<span class="initials">${initials(agent.name)}</span>`;
+  tr.innerHTML = `
+    <td class="agent-cell">${imgOrInit}<span>${agent.name}</span></td>
+    <td>${stats.calls||0}</td>
+    <td>${(stats.talkMin||0)}</td>
+    <td>${stats.sales||0}</td>
+    <td>${fmtMoney(stats.av12x||0)}</td>
+  `;
+  return tr;
 }
 
-function renderLeadersToday() {
-  els.viewLabel.textContent = "Today — Leaderboard (Submitted AV)";
-  const items = roster.map(a => {
-    const m = byEmail.get((a.email||"").toLowerCase()) || { calls:0, talk:0, sales:0, av12:0 };
-    return { agent:a, m };
+function renderRoster(){
+  $("#mode").textContent = VIEWS[0].label;
+  const tbody = $("#tbody"); tbody.innerHTML = '';
+  const byEmail = new Map(board.map(b => [b.email, b]));
+  roster.forEach(a => {
+    tbody.appendChild(rowFor(a, byEmail.get(a.email.toLowerCase()) || {}));
   });
-  items.sort((x,y)=> (y.m.av12||0) - (x.m.av12||0));
-  const top = items.slice(0, 10).map(x => rowHTML(x.agent, x.m)).join("");
-  els.tbody.innerHTML = top;
 }
 
-// ---- main flow
-let view = 0; // 0 = roster, 1 = leaderboard
+function renderLeaderboard(kind){
+  const tbody = $("#tbody"); tbody.innerHTML = '';
 
-async function tick() {
-  try {
-    await fetchBoard();
-    if (view === 0) renderRosterToday();
-    else            renderLeadersToday();
-  } catch (e) {
-    console.error(e);
+  // Attach stats to roster rows; missing stats -> zeros
+  const byEmail = new Map(board.map(b => [b.email, b]));
+  const rows = roster.map(a => ({
+    a,
+    s: byEmail.get(a.email.toLowerCase()) || { calls:0, talkMin:0, sales:0, av12x:0 }
+  }));
+
+  if(kind === 'av'){
+    $("#mode").textContent = VIEWS[1].label;
+    rows.sort((x,y) => (y.s.av12x||0) - (x.s.av12x||0));
+  }else{
+    $("#mode").textContent = VIEWS[2].label;
+    rows.sort((x,y) => (y.s.sales||0) - (x.s.sales||0));
   }
+
+  rows.forEach(({a,s}) => tbody.appendChild(rowFor(a,s)));
 }
 
-async function start() {
-  setRuleOfTheDay();
-  await fetchRoster();
-  await tick();
+/* ---------- Rotation ---------- */
 
-  // refresh data every 20s
-  setInterval(tick, 20000);
-
-  // rotate view every 45s
+function showCurrentView(){
+  const id = VIEWS[viewIdx].id;
+  if(id === 'roster') renderRoster();
+  else if(id === 'av') renderLeaderboard('av');
+  else renderLeaderboard('sales');
+}
+function startRotation(){
+  showCurrentView();
   setInterval(() => {
-    view = (view + 1) % 2;
-    if (view === 0) renderRosterToday();
-    else            renderLeadersToday();
-  }, 45000);
-
-  // flip rule once per minute in case midnight ET passes while the board is running
-  setInterval(setRuleOfTheDay, 60000);
+    viewIdx = (viewIdx + 1) % VIEWS.length;
+    showCurrentView();
+  }, ROTATE_MS);
 }
 
-document.addEventListener('DOMContentLoaded', start);
+/* ---------- Boot ---------- */
+document.addEventListener('DOMContentLoaded', async () => {
+  setPrincipleDaily();                 // daily rule + subtitle
+  await loadRoster();                  // who should be visible
+  await loadBoardToday();              // today’s stats (zeros if missing)
+  startRotation();                     // roster -> av -> sales (every 45s)
+});
