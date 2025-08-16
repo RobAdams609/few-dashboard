@@ -1,42 +1,61 @@
-// /api/sales_diag — check sold products over a wider window
+const { rangeForDays } = require("./_util.js");
+
+// Accept many env names (your screenshots):
+const API_KEY = (
+  process.env.RINGY_SALES_API_KEY ||
+  process.env.RINGY_API_KEY_SOLD ||
+  process.env.RINGY_API_KEY_LEADS ||
+  process.env.RINGY_API_KEY // generic fallback
+);
+
+const ENDPOINT = (
+  process.env.RINGY_SALES_ENDPOINT ||
+  process.env.RINGY_SOLD_URL ||
+  process.env.RINGY_LEAD_LOOKUP_URL ||
+  "https://app.ringy.com/api/public/external/get-lead-sold-products"
+);
+
 exports.handler = async (event) => {
-  const SOLD_URL = "https://app.ringy.com/api/public/external/get-lead-sold-products";
-  const apiKey = process.env.RINGY_API_KEY_SOLD;
-  const qs = new URLSearchParams(event.queryStringParameters || {});
-  const days = Math.max(1, Math.min(90, Number(qs.get("days") || 30)));
-
-  const end = new Date();
-  const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
-  const fmt = d => {
-    const pad = n => String(n).padStart(2, "0");
-    return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
-  };
-
-  const body = { apiKey, startDate: fmt(start), endDate: fmt(end), limit: 5000 };
-
   try {
-    const r = await fetch(SOLD_URL, {
+    if (!API_KEY) throw new Error("Missing Ringy API key for sales (set RINGY_API_KEY_SOLD or RINGY_API_KEY_LEADS)");
+    const params = event.queryStringParameters || {};
+    const days = Number(params.days || 30);
+    const limit = Math.min(Number(params.limit || 5000), 5000);
+    const { startDate, endDate } = rangeForDays(days);
+
+    const body = { apiKey: API_KEY, startDate, endDate, limit };
+
+    const res = await fetch(ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
     });
-    const data = await r.json();
+
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Ringy sales ${res.status}: ${txt}`);
+    }
+
+    const json = await res.json();
+    const records = Array.isArray(json?.data) ? json.data : Array.isArray(json) ? json : (json?.records || []);
+
     return {
       statusCode: 200,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" },
+      headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
       body: JSON.stringify({
-        startUtc: body.startDate,
-        endUtc: body.endDate,
-        count: Array.isArray(data) ? data.length : 0,
-        sample: Array.isArray(data) ? data.slice(0, 3) : data
-      })
+        source: "ringy",
+        endpoint: ENDPOINT,
+        startDate,
+        endDate,
+        count: records.length,
+        records,
+      }),
     };
-  } catch (e) {
+  } catch (err) {
     return {
-      statusCode: 500,
-      headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ error: String(e) })
+      statusCode: 502,
+      headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+      body: JSON.stringify({ error: String(err.message || err) }),
     };
   }
 };
