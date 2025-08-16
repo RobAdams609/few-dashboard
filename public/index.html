@@ -1,26 +1,25 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>The Few — Live Board</title>
   <link rel="stylesheet" href="/dashboard.css" />
 </head>
 <body>
 
-  <!-- Rule ticker (double height, top) -->
+  <!-- Rule of the day ticker -->
   <div id="rule-ticker" class="ticker">
-    <span class="ticker-label">RULE OF THE DAY —</span>
     <span id="rule-ticker-text"></span>
   </div>
 
-  <!-- Banner -->
+  <!-- Big headline -->
   <div id="banner">
-    <h1 class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</h1>
-    <div id="principle" class="principle"></div>
+    <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
+    <div id="principle" class="subtitle"></div>
   </div>
 
-  <!-- Table view -->
+  <!-- Table -->
   <div id="view">
     <table id="table">
       <thead>
@@ -36,10 +35,8 @@
     </table>
   </div>
 
-  <!-- Bottom sale banner (auto-appears on new sale) -->
-  <div id="sale-banner" class="sale-banner hidden">
-    <span id="sale-text"></span>
-  </div>
+  <!-- Sale celebration pop -->
+  <div id="sale-pop" aria-live="polite"></div>
 
   <script src="/dashboard.js"></script>
 </body>
