@@ -14,3 +14,37 @@ tbody td { padding:10px 8px; border-bottom:1px solid #222; vertical-align:middle
 #ticker { position:fixed; bottom:0; left:0; right:0; padding:10px 16px; border-top:2px solid var(--accent); white-space:nowrap; overflow:hidden; }
 #tickerContent { display:inline-block; padding-left:100%; animation:scroll 25s linear infinite; }
 @keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
+/* --- Rule ticker --- */
+.ticker{
+  position: fixed;
+  top: 6px;        /* keeps it in the top bar */
+  left: 12px;
+  right: 12px;
+  height: 28px;
+  line-height: 28px;
+  overflow: hidden;
+  white-space: nowrap;
+  border-top: 2px solid #a01616;
+  border-bottom: 1px solid #a01616;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: .3px;
+}
+
+#rule-ticker-text{
+  display: inline-block;
+  padding-left: 100%;            /* start off-screen to the right */
+  animation: rule-scroll 30s linear infinite;
+}
+
+@keyframes rule-scroll{
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-100%); }
+}
+
+/* make the big rule under the title large */
+#principle {
+  font-size: 38px;
+  font-weight: 700;
+  margin-top: 4px;
+}
