@@ -1,207 +1,257 @@
-/* -------- CONFIG -------- */
-const ROSTER_URL = "/headshots/roster.json";       // keep this file here
-const HEADSHOT_DIR = "/headshots/";               // images live here
-const ROTATE_MS = 45_000;                         // 45s rotation
+/* ===========================
+   Live Board (no partials)
+   =========================== */
 
-// Views we rotate through (keep simple)
-const VIEWS = [
-  { id: "roster",  title: "Today — Roster" },
-  { id: "sales",   title: "Today — Leaderboard (Sales)",    cols: ["Agent","Sales"] },
-  { id: "av",      title: "Today — Leaderboard (Submitted AV)", cols: ["Agent","Submitted AV (12×)"] }
-];
+const ROSTER_URL = '/headshots/roster.json';
+const RULES_URL  = '/rules.json';
+const BOARD_URL  = '/api/board';     // existing serverless function that returns today's stats
 
-// Principles / Rule text (daily)
-const PRINCIPLES = [
-  "1) Own the first 10 minutes.",
-  "2) Speed to lead beats price.",
-  "3) Ask, then shut up and listen.",
-  "4) The follow-up is the sale.",
-  "5) Tonality > words.",
-  "6) Control the frame, softly.",
-  "7) Prequalify without friction.",
-  "8) Solve; don’t sell.",
-  "9) Document everything, instantly.",
-  "10) Prospect daily, even on wins.",
-  "Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
-];
+// Rotation controls
+const ROTATE_SECONDS = 45;           // Roster → Sales → Submitted AV (12x)
 
-// Rule-of-day ticker text
-const RULE_OF_DAY = "RULE OF THE DAY — " + PRINCIPLES[(new Date().getDay()) % PRINCIPLES.length];
+// Data refresh cadence
+const FETCH_SECONDS = 20;            // fetch fresh stats every 20s
 
-/* -------- DOM -------- */
-const thead = document.getElementById("thead");
-const tbody = document.getElementById("tbody");
-const viewTitle = document.getElementById("view-title");
+// DOM
+const elRule = document.getElementById('rule-ticker-text');
+const elLabel = document.getElementById('view-label');
+const elThead = document.getElementById('thead');
+const elTbody = document.getElementById('tbody');
+const elSubtitle = document.getElementById('subtitle');
 
-/* -------- Helpers -------- */
-const fmtInt = n => (n||0).toLocaleString();
-const fmtMoney = n => "$" + (Math.round(n||0)).toLocaleString();
+// -------------- Utils --------------
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const fmtMoney = n => new Intl.NumberFormat('en-US',{ style:'currency', currency:'USD', maximumFractionDigits:0 }).format(n||0);
+const initials = (name='') => name.split(/\s+/).filter(Boolean).slice(0,2).map(s=>s[0]).join('').toUpperCase();
 
-/** initials from name */
-function initials(name){
-  const parts = (name||"").trim().split(/\s+/);
-  return (parts[0]?.[0]||"") + (parts[1]?.[0]||"");
+// Conservative normalizer for whatever /api/board returns
+function normAgent(a = {}){
+  const email = String(a.email || a.userEmail || a.leadEmail || '').toLowerCase();
+  const calls = + (a.calls ?? a.callCount ?? 0);
+  const talk  = + (a.talk ?? a.talkMin ?? a.talkMinutes ?? 0);
+  const sales = + (a.sales ?? a.saleCount ?? 0);
+  const av    = + (a.av12 ?? a.avx12 ?? a.av ?? 0);  // submitted AV 12x
+  return { email, calls, talk, sales, av };
 }
 
-/** render table head for a given view */
-function renderHead(viewId){
-  let html="";
-  if (viewId === "roster"){
-    html = `<tr>
-      <th>Agent</th>
-      <th>Calls</th>
-      <th>Talk Time (min)</th>
-      <th>Sales</th>
-      <th>Submitted AV (12×)</th>
-    </tr>`;
-    thead.classList.remove("only-two-cols");
-  }else if(viewId === "sales"){
-    html = `<tr><th>Agent</th><th>Sales</th></tr>`;
-    thead.classList.add("only-two-cols");
-  }else{
-    html = `<tr><th>Agent</th><th>Submitted AV (12×)</th></tr>`;
-    thead.classList.add("only-two-cols");
+// Daily (ET) index for rules
+function dayOfYearEST(){
+  const now = new Date();
+  const est = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const start = new Date(est.getFullYear(), 0, 1);
+  return Math.floor((est - start)/86400000);
+}
+
+// -------------- Load rules --------------
+async function setRuleTicker(){
+  try{
+    const res = await fetch(RULES_URL, { cache: 'no-store' });
+    const json = await res.json();
+    const list = Array.isArray(json.rules) ? json.rules : [];
+    if(!list.length) return;
+
+    // Rule of the day (drop any leading "1) ")
+    const idx = dayOfYearEST() % list.length;
+    const headline = String(list[idx]).replace(/^\s*\d+\)\s*/,'').trim();
+    elRule.textContent = headline;
+
+    // Subtitle from the Bonus if present
+    const bonus = list.find(x => /^bonus\)/i.test(x));
+    if (bonus) {
+      elSubtitle.textContent = bonus;
+    } else {
+      elSubtitle.textContent = '';
+    }
+  }catch(e){
+    console.error('rules error', e);
   }
-  thead.innerHTML = html;
 }
 
-/** table row HTML for an agent */
-function agentCell(a){
-  const photo = a.photo ? HEADSHOT_DIR + a.photo : null;
-  const avatar = photo
-    ? `<img class="avatar" src="${photo}" alt="${a.name}">`
-    : `<div class="initials" aria-hidden="true">${initials(a.name||"")}</div>`;
-  return `<div class="agent">${avatar}<div>${a.name||a.email||"Unknown"}</div></div>`;
-}
+// refresh rule once an hour in case the page is left open forever
+setRuleTicker();
+setInterval(setRuleTicker, 60*60*1000);
 
-/* -------- Data layer --------
-   We only call ONE function endpoint you already had: /api/board
-   It should return today’s rollups per agent (calls, talk, sales, av).
-   We then merge those with your roster so EVERYONE shows.
---------------------------------------------------------------- */
+// -------------- Load roster --------------
+/*
+  public/headshots/roster.json
+  {
+    "agents":[
+      {"name":"Robert Adams","email":"robert@americanpathinsurance.com","photo":"robert-adams.jpg"},
+      ...
+    ]
+  }
+*/
+let ROSTER = [];
 
-async function fetchRoster(){
-  const res = await fetch(ROSTER_URL, { cache: "no-store" });
+async function loadRoster(){
+  const res = await fetch(ROSTER_URL, { cache: 'no-store' });
   const json = await res.json();
-  return json.agents || [];
+  ROSTER = Array.isArray(json.agents) ? json.agents : [];
+  // safety: drop anyone explicitly named "Abigail Austin" if you’ve removed her from reporting
+  ROSTER = ROSTER.filter(a => (a.name || '').toLowerCase() !== 'abigail austin');
 }
+
+// -------------- Fetch stats --------------
+let BOARD = [];  // normalized stats by email
 
 async function fetchBoard(){
-  const res = await fetch("/api/board", { credentials: "include", cache: "no-store" });
-  if(!res.ok) throw new Error("board " + res.status);
-  return await res.json();
-}
-
-function mergeRoster(roster, board){
-  // normalize board by email
-  const byEmail = new Map();
-  (board.agents || board || []).forEach(a => {
-    const key = (a.email || "").toLowerCase();
-    byEmail.set(key, a);
-  });
-
-  // full list from roster; if no match, fill zeros
-  const merged = roster.map(r => {
-    const k = (r.email||"").toLowerCase();
-    const b = byEmail.get(k) || {};
-    return {
-      name: r.name || b.name,
-      email: r.email || b.email,
-      photo: r.photo || null,
-      calls: b.calls || 0,
-      talkMin: b.talkMin || b.talk || 0,
-      sales: b.sales || 0,
-      av12x: b.av12x || b.av || 0
-    };
-  });
-
-  return merged;
-}
-
-/* -------- Renderers -------- */
-
-function renderRoster(rows){
-  renderHead("roster");
-  tbody.innerHTML = rows.map(r => `
-    <tr>
-      <td>${agentCell(r)}</td>
-      <td class="num">${fmtInt(r.calls)}</td>
-      <td class="num">${fmtInt(r.talkMin)}</td>
-      <td class="num">${fmtInt(r.sales)}</td>
-      <td class="num">${fmtMoney(r.av12x)}</td>
-    </tr>
-  `).join("");
-}
-
-function renderSalesLB(rows){
-  renderHead("sales");
-  const sorted = [...rows].sort((a,b)=> (b.sales||0) - (a.sales||0));
-  tbody.innerHTML = sorted.map(r=>`
-    <tr>
-      <td>${agentCell(r)}</td>
-      <td class="num">${fmtInt(r.sales)}</td>
-    </tr>
-  `).join("");
-}
-
-function renderAvLB(rows){
-  renderHead("av");
-  const sorted = [...rows].sort((a,b)=> (b.av12x||0) - (a.av12x||0));
-  tbody.innerHTML = sorted.map(r=>`
-    <tr>
-      <td>${agentCell(r)}</td>
-      <td class="num">${fmtMoney(r.av12x)}</td>
-    </tr>
-  `).join("");
-}
-
-/* -------- Rotation controller -------- */
-
-let currentView = 0;
-let latestRows = [];
-
-function paint(){
-  const view = VIEWS[currentView];
-  viewTitle.textContent = view.title;
-
-  if(view.id === "roster")      renderRoster(latestRows);
-  else if(view.id === "sales")  renderSalesLB(latestRows);
-  else                          renderAvLB(latestRows);
-}
-
-function rotate(){
-  currentView = (currentView + 1) % VIEWS.length;
-  paint();
-}
-
-/* -------- Boot -------- */
-
-async function boot(){
-  // ticker + principle
-  document.getElementById("rule-ticker-text").textContent = RULE_OF_DAY.repeat(3) + " ";
-  const dayIdx = Math.floor((Date.now() / 86400000)) % PRINCIPLES.length;
-  document.getElementById("principle").textContent = PRINCIPLES[dayIdx];
-
   try{
-    const [roster, board] = await Promise.all([fetchRoster(), fetchBoard()]);
-    latestRows = mergeRoster(roster, board);
+    const res = await fetch(BOARD_URL, { cache: 'no-store' });
+    const j = await res.json();
+    const arr = Array.isArray(j.agents) ? j.agents : (Array.isArray(j.data) ? j.data : []);
+    BOARD = arr.map(normAgent);
   }catch(e){
-    console.error(e);
-    latestRows = [];
+    console.error('board fetch error', e);
+    BOARD = [];
+  }
+}
+
+// -------------- Views --------------
+const VIEW = {
+  ROSTER: 'roster',
+  SALES:  'sales',
+  AV:     'av'
+};
+const ROTATION = [VIEW.ROSTER, VIEW.SALES, VIEW.AV];
+let curIndex = 0;
+
+function labelFor(view){
+  if (view === VIEW.SALES) return 'Today — Leaderboard (Sales)';
+  if (view === VIEW.AV)    return 'Today — Leaderboard (Submitted AV)';
+  return 'Today — Roster';
+}
+
+function buildHead(view){
+  let cols = [];
+  if (view === VIEW.SALES){
+    cols = ['Agent', 'Sales'];
+  } else if (view === VIEW.AV){
+    cols = ['Agent', 'Submitted AV (12x)'];
+  } else {
+    cols = ['Agent', 'Calls', 'Talk Time (min)', 'Sales', 'Submitted AV (12x)'];
   }
 
-  currentView = 0;
-  paint();
-  setInterval(rotate, ROTATE_MS);
-
-  // refresh board every 20s to keep numbers hot, repaint same view
-  setInterval(async ()=>{
-    try{
-      const [roster, board] = await Promise.all([fetchRoster(), fetchBoard()]);
-      latestRows = mergeRoster(roster, board);
-      paint();
-    }catch(e){ console.warn("refresh failed", e); }
-  }, 20000);
+  const tr = document.createElement('tr');
+  cols.forEach(c => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    tr.appendChild(th);
+  });
+  elThead.innerHTML = '';
+  elThead.appendChild(tr);
 }
 
-boot();
+function metricFor(email){
+  const key = String(email||'').toLowerCase();
+  if(!key) return { calls:0, talk:0, sales:0, av:0 };
+  return BOARD.find(x => x.email === key) || { calls:0, talk:0, sales:0, av:0 };
+}
+
+function avatarCell(agent){
+  const wrap = document.createElement('div');
+  wrap.className = 'agent-cell';
+
+  const a = document.createElement('div');
+  a.className = 'avatar';
+
+  if (agent.photo){
+    const img = document.createElement('img');
+    img.src = `/headshots/${agent.photo}`;
+    img.alt = `${agent.name}`;
+    a.appendChild(img);
+  } else {
+    a.textContent = initials(agent.name||'');
+  }
+
+  const name = document.createElement('div');
+  name.textContent = agent.name || 'Unknown';
+
+  wrap.appendChild(a);
+  wrap.appendChild(name);
+  return wrap;
+}
+
+function render(view){
+  elLabel.textContent = labelFor(view);
+  buildHead(view);
+  elTbody.innerHTML = '';
+
+  // Always render roster order (stable), fill with zeros if no stats yet
+  ROSTER.forEach(agent => {
+    const { calls, talk, sales, av } = metricFor(agent.email);
+
+    const tr = document.createElement('tr');
+
+    const tdAgent = document.createElement('td');
+    tdAgent.appendChild(avatarCell(agent));
+    tr.appendChild(tdAgent);
+
+    if (view === VIEW.SALES){
+      const tdSales = document.createElement('td');
+      tdSales.textContent = String(sales||0);
+      tr.appendChild(tdSales);
+    } else if (view === VIEW.AV){
+      const tdAv = document.createElement('td');
+      tdAv.textContent = fmtMoney(av||0);
+      tr.appendChild(tdAv);
+    } else {
+      const tdCalls = document.createElement('td');
+      const tdTalk  = document.createElement('td');
+      const tdSales = document.createElement('td');
+      const tdAv    = document.createElement('td');
+
+      tdCalls.textContent = String(calls||0);
+      tdTalk.textContent  = String(Math.round(talk||0));
+      tdSales.textContent = String(sales||0);
+      tdAv.textContent    = fmtMoney(av||0);
+
+      tr.appendChild(tdCalls);
+      tr.appendChild(tdTalk);
+      tr.appendChild(tdSales);
+      tr.appendChild(tdAv);
+    }
+
+    elTbody.appendChild(tr);
+  });
+
+  // Sort rows for leaderboards (descending)
+  if (view !== VIEW.ROSTER){
+    // build a value map from BOARD for quick read
+    const map = Object.fromEntries(BOARD.map(b => [b.email, b]));
+    const rows = Array.from(elTbody.querySelectorAll('tr'));
+    rows.sort((r1, r2) => {
+      const email1 = (ROSTER[rows.indexOf(r1)]?.email||'').toLowerCase();
+      const email2 = (ROSTER[rows.indexOf(r2)]?.email||'').toLowerCase();
+      const m1 = map[email1] || { sales:0, av:0 };
+      const m2 = map[email2] || { sales:0, av:0 };
+      if (view === VIEW.SALES) return (m2.sales||0) - (m1.sales||0);
+      if (view === VIEW.AV)    return (m2.av||0) - (m1.av||0);
+      return 0;
+    });
+    rows.forEach(r => elTbody.appendChild(r));
+  }
+}
+
+async function refreshAndRender(view){
+  await fetchBoard();
+  render(view);
+}
+
+// Rotate views
+async function start(){
+  await loadRoster();
+  await refreshAndRender(ROTATION[curIndex]);
+
+  // periodic data refresh
+  setInterval(() => refreshAndRender(ROTATION[curIndex]), FETCH_SECONDS*1000);
+
+  // rotation
+  if (ROTATE_SECONDS > 0){
+    setInterval(() => {
+      curIndex = (curIndex + 1) % ROTATION.length;
+      render(ROTATION[curIndex]);        // re-render immediately with existing data
+    }, ROTATE_SECONDS * 1000);
+  }
+}
+
+start();
