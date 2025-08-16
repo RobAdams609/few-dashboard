@@ -1,56 +1,93 @@
 :root{
-  --bg:#000; --fg:#fff; --dim:#bbb; --accent:#8b0000; --line:#222;
-}
-*{ box-sizing:border-box; }
-html,body{ margin:0; padding:0; background:var(--bg); color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
-body{ padding-top:28px; } /* keep content below the ticker */
+  /* Color palette (change these 3 to taste) */
+  --bg:#000;                 /* page background */
+  --fg:#fff;                 /* main text */
+  --dim:#cfcfcf;             /* secondary text */
+  --accent:#0d3b66;          /* deep navy lines/accents */
+  --pop:#ffd166;             /* gold highlight (sale toast) */
 
-/* ticker (top) */
+  --line:#191919;            /* subtle table lines */
+}
+
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; background:var(--bg); color:var(--fg);
+  font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+
+/* doubled ticker height */
 .ticker{
-  position:fixed; top:0; left:0; right:0; height:28px;
-  display:block; overflow:hidden; white-space:nowrap; z-index:9999;
-  background:#000; color:#fff; border-bottom:2px solid var(--accent);
-  font-weight:700; font-size:14px; line-height:28px; padding:0 8px;
+  position:fixed; top:0; left:0; right:0; height:56px;
+  overflow:hidden; white-space:nowrap; z-index:9999;
+  background:#000; color:#fff; border-bottom:3px solid var(--accent);
+  font-weight:800; font-size:18px; line-height:56px; padding:0 12px;
 }
 #rule-ticker-text{ display:inline-block; padding-left:100%; animation:marq 30s linear infinite; }
 @keyframes marq{ from{ transform:translateX(0); } to{ transform:translateX(-100%); } }
 
-/* banner (doubled height & centered) */
+/* keep content below ticker */
+body{ padding-top:64px; }
+
+/* center content without changing HTML */
+#banner, #view{ max-width:1280px; margin-inline:auto; padding-inline:18px; }
+
+/* banner */
 #banner{
   text-align:center;
-  padding:30px 20px 18px;       /* bigger */
+  padding:38px 18px 20px;                /* bigger than before */
   border-bottom:3px solid var(--accent);
 }
 #banner .title{
-  font-weight:800;               /* keep bold only for the title */
-  letter-spacing:.6px;
-  font-size:clamp(22px, 3.2vw, 40px);   /* noticeably larger */
-  line-height:1.15;
   margin:0;
+  font-weight:900;
+  letter-spacing:.6px;
+  font-size:clamp(26px, 3.6vw, 44px);
+  line-height:1.1;
 }
 #principle{
-  margin-top:10px;
+  margin-top:12px;
   color:var(--dim);
-  font-weight:400;               /* NOT bold */
-  font-size:clamp(14px, 1.6vw, 22px);
-  line-height:1.3;
+  font-weight:400;                       /* not bold by request */
+  font-size:clamp(15px, 1.7vw, 22px);
+  line-height:1.25;
 }
 
 /* table */
-#view{ padding:12px 12px 24px; }
-table{ width:100%; border-collapse:collapse; }
+#view{ padding:14px 18px 28px; }
+table{ width:100%; border-collapse:collapse; table-layout:fixed; }
 thead th{
-  text-align:left; font-size:14px; color:#ddd; padding:10px 8px; border-bottom:1px solid var(--line);
+  text-align:left; font-size:14px; color:#ddd; padding:12px 10px;
+  border-bottom:1px solid var(--line);
 }
 tbody td{
-  padding:10px 8px; border-bottom:1px solid var(--line); font-size:15px;
+  padding:12px 10px; border-bottom:1px solid var(--line); font-size:16px;
 }
-tbody tr:nth-child(odd){ background:#0a0a0a; }
-tbody tr:hover{ background:#101010; }
-td.money{ font-variant-numeric:tabular-nums; }
+tbody tr:nth-child(odd){ background:#0b0b0b; }
+tbody tr:hover{ background:#111; }
+
 td.num{ text-align:right; font-variant-numeric:tabular-nums; }
+td.money{ font-variant-numeric:tabular-nums; }
+
+/* agent cell with avatar */
+td.agent{
+  display:flex; align-items:center; gap:10px; overflow:hidden;
+}
+.avatar{
+  width:32px; height:32px; border-radius:50%; flex:0 0 32px; object-fit:cover;
+  border:2px solid var(--accent);
+}
+
+/* SALE toast at bottom */
+#sale-toast{
+  position:fixed; left:50%; bottom:12px; transform:translateX(-50%);
+  background:var(--pop); color:#111; padding:12px 16px; border-radius:8px;
+  font-weight:800; letter-spacing:.2px;
+  border:2px solid var(--accent); box-shadow:0 8px 24px rgba(0,0,0,.45);
+  opacity:0; pointer-events:none; transition:opacity .25s ease, transform .25s ease;
+  max-width:90vw; text-align:center; z-index:9999;
+}
+#sale-toast.show{ opacity:1; transform:translateX(-50%) translateY(-4px); }
 
 @media (min-width:1600px){
   thead th, tbody td{ font-size:18px; }
+  .avatar{ width:36px; height:36px; }
 }
 
