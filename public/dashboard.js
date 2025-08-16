@@ -1,183 +1,190 @@
-/* public/dashboard.js  — full replacement
-   - Always shows every person in /headshots/roster.json
-   - Merges today's stats from /api/board
-   - Excludes anyone in EXCLUDE_EMAILS from ALL UI reporting
-   - Keeps your Rule-of-the-Day banner & hero header
-*/
-
-/* ------------------- Config ------------------- */
-
-// Anyone in this set will be hidden from rows, ranks and totals
-const EXCLUDE_EMAILS = new Set([
-  'abigailaustin.healthadvisor@gmail.com'
-]);
-
-// Your 10 rules + bonus (used in the ticker and subheader)
+// ---------- principles (rule of the day) ----------
 const PRINCIPLES = [
-  "Do not be entitled. Earn everything. Choose hard work over handouts… always.",
-  "To get, give.",
-  "Bring The Few Energy. Exude grit, gratitude, and go in every moment of every day.",
-  "Get comfortable being uncomfortable.",
-  "If you risk nothing, you risk everything.",
-  "Luck favors hard workers. You make your own luck.",
-  "Your goal is growth to the grave.",
-  "Plan your day. If you have no plan, expect no progress.",
-  "Choose effort over your excuses and emotions.",
-  "Restore the dignity of hard work.",
+  "1) Own the first 10 minutes.",
+  "2) To get, give.",
+  "3) Bring The Few Energy. Exude grit, gratitude, and go in every moment of every day.",
+  "4) Get comfortable being uncomfortable.",
+  "5) If you risk nothing, you risk everything. Risk is scary, but regret is terrifying.",
+  "6) Luck favors hard workers. You make your own luck.",
+  "7) Your goal is growth to the grave.",
+  "8) Plan your day. If you have no plan, expect no progress.",
+  "9) Choose effort over your excuses and emotions.",
+  "10) Restore the dignity of hard work.",
   "Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
 ];
 
-/* -------------- Helpers / formatting ---------- */
+// ---------- config ----------
+const HEAD_BASE = "/headshots/";
+const ROSTER_URL = "/headshots/roster.json";
+const EXCLUDE_EMAILS = new Set([
+  "abigailaustin.healthadvisor@gmail.com" // <- already excluded
+]);
 
-const $ = (sel) => document.querySelector(sel);
+// ---------- state ----------
+let board = { agents: [] };
+let roster = [];
+let lastSalesByKey = new Map(); // email preferred, else name
+let viewMode = 0;
 
-const toMoney = (n) =>
-  (n ?? 0).toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+// ---------- helpers ----------
+const fmt = n => (n||0).toLocaleString();
+const fmtMoney = n => '$' + (Math.round(n||0)).toLocaleString();
 
-const toInt = (n) => (n ? Math.round(n) : 0);
+// prefer email for identity; fall back to lowercased name
+const keyFor = a => (a.email && a.email.toLowerCase()) || (a.name||'').toLowerCase();
 
-const todayUtcRange = () => {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59));
-  return { startUtc: start.toISOString(), endUtc: end.toISOString() };
-};
-
-const ruleIndexForToday = () => Math.floor(Date.now() / (24*60*60*1000)) % PRINCIPLES.length;
-
-/* -------------------- Data fetch -------------------- */
-
-async function getRoster() {
-  const res = await fetch('/headshots/roster.json', { cache: 'no-cache' });
-  if (!res.ok) throw new Error('roster.json not found');
-  const list = await res.json();
-  // normalize emails and drop excluded
-  return list
-    .map(r => ({ ...r, email: String(r.email || '').toLowerCase() }))
-    .filter(r => !EXCLUDE_EMAILS.has(r.email));
+// avatar component
+function avatarCell(r){
+  const img = document.createElement('img');
+  if (r.photo) {
+    img.src = HEAD_BASE + r.photo;
+    img.alt = r.name;
+    img.onerror = () => img.replaceWith(initialsChip(r.name));
+    return img;
+  }
+  return initialsChip(r.name);
+}
+function initialsChip(name){
+  const span = document.createElement('span');
+  span.className = 'initials';
+  const initials = (name || '?').split(/\s+/).map(s => s[0]||'').join('').slice(0,2).toUpperCase();
+  span.textContent = initials;
+  return span;
 }
 
-async function getBoard() {
-  // Your Netlify function for “today”
+// ---------- fetch ----------
+async function fetchBoard(){
   const res = await fetch('/api/board', { credentials: 'include' });
-  if (!res.ok) throw new Error('board api failed');
-  const data = await res.json();
-
-  // Normalize and remove excluded from API payload we’ll use for joins & totals
-  const agents = (data.agents || [])
-    .map(a => ({ ...a, email: String(a.email || '').toLowerCase() }))
-    .filter(a => !EXCLUDE_EMAILS.has(a.email));
-
-  return { ...data, agents };
+  if (!res.ok) throw new Error('board ' + res.status);
+  board = await res.json();
 }
 
-/* -------------------- Render -------------------- */
-
-function setHeroAndTicker() {
-  // Big hero header already exists in your HTML/CSS; we only set texts
-  const rule = PRINCIPLES[ruleIndexForToday()];
-  const banner = $('#rule-ticker-text');
-  const sub = $('#principle');
-
-  if (banner) banner.textContent = `RULE OF THE DAY —  ${rule}`;
-  if (sub) sub.textContent = rule;
+async function fetchRoster(){
+  const res = await fetch(ROSTER_URL, { cache: 'no-store' });
+  roster = await res.json();
 }
 
-function buildRows(roster, board) {
-  // Map today’s stats by email for quick join
-  const byEmail = new Map(
-    (board.agents || []).map(a => [
-      String(a.email || '').toLowerCase(),
-      {
-        calls: toInt(a.calls),
-        talk: toInt(a.talk),       // expect minutes from your API (adjust if seconds)
-        sales: toInt(a.sales),
-        av: toInt(a.av)            // expect 12x AV number; format later
-      }
-    ])
-  );
+// ---------- merge roster + live ----------
+function buildRows(){
+  // map live by email or name
+  const liveMap = new Map();
+  for(const a of (board.agents || [])){
+    liveMap.set(keyFor(a), a);
+  }
 
-  // Always list the roster, falling back to zeros if no activity today
-  return roster.map(p => {
-    const stats = byEmail.get(p.email) || { calls: 0, talk: 0, sales: 0, av: 0 };
-    return {
-      name: p.name,
-      email: p.email,
-      photo: p.photo ? `/headshots/${p.photo}` : null,
-      ...stats
-    };
-  });
+  // build rows from roster order
+  const rows = [];
+  for(const r of roster){
+    if (EXCLUDE_EMAILS.has((r.email||'').toLowerCase())) continue;
+
+    const k = keyFor(r);
+    const live = liveMap.get(k) || {};
+    rows.push({
+      key: k,
+      name: r.name,
+      email: r.email,
+      photo: r.photo || null,
+      calls: live.calls || 0,
+      talk: live.talk || 0,
+      sales: live.sales || 0,
+      av: live.av || 0
+    });
+  }
+  return rows;
 }
 
-function renderTable(rows) {
+// ---------- render ----------
+function render(){
   const tbody = document.querySelector('#table tbody');
-  if (!tbody) return;
+  tbody.innerHTML = '';
 
-  // Clear
-  while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+  const rows = buildRows();
 
-  // Simple alphabetical – you can sort by calls/sales/AV if you prefer
-  rows.sort((a, b) => a.name.localeCompare(b.name));
+  // sort by sales desc, then calls desc
+  rows.sort((a,b)=> (b.sales||0)-(a.sales||0) || (b.calls||0)-(a.calls||0));
 
-  for (const r of rows) {
+  for(const r of rows){
     const tr = document.createElement('tr');
 
-    // Agent cell with headshot
-    const agentTd = document.createElement('td');
-    const wrap = document.createElement('div');
-    wrap.className = 'agent';
-    if (r.photo) {
-      const img = document.createElement('img');
-      img.src = r.photo;
-      img.alt = r.name;
-      img.loading = 'lazy';
-      wrap.appendChild(img);
-    } else {
-      // fallback circle with initials
-      const init = document.createElement('div');
-      init.className = 'initials';
-      init.textContent = r.name.split(' ').map(s => s[0]).slice(0,2).join('').toUpperCase();
-      wrap.appendChild(init);
-    }
-    const nameSpan = document.createElement('span');
-    nameSpan.textContent = r.name;
-    wrap.appendChild(nameSpan);
-    agentTd.appendChild(wrap);
+    const tdAgent = document.createElement('td');
+    const chip = document.createElement('div'); chip.className = 'agent';
+    chip.appendChild(avatarCell(r));
+    const nameSpan = document.createElement('span'); nameSpan.textContent = r.name;
+    chip.appendChild(nameSpan);
+    tdAgent.appendChild(chip);
 
-    const callsTd = document.createElement('td'); callsTd.textContent = r.calls;
-    const talkTd  = document.createElement('td'); talkTd.textContent  = r.talk;
-    const salesTd = document.createElement('td'); salesTd.textContent = r.sales;
-    const avTd    = document.createElement('td'); avTd.textContent    = toMoney(r.av);
+    const tdCalls = document.createElement('td'); tdCalls.className='calls'; tdCalls.textContent = fmt(r.calls);
+    const tdTalk  = document.createElement('td'); tdTalk.className='talk'; tdTalk.textContent  = fmt(r.talk);
+    const tdSales = document.createElement('td'); tdSales.className='sales'; tdSales.textContent = fmt(r.sales);
+    const tdAv    = document.createElement('td'); tdAv.className='av'; tdAv.textContent    = fmtMoney(r.av);
 
-    tr.append(agentTd, callsTd, talkTd, salesTd, avTd);
+    tr.append(tdAgent, tdCalls, tdTalk, tdSales, tdAv);
     tbody.appendChild(tr);
   }
 }
 
-function renderTotals(rows) {
-  // (Optional) If you show totals anywhere, compute them from the filtered rows.
-  // Example: document.getElementById('totals-calls').textContent = rows.reduce((s,r)=>s+r.calls,0);
+// ---------- rule ticker & headline subtext ----------
+function setPrinciple(){
+  const dayIndex = Math.floor(Date.now() / (24*60*60*1000)) % PRINCIPLES.length;
+  document.getElementById('principle').textContent = PRINCIPLES[dayIndex];
+}
+function setRuleTicker(){
+  setPrinciple();
+  const t = document.getElementById('rule-ticker-text');
+  t.textContent = PRINCIPLES[dayIndexForTicker()];
+  // simple drift: rotate every ~40s
+  let i = dayIndexForTicker();
+  setInterval(()=>{
+    i = (i+1) % PRINCIPLES.length;
+    t.textContent = PRINCIPLES[i];
+  }, 40000);
+}
+const dayIndexForTicker = () => Math.floor(Date.now()/(24*60*60*1000)) % PRINCIPLES.length;
+
+// ---------- sale celebration ----------
+function checkCelebrations(){
+  const rows = buildRows();
+  for(const r of rows){
+    const k = r.key;
+    const prev = lastSalesByKey.get(k) || 0;
+    if (r.sales > prev){
+      showSalePop(r.name, r.sales - prev, r.av);
+    }
+    lastSalesByKey.set(k, r.sales);
+  }
 }
 
-/* -------------------- Live loop -------------------- */
+let popTimer = null;
+function showSalePop(name, inc, av){
+  const root = document.getElementById('sale-pop');
+  root.innerHTML = `
+    <div class="card">
+      <span class="badge">SALE</span>
+      <div class="msg">${name} just sold! (+${inc}) — AV ${fmtMoney(av)}</div>
+    </div>
+  `;
+  root.classList.add('show');
+  clearTimeout(popTimer);
+  popTimer = setTimeout(()=> root.classList.remove('show'), 4500);
+}
 
-async function refresh() {
+// ---------- loop ----------
+async function tick(){
   try {
-    const [roster, board] = await Promise.all([getRoster(), getBoard()]);
-    const rows = buildRows(roster, board);
-    renderTable(rows);
-    renderTotals(rows);
-  } catch (e) {
+    await fetchBoard();
+    render();
+    checkCelebrations();
+  } catch(e){
     console.error(e);
   }
 }
 
-function start() {
-  setHeroAndTicker();
-  refresh();                      // initial
-  setInterval(refresh, 20_000);   // poll every 20s
-  // rotate rule once an hour
-  setInterval(setHeroAndTicker, 60_000);
-}
-
-document.addEventListener('DOMContentLoaded', start);
+// ---------- boot ----------
+document.addEventListener('DOMContentLoaded', async () => {
+  await fetchRoster();
+  setRuleTicker();
+  setPrinciple();
+  await tick();
+  setInterval(tick, 20000);     // refresh every 20s
+  setInterval(setPrinciple, 60000); // refresh principle hourly-ish
+});
