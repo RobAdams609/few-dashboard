@@ -1,50 +1,41 @@
-:root { --bg:#000; --fg:#fff; --accent:#e21b23; }
-html,body { margin:0; padding:0; font-family:system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial; background:var(--bg); color:var(--fg); }
-#banner { padding:12px 16px; border-bottom:2px solid var(--accent); display:flex; justify-content:space-between; align-items:center; }
-#banner .title { font-weight:800; letter-spacing:.5px; }
-#principle { opacity:.9; font-weight:600; }
-#view { padding:16px; }
-table { width:100%; border-collapse:collapse; font-size:1.05rem; }
-thead th { text-align:left; border-bottom:2px solid #333; padding:8px; }
-tbody td { padding:10px 8px; border-bottom:1px solid #222; vertical-align:middle; }
-.rank-top { background:rgba(34,139,34,.18); }
-.rank-bottom { background:rgba(139,0,0,.18); }
-.agent { display:flex; align-items:center; gap:10px; }
-.agent img { width:36px; height:36px; border-radius:50%; object-fit:cover; border:1px solid #333; }
-#ticker { position:fixed; bottom:0; left:0; right:0; padding:10px 16px; border-top:2px solid var(--accent); white-space:nowrap; overflow:hidden; }
-#tickerContent { display:inline-block; padding-left:100%; animation:scroll 25s linear infinite; }
-@keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-100%); } }
-/* --- Rule ticker --- */
+:root{
+  --bg:#000; --fg:#fff; --dim:#bbb; --accent:#8b0000; --line:#222;
+}
+*{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; background:var(--bg); color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+body{ padding-top:28px; } /* keep content below the ticker */
+
+/* ticker */
 .ticker{
-  position: fixed;
-  top: 6px;        /* keeps it in the top bar */
-  left: 12px;
-  right: 12px;
-  height: 28px;
-  line-height: 28px;
-  overflow: hidden;
-  white-space: nowrap;
-  border-top: 2px solid #a01616;
-  border-bottom: 1px solid #a01616;
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: .3px;
+  position:fixed; top:0; left:0; right:0; height:28px;
+  display:block; overflow:hidden; white-space:nowrap; z-index:9999;
+  background:#000; color:#fff; border-bottom:2px solid var(--accent);
+  font-weight:700; font-size:14px; line-height:28px; padding:0 8px;
 }
+#rule-ticker-text{ display:inline-block; padding-left:100%; animation:marq 30s linear infinite; }
+@keyframes marq{ from{ transform:translateX(0); } to{ transform:translateX(-100%); } }
 
-#rule-ticker-text{
-  display: inline-block;
-  padding-left: 100%;            /* start off-screen to the right */
-  animation: rule-scroll 30s linear infinite;
+/* banner */
+#banner{ padding:12px 14px 10px; border-bottom:2px solid var(--accent); }
+#banner .title{ font-weight:800; letter-spacing:.5px; }
+#principle{ color:var(--dim); font-weight:700; text-align:right; }
+
+/* table */
+#view{ padding:10px 12px 24px; }
+table{ width:100%; border-collapse:collapse; }
+thead th{
+  text-align:left; font-size:14px; color:#ddd; padding:10px 8px; border-bottom:1px solid var(--line);
 }
-
-@keyframes rule-scroll{
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(-100%); }
+tbody td{
+  padding:10px 8px; border-bottom:1px solid var(--line); font-size:15px;
 }
+tbody tr:nth-child(odd){ background:#0a0a0a; }
+tbody tr:hover{ background:#101010; }
+td.money{ font-variant-numeric:tabular-nums; }
+td.num{ text-align:right; font-variant-numeric:tabular-nums; }
 
-/* make the big rule under the title large */
-#principle {
-  font-size: 38px;
-  font-weight: 700;
-  margin-top: 4px;
+@media (min-width:1600px){
+  #banner .title{ font-size:20px; }
+  #principle{ font-size:16px; }
+  thead th, tbody td{ font-size:18px; }
 }
