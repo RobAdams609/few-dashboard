@@ -1,190 +1,219 @@
-// ---------- principles (rule of the day) ----------
+/* few-dashboard — daily & sales-week (Fri→Thu) views with auto-rotation
+   Views (45s each):
+     Today — Roster
+     Today — Leaders — Submitted AV
+     Today — Leaders — Sales
+     This Week (Fri→Thu) — Roster
+     This Week (Fri→Thu) — Leaders — Submitted AV
+     This Week (Fri→Thu) — Leaders — Sales
+*/
+
+/* ---------- SETTINGS ---------- */
+const DEAL_VALUE = 200;          // $ per sale
+const AV_MULTIPLIER = 12;        // 12× AV
+const ROTATE_MS = 45_000;        // rotate every 45 seconds
+const MAX_LEADER_ROWS = 12;      // top list length
+
+/* ---------- DOM ---------- */
+const $ = (sel) => document.querySelector(sel);
+const table = $('#table');
+const tableBody = table.querySelector('tbody');
+const viewTag = document.getElementById('viewTag') || (() => {
+  const d = document.createElement('div'); d.id = 'viewTag';
+  document.getElementById('banner')?.appendChild(d); return d;
+})();
+
+/* ---------- PRINCIPLES / RULES ---------- */
 const PRINCIPLES = [
   "1) Own the first 10 minutes.",
   "2) To get, give.",
-  "3) Bring The Few Energy. Exude grit, gratitude, and go in every moment of every day.",
+  "3) Bring The Few Energy.",
   "4) Get comfortable being uncomfortable.",
-  "5) If you risk nothing, you risk everything. Risk is scary, but regret is terrifying.",
-  "6) Luck favors hard workers. You make your own luck.",
+  "5) If you risk nothing, you risk everything.",
+  "6) Luck favors hard workers.",
   "7) Your goal is growth to the grave.",
-  "8) Plan your day. If you have no plan, expect no progress.",
+  "8) Plan your day.",
   "9) Choose effort over your excuses and emotions.",
-  "10) Restore the dignity of hard work.",
   "Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
 ];
-
-// ---------- config ----------
-const HEAD_BASE = "/headshots/";
-const ROSTER_URL = "/headshots/roster.json";
-const EXCLUDE_EMAILS = new Set([
-  "abigailaustin.healthadvisor@gmail.com" // <- already excluded
-]);
-
-// ---------- state ----------
-let board = { agents: [] };
-let roster = [];
-let lastSalesByKey = new Map(); // email preferred, else name
-let viewMode = 0;
-
-// ---------- helpers ----------
-const fmt = n => (n||0).toLocaleString();
-const fmtMoney = n => '$' + (Math.round(n||0)).toLocaleString();
-
-// prefer email for identity; fall back to lowercased name
-const keyFor = a => (a.email && a.email.toLowerCase()) || (a.name||'').toLowerCase();
-
-// avatar component
-function avatarCell(r){
-  const img = document.createElement('img');
-  if (r.photo) {
-    img.src = HEAD_BASE + r.photo;
-    img.alt = r.name;
-    img.onerror = () => img.replaceWith(initialsChip(r.name));
-    return img;
-  }
-  return initialsChip(r.name);
-}
-function initialsChip(name){
-  const span = document.createElement('span');
-  span.className = 'initials';
-  const initials = (name || '?').split(/\s+/).map(s => s[0]||'').join('').slice(0,2).toUpperCase();
-  span.textContent = initials;
-  return span;
-}
-
-// ---------- fetch ----------
-async function fetchBoard(){
-  const res = await fetch('/api/board', { credentials: 'include' });
-  if (!res.ok) throw new Error('board ' + res.status);
-  board = await res.json();
-}
-
-async function fetchRoster(){
-  const res = await fetch(ROSTER_URL, { cache: 'no-store' });
-  roster = await res.json();
-}
-
-// ---------- merge roster + live ----------
-function buildRows(){
-  // map live by email or name
-  const liveMap = new Map();
-  for(const a of (board.agents || [])){
-    liveMap.set(keyFor(a), a);
-  }
-
-  // build rows from roster order
-  const rows = [];
-  for(const r of roster){
-    if (EXCLUDE_EMAILS.has((r.email||'').toLowerCase())) continue;
-
-    const k = keyFor(r);
-    const live = liveMap.get(k) || {};
-    rows.push({
-      key: k,
-      name: r.name,
-      email: r.email,
-      photo: r.photo || null,
-      calls: live.calls || 0,
-      talk: live.talk || 0,
-      sales: live.sales || 0,
-      av: live.av || 0
-    });
-  }
-  return rows;
-}
-
-// ---------- render ----------
-function render(){
-  const tbody = document.querySelector('#table tbody');
-  tbody.innerHTML = '';
-
-  const rows = buildRows();
-
-  // sort by sales desc, then calls desc
-  rows.sort((a,b)=> (b.sales||0)-(a.sales||0) || (b.calls||0)-(a.calls||0));
-
-  for(const r of rows){
-    const tr = document.createElement('tr');
-
-    const tdAgent = document.createElement('td');
-    const chip = document.createElement('div'); chip.className = 'agent';
-    chip.appendChild(avatarCell(r));
-    const nameSpan = document.createElement('span'); nameSpan.textContent = r.name;
-    chip.appendChild(nameSpan);
-    tdAgent.appendChild(chip);
-
-    const tdCalls = document.createElement('td'); tdCalls.className='calls'; tdCalls.textContent = fmt(r.calls);
-    const tdTalk  = document.createElement('td'); tdTalk.className='talk'; tdTalk.textContent  = fmt(r.talk);
-    const tdSales = document.createElement('td'); tdSales.className='sales'; tdSales.textContent = fmt(r.sales);
-    const tdAv    = document.createElement('td'); tdAv.className='av'; tdAv.textContent    = fmtMoney(r.av);
-
-    tr.append(tdAgent, tdCalls, tdTalk, tdSales, tdAv);
-    tbody.appendChild(tr);
-  }
-}
-
-// ---------- rule ticker & headline subtext ----------
 function setPrinciple(){
-  const dayIndex = Math.floor(Date.now() / (24*60*60*1000)) % PRINCIPLES.length;
-  document.getElementById('principle').textContent = PRINCIPLES[dayIndex];
+  const idx = Math.floor(Date.now() / (24*60*60*1000)) % PRINCIPLES.length;
+  const el = document.getElementById('principle');
+  if (el) el.textContent = PRINCIPLES[idx];
 }
-function setRuleTicker(){
-  setPrinciple();
-  const t = document.getElementById('rule-ticker-text');
-  t.textContent = PRINCIPLES[dayIndexForTicker()];
-  // simple drift: rotate every ~40s
-  let i = dayIndexForTicker();
-  setInterval(()=>{
-    i = (i+1) % PRINCIPLES.length;
-    t.textContent = PRINCIPLES[i];
-  }, 40000);
-}
-const dayIndexForTicker = () => Math.floor(Date.now()/(24*60*60*1000)) % PRINCIPLES.length;
 
-// ---------- sale celebration ----------
-function checkCelebrations(){
-  const rows = buildRows();
-  for(const r of rows){
-    const k = r.key;
-    const prev = lastSalesByKey.get(k) || 0;
-    if (r.sales > prev){
-      showSalePop(r.name, r.sales - prev, r.av);
-    }
-    lastSalesByKey.set(k, r.sales);
+/* ---------- ROSTER ---------- */
+let roster = []; // [{name, email, photo|null}, ...]
+const ROSTER_TRY = [
+  '/headshots/roster.json',
+  'https://raw.githubusercontent.com/RobAdams609/few-dashboard/main/public/headshots/roster.json'
+];
+async function fetchRoster(){
+  roster = [];
+  for (const url of ROSTER_TRY){
+    try{
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const txt = await res.text();
+      let json; try { json = JSON.parse(txt); } catch { continue; }
+      if (Array.isArray(json)) { roster = json; return; }
+      if (json && Array.isArray(json.agents)) { roster = json.agents; return; }
+    }catch{}
   }
 }
 
-let popTimer = null;
-function showSalePop(name, inc, av){
-  const root = document.getElementById('sale-pop');
-  root.innerHTML = `
-    <div class="card">
-      <span class="badge">SALE</span>
-      <div class="msg">${name} just sold! (+${inc}) — AV ${fmtMoney(av)}</div>
-    </div>
-  `;
-  root.classList.add('show');
-  clearTimeout(popTimer);
-  popTimer = setTimeout(()=> root.classList.remove('show'), 4500);
+/* ---------- BOARD (stats) ---------- */
+let stats = {
+  daily:  { agents: [] },
+  weekly: { agents: [] }
+};
+
+// Days since last Friday (ET), inclusive of today.
+// Fri=1, Sat=2, Sun=3, Mon=4, Tue=5, Wed=6, Thu=7.
+function daysSinceSalesWeekStartET(){
+  const now = new Date();
+  // Convert "now" to America/New_York local time
+  const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const dow = et.getDay();            // 0=Sun, 1=Mon, ... 5=Fri, 6=Sat
+  const FRIDAY = 5;
+  const delta = ((dow + 7) - FRIDAY) % 7; // 0 if Fri, 1 if Sat, ... 6 if Thu
+  return delta + 1;
 }
 
-// ---------- loop ----------
+async function fetchBoardRangeDays(days){
+  const urls = [
+    `/api/board?days=${days}`,
+    `/api/board&days=${days}`,
+    '/api/board'
+  ];
+  for (const url of urls){
+    try{
+      const res = await fetch(url, { credentials: 'include', cache: 'no-store' });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (data && Array.isArray(data.agents)) return data;
+    }catch{}
+  }
+  return { agents: [] };
+}
+
+async function fetchAllStats(){
+  const weeklyDays = daysSinceSalesWeekStartET(); // Fri→today (ET)
+  const [daily, weekly] = await Promise.all([
+    fetchBoardRangeDays(1),
+    fetchBoardRangeDays(weeklyDays),
+  ]);
+  stats.daily  = daily  || { agents: [] };
+  stats.weekly = weekly || { agents: [] };
+}
+
+/* ---------- MERGE roster + stats ---------- */
+const keyEmail = (s) => (s||'').trim().toLowerCase();
+const keyName  = (s) => (s||'').trim().toLowerCase().replace(/\s+/g, ' ');
+
+function mergeRows(range){ // range: 'daily' | 'weekly'
+  const src = stats[range] || { agents: [] };
+  const byEmail = new Map();
+  const byName  = new Map();
+  (src.agents || []).forEach(a => {
+    if (a.email) byEmail.set(keyEmail(a.email), a);
+    if (a.name)  byName.set(keyName(a.name), a);
+  });
+
+  return (roster || []).map(r => {
+    const stat = byEmail.get(keyEmail(r.email)) || byName.get(keyName(r.name)) || {};
+    const calls = Number(stat.calls||0);
+    const talk  = Number(stat.talk||0);
+    const sales = Number(stat.sales||0);
+    const submittedAV = sales * DEAL_VALUE * AV_MULTIPLIER;
+    return {
+      name: r.name, email: r.email, photo: r.photo || null,
+      calls, talk, sales, submittedAV
+    };
+  });
+}
+
+/* ---------- RENDER ---------- */
+function fmtMoney(n){ return '$' + Math.round(n).toLocaleString(); }
+function initials(name){
+  return (name||'')
+    .split(/\s+/).filter(Boolean).slice(0,2)
+    .map(s => s[0].toUpperCase()).join('');
+}
+function avatarCell(row){
+  const wrap = document.createElement('div');
+  wrap.className = 'avatar-wrap';
+  if (row.photo){
+    const img = document.createElement('img');
+    img.src = `/headshots/${row.photo}`;
+    img.alt = row.name;
+    img.className = 'avatar';
+    img.onerror = () => { wrap.textContent = initials(row.name); wrap.classList.add('initials'); };
+    wrap.appendChild(img);
+  } else {
+    wrap.textContent = initials(row.name);
+    wrap.classList.add('initials');
+  }
+  return wrap;
+}
+function clearTbody(){ while (tableBody.firstChild) tableBody.removeChild(tableBody.firstChild); }
+function renderTable(rows){
+  clearTbody();
+  for (const r of rows){
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td'); tdName.className = 'col-name';
+    const av = avatarCell(r); const label = document.createElement('span'); label.className = 'name'; label.textContent = r.name;
+    tdName.appendChild(av); tdName.appendChild(label);
+    const tdCalls = document.createElement('td'); tdCalls.textContent = (r.calls||0).toLocaleString();
+    const tdTalk  = document.createElement('td'); tdTalk.textContent  = (r.talk||0).toLocaleString();
+    const tdSales = document.createElement('td'); tdSales.textContent = (r.sales||0).toLocaleString();
+    const tdAV    = document.createElement('td'); tdAV.textContent    = fmtMoney(r.submittedAV||0);
+    tr.appendChild(tdName); tr.appendChild(tdCalls); tr.appendChild(tdTalk); tr.appendChild(tdSales); tr.appendChild(tdAV);
+    tableBody.appendChild(tr);
+  }
+}
+function setViewBadge(text){ if (viewTag){ viewTag.textContent = text; viewTag.className = 'view-tag'; } }
+
+/* ---------- VIEWS & ROTATION ---------- */
+const VIEWS = [
+  { key: 'daily_roster',         range: 'daily',  type: 'roster',        label: 'Today — Roster' },
+  { key: 'daily_leaders_av',     range: 'daily',  type: 'leaders_av',    label: 'Today — Leaders — Submitted AV' },
+  { key: 'daily_leaders_sales',  range: 'daily',  type: 'leaders_sales', label: 'Today — Leaders — Sales' },
+  { key: 'weekly_roster',        range: 'weekly', type: 'roster',        label: 'This Week (Fri→Thu) — Roster' },
+  { key: 'weekly_leaders_av',    range: 'weekly', type: 'leaders_av',    label: 'This Week (Fri→Thu) — Leaders — Submitted AV' },
+  { key: 'weekly_leaders_sales', range: 'weekly', type: 'leaders_sales', label: 'This Week (Fri→Thu) — Leaders — Sales' },
+];
+let viewIndex = 0;
+
+function render(){
+  const v = VIEWS[viewIndex];
+  const rows = mergeRows(v.range);
+
+  let out = rows;
+  if (v.type === 'leaders_av'){
+    out = rows.slice().sort((a,b)=> (b.submittedAV||0) - (a.submittedAV||0)).slice(0, MAX_LEADER_ROWS);
+  } else if (v.type === 'leaders_sales'){
+    out = rows.slice().sort((a,b)=> (b.sales||0) - (a.sales||0)).slice(0, MAX_LEADER_ROWS);
+  } else if (v.type === 'roster'){
+    out = rows.slice().sort((a,b)=> a.name.localeCompare(b.name));
+  }
+
+  setViewBadge(v.label);
+  renderTable(out);
+}
+function rotate(){ viewIndex = (viewIndex + 1) % VIEWS.length; render(); }
+
+/* ---------- LOOP ---------- */
 async function tick(){
-  try {
-    await fetchBoard();
-    render();
-    checkCelebrations();
-  } catch(e){
-    console.error(e);
-  }
+  await Promise.all([fetchRoster(), fetchAllStats()]);
+  setPrinciple();
+  render();
 }
 
-// ---------- boot ----------
-document.addEventListener('DOMContentLoaded', async () => {
-  await fetchRoster();
-  setRuleTicker();
+/* ---------- INIT ---------- */
+document.addEventListener('DOMContentLoaded', () => {
   setPrinciple();
-  await tick();
-  setInterval(tick, 20000);     // refresh every 20s
-  setInterval(setPrinciple, 60000); // refresh principle hourly-ish
+  tick();
+  setInterval(tick, 20_000);      // refresh data every 20s
+  setInterval(rotate, ROTATE_MS); // rotate views every 45s
 });
