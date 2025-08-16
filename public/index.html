@@ -7,18 +7,20 @@
   <link rel="stylesheet" href="/dashboard.css" />
 </head>
 <body>
-  <!-- Top scrolling rule-of-the-day ticker -->
+
+  <!-- Rule ticker (double height, top) -->
   <div id="rule-ticker" class="ticker">
+    <span class="ticker-label">RULE OF THE DAY —</span>
     <span id="rule-ticker-text"></span>
   </div>
 
   <!-- Banner -->
   <div id="banner">
-    <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
-    <div id="principle"></div>
+    <h1 class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</h1>
+    <div id="principle" class="principle"></div>
   </div>
 
-  <!-- Main table -->
+  <!-- Table view -->
   <div id="view">
     <table id="table">
       <thead>
@@ -32,6 +34,11 @@
       </thead>
       <tbody></tbody>
     </table>
+  </div>
+
+  <!-- Bottom sale banner (auto-appears on new sale) -->
+  <div id="sale-banner" class="sale-banner hidden">
+    <span id="sale-text"></span>
   </div>
 
   <script src="/dashboard.js"></script>
