@@ -1,139 +1,165 @@
-/* ========= RULES (your list) ========= */
+/***** RULES / PRINCIPLES *****/
 const PRINCIPLES = [
   "Do not be entitled. Earn everything. Choose hard work over handouts… always.",
   "To get, give.",
   "Bring The Few Energy. Exude grit, gratitude, and go in every moment of every day.",
   "Get comfortable being uncomfortable.",
-  "If you risk nothing, you risk everything.",
+  "If you risk nothing, you risk everything. Risk is scary, but regret is terrifying.",
   "Luck favors hard workers. You make your own luck.",
   "Your goal is growth to the grave.",
   "Plan your day. If you have no plan, expect no progress.",
   "Choose effort over your excuses and emotions.",
   "Restore the dignity of hard work.",
-  "(Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
+  "Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
 ];
 
-/* ========= helpers ========= */
-const $ = s => document.querySelector(s);
-const fmt = n => (n||0).toLocaleString();
-const fmtMoney = n => `$${Math.round(n||0).toLocaleString()}`;
-
-/* “Rule of the day” is locked to calendar day */
-function ruleIndexForToday(){
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(),0,0));
-  const day = Math.floor((now - start)/86400000);
-  return day % PRINCIPLES.length;
-}
-function setPrinciple(){ $('#principle').textContent = PRINCIPLES[ruleIndexForToday()]; }
-function setRuleTicker(){ $('#rule-ticker-text').textContent = `RULE OF THE DAY — ${PRINCIPLES[ruleIndexForToday()]} — `; }
-
-/* ========= data + render ========= */
+/***** STATE *****/
+let viewMode = 0;                 // rotate table views in the future if needed
 let board = { agents: [], rank: {} };
-let prevSales = new Map();    // track prior sales count per agent for the toast
+let lastSalesCount = 0;
 
-/* If the API returns “Unknown”, show your name */
-function normalizeName(name){
-  if (!name) return "Robert Adams";
-  const n = String(name).trim();
-  if (n.toLowerCase() === "unknown") return "Robert Adams";
+/***** UTIL *****/
+const $ = sel => document.querySelector(sel);
+const fmt = n => (n||0).toLocaleString();
+const fmtMoney = n => '$' + (Math.round(n||0)).toLocaleString();
+const slug = s => String(s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+
+function normalizeName(n){
+  if (!n || n === 'Unknown') return 'Robert Adams';
   return n;
 }
 
-/* Headshot path: /headshots/<slug>.jpg ; fall back to an inline placeholder */
-function slugify(n){ return n.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,''); }
-function avatarImg(name){
-  const src = `/headshots/${slugify(name)}.jpg`;
-  // data URI gray circle fallback (so no broken image icon)
-  const fallback = 'data:image/svg+xml;utf8,' + encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200">
-       <rect width="100%" height="100%" fill="#333"/>
-       <text x="50%" y="52%" text-anchor="middle" font-family="Arial" font-size="64" fill="#999">•</text>
-     </svg>`
-  );
-  return `<img class="avatar" src="${src}" onerror="this.onerror=null;this.src='${fallback}'" alt="">`;
+function initialsOf(name){
+  const parts = String(name||'').trim().split(/\s+/).slice(0,2);
+  return parts.map(p => p[0]?.toUpperCase() || '').join('');
 }
 
+/***** RULE OF THE DAY *****/
+function setPrinciple(){
+  const idx = Math.floor((Date.now() / (24*60*60*1000))) % PRINCIPLES.length;
+  $('#principle').textContent = PRINCIPLES[idx];
+}
+function setRuleTicker(){
+  const idx = Math.floor((Date.now() / (24*60*60*1000))) % PRINCIPLES.length;
+  $('#rule-ticker-text').textContent = PRINCIPLES[idx];
+}
+
+/***** DATA FETCH *****/
 async function fetchBoard(){
-  const res = await fetch('/api/board', { credentials:'include' });
-  if (!res.ok) throw new Error(`board ${res.status}`);
+  const res = await fetch('/api/board', { credentials: 'include' });
+  if(!res.ok) throw new Error('board ' + res.status);
   board = await res.json();
 }
 
+async function fetchSales(){
+  const res = await fetch('/api/sales', { credentials: 'include' });
+  if(!res.ok) return { list: [] };
+  return await res.json();
+}
+
+/***** RENDER *****/
 function render(){
   const tbody = $('#table tbody');
   tbody.innerHTML = '';
 
-  const rows = Array.isArray(board.agents) ? board.agents : [];
-  rows.sort((a,b) => (b.sales||0)-(a.sales||0) || (b.av||0)-(a.av||0) || (b.calls||0)-(a.calls||0));
+  const agents = Array.isArray(board.agents) ? board.agents : [];
 
-  for (const a of rows){
-    const name = normalizeName(a.display || a.name || '');
+  agents.forEach(a => {
+    const name = normalizeName(a.display || a.name || 'Unknown');
     const calls = a.calls ?? 0;
-    const talkMin = Math.round(a.talk || 0);
+    const talk = a.talk ?? a.talkMin ?? 0;
     const sales = a.sales ?? 0;
-    const av12 = a.av ?? 0;
+    const av = a.av ?? 0;
 
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="agent">${avatarImg(name)} <span>${name}</span></td>
-      <td class="num">${fmt(calls)}</td>
-      <td class="num">${fmt(talkMin)}</td>
-      <td class="num">${fmt(sales)}</td>
-      <td class="num money">${fmtMoney(av12)}</td>
-    `;
+
+    // Agent cell (avatar + name)
+    const tdAgent = document.createElement('td');
+    const wrap = document.createElement('div'); wrap.className = 'agent';
+
+    // avatar (try headshot, else initials)
+    const img = document.createElement('img');
+    img.className = 'avatar';
+    img.alt = name;
+    img.src = `/headshots/${slug(name)}.jpg`;
+    img.onerror = () => {
+      const d = document.createElement('div');
+      d.className = 'initials';
+      d.textContent = initialsOf(name);
+      img.replaceWith(d);
+    };
+
+    const spanName = document.createElement('span');
+    spanName.textContent = name;
+
+    wrap.appendChild(img);
+    wrap.appendChild(spanName);
+    tdAgent.appendChild(wrap);
+
+    const tdCalls = document.createElement('td'); tdCalls.textContent = fmt(calls);
+    const tdTalk  = document.createElement('td'); tdTalk.textContent  = fmt(Math.round(talk));
+    const tdSales = document.createElement('td'); tdSales.textContent = fmt(sales);
+    const tdAV    = document.createElement('td'); tdAV.textContent    = fmtMoney(av);
+
+    tr.append(tdAgent, tdCalls, tdTalk, tdSales, tdAV);
     tbody.appendChild(tr);
-  }
+  });
 }
 
-/* ========= SALE toast ========= */
-let toastTimer = null;
-function ensureToast(){
-  if (!$('#sale-toast')){
-    document.body.insertAdjacentHTML('beforeend', `<div id="sale-toast"></div>`);
-  }
-  return $('#sale-toast');
-}
-function showSaleToast(msg){
-  const el = ensureToast();
-  el.textContent = msg;
-  el.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(()=> el.classList.remove('show'), 6000);
-}
-
-/* Compare new board to previous map; show toast for increases */
-function checkForNewSales(){
-  const list = Array.isArray(board.agents) ? board.agents : [];
-  for (const a of list){
-    const name = normalizeName(a.display || a.name || '');
-    const cur = a.sales || 0;
-    const prev = prevSales.get(name) || 0;
-    if (cur > prev){
-      const inc = cur - prev;
-      showSaleToast(`SALE! ${name} just logged ${inc} sale${inc>1?'s':''}.`);
-    }
-    prevSales.set(name, cur);
-  }
-}
-
-/* ========= loop ========= */
+/***** ROTATION / POLLING *****/
 async function tick(){
   try{
     await fetchBoard();
     render();
-    checkForNewSales();
   }catch(e){
     console.error(e);
   }
 }
+function rotateView(){
+  viewMode = (viewMode + 1) % 4;
+  render();
+}
 
+/***** SALE BANNER *****/
+function showSaleBanner(text){
+  const el = $('#sale-banner');
+  $('#sale-text').textContent = text;
+  el.classList.remove('hidden');
+  // kick in transition
+  requestAnimationFrame(() => el.classList.add('show'));
+  // hide after 12s
+  setTimeout(() => el.classList.remove('show'), 12000);
+}
+async function pollSales(){
+  try{
+    const data = await fetchSales();           // expected shape { list: [...] }
+    const list = Array.isArray(data.list) ? data.list : [];
+    if(list.length > lastSalesCount){
+      const sale = list[0] || {};
+      const who = normalizeName(sale.agentName || sale.agent || '');
+      const amt = sale.amount != null ? fmtMoney(sale.amount) : '';
+      const what = sale.soldProductName || sale.product || 'A sale';
+      const msg = `${what} ${amt ? '— ' + amt : ''}${who ? ' by ' + who : ''}!`;
+      showSaleBanner(msg);
+      lastSalesCount = list.length;
+    }
+  }catch(e){
+    // silent – keep dashboard calm
+  }
+}
+
+/***** STARTUP *****/
 document.addEventListener('DOMContentLoaded', () => {
   setPrinciple();
   setRuleTicker();
-  tick();
 
-  setInterval(tick, 20_000);              // refresh data
-  setInterval(setPrinciple, 60_000);      // refresh banner rule
-  setInterval(setRuleTicker, 60*60*1000); // refresh ticker hourly
+  tick();                         // initial load
+  setInterval(tick, 20_000);      // refresh every 20s
+
+  setInterval(rotateView, 30_000);   // reserved
+  setInterval(setPrinciple, 60_000); // update subline hourly
+  setInterval(setRuleTicker, 60_000);// keep ticker fresh
+
+  pollSales();                    // first sales check
+  setInterval(pollSales, 30_000); // check every 30s
 });
