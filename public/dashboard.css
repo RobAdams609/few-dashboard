@@ -53,3 +53,4 @@ td.num{ text-align:right; font-variant-numeric:tabular-nums; }
 @media (min-width:1600px){
   thead th, tbody td{ font-size:18px; }
 }
+
