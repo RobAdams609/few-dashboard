@@ -1,102 +1,102 @@
+/* ========= RULES (from your images) ========= */
 const PRINCIPLES = [
- "1) Own the first 10 minutes.",
- "2) Speed to lead beats price.",
- "3) Ask, then shut up and listen.",
- "4) The follow-up is the sale.",
- "5) Tonality > words.",
- "6) Control the frame, softly.",
- "7) Prequalify without friction.",
- "8) Solve; don’t sell.",
- "9) Document everything, instantly.",
- "10) Prospect daily, even on wins.",
- "Bonus) When in doubt, dial."
+  "Do not be entitled. Earn everything. Choose hard work over handouts… always.",
+  "To get, give.",
+  "Bring The Few Energy. Exude grit, gratitude, and go in every moment of every day.",
+  "Get comfortable being uncomfortable.",
+  "If you risk nothing, you risk everything.",
+  "Luck favors hard workers. You make your own luck.",
+  "Your goal is growth to the grave.",
+  "Plan your day. If you have no plan, expect no progress.",
+  "Choose effort over your excuses and emotions.",
+  "Restore the dignity of hard work.",
+  "(Bonus) You are who you hunt with. Everybody wants to eat, but FEW will hunt."
 ];
 
-let viewMode = 0; // 0 Calls, 1 Talk, 2 Sales, 3 AV
-let board = { agents: [], rank: {} };
+/* ========= helpers ========= */
+const $ = (sel) => document.querySelector(sel);
+const pad2 = (n) => String(n).padStart(2,'0');
+const fmt = (n) => (n||0).toLocaleString();
+const fmtMoney = (n)=> `$${Math.round(n||0).toLocaleString()}`;
 
-function fmt(n){ return (n||0).toLocaleString(); }
-function fmtMoney(n){ return '$' + (Math.round(n||0)).toLocaleString(); }
-function setPrinciple(){
-  const idx = Math.floor(Date.now() / (3*60*60*1000)) % PRINCIPLES.length;
-  document.getElementById('principle').textContent = PRINCIPLES[idx];
+/* pick a stable rule for the day (ET) */
+function ruleIndexForToday(){
+  const now = new Date();
+  // convert to ET without timezone libs: assume server/browser local offset okay for daily roll
+  const start = new Date(Date.UTC(now.getUTCFullYear(),0,0));
+  const dayOfYear = Math.floor((now - start)/86400000);
+  return dayOfYear % PRINCIPLES.length;
 }
 
+/* banner rule (right side) */
+function setPrinciple(){
+  const idx = ruleIndexForToday();
+  $('#principle').textContent = PRINCIPLES[idx];
+}
+
+/* scrolling ticker text (top) */
+function setRuleTicker(){
+  const idx = ruleIndexForToday();
+  $('#rule-ticker-text').textContent = `RULE OF THE DAY — ${PRINCIPLES[idx]} — `;
+}
+
+/* ========= data + render ========= */
+let board = { agents: [], rank: {} };
+
 async function fetchBoard(){
-  const res = await fetch('/api/board', { credentials: 'include' });
-  if (!res.ok) throw new Error('board ' + res.status);
+  const res = await fetch('/api/board', { credentials:'include' });
+  if (!res.ok) throw new Error(`board ${res.status}`);
   board = await res.json();
 }
 
-function topBottomClasses(list, key){
-  const sorted = [...list].sort((a,b)=> (b[key]||0)-(a[key]||0));
-  const top = new Set(sorted.slice(0,3).map(a=>a.display));
-  const bottom = new Set(sorted.slice(-1).map(a=>a.display));
-  return { top, bottom };
-}
-
 function render(){
-  const thead = document.querySelector('#table thead');
-  const tbody = document.querySelector('#table tbody');
-  thead.innerHTML = '';
+  const tbody = $('#table tbody');
   tbody.innerHTML = '';
 
-  const cols = [
-    { key:'agent', label:'Agent', render:(a)=>`<div class="agent"><img src="${a.headshot}" alt=""><span>${a.display}</span></div>` },
-    { key:'calls', label:'Calls', render:(a)=>fmt(a.calls) },
-    { key:'talkTimeMins', label:'Talk Time (min)', render:(a)=>fmt(a.talkTimeMins) },
-    { key:'salesCount', label:'Sales', render:(a)=>fmt(a.salesCount) },
-    { key:'av', label:'AV (12×)', render:(a)=>fmtMoney(a.av) }
-  ];
+  const rows = Array.isArray(board.agents) ? board.agents : [];
 
-  const modeSort = [
-    { key:'calls' }, { key:'talkTimeMins' }, { key:'salesCount' }, { key:'av' }
-  ][viewMode].key;
+  // Sort by Sales desc, then AV, then Calls (tweak as desired)
+  rows.sort((a,b) => (b.sales||0)-(a.sales||0) || (b.av||0)-(a.av||0) || (b.calls||0)-(a.calls||0));
 
-  const rows = [...board.agents].sort((a,b)=> (b[modeSort]||0)-(a[modeSort]||0));
-
-  const { top, bottom } = topBottomClasses(board.agents, modeSort);
-
-  // header
-  const trh = document.createElement('tr');
-  cols.forEach(c => {
-    const th = document.createElement('th'); th.textContent = c.label; trh.appendChild(th);
-  });
-  thead.appendChild(trh);
-
-  // body
-  rows.forEach(a => {
+  for (const a of rows){
     const tr = document.createElement('tr');
-    if (top.has(a.display)) tr.classList.add('rank-top');
-    if (bottom.has(a.display)) tr.classList.add('rank-bottom');
-    cols.forEach(c => {
-      const td = document.createElement('td');
-      td.innerHTML = c.render(a);
-      tr.appendChild(td);
-    });
+
+    const name = a.display || a.name || 'Unknown';
+    const calls = a.calls ?? 0;
+    const talkMin = Math.round((a.talk || 0)); // already minutes in backend
+    const sales = a.sales ?? 0;
+    const av12 = a.av ?? 0; // already 12× calc on backend
+
+    tr.innerHTML = `
+      <td>${name}</td>
+      <td class="num">${fmt(calls)}</td>
+      <td class="num">${fmt(talkMin)}</td>
+      <td class="num">${fmt(sales)}</td>
+      <td class="num money">${fmtMoney(av12)}</td>
+    `;
     tbody.appendChild(tr);
-  });
-
-  // ticker
-  const deals = [...board.agents]
-    .filter(a => (a.av||0) > 0)
-    .sort((a,b)=> (b.av||0)-(a.av||0))
-    .map(a => `${a.display} — ${fmtMoney(a.av)} AV`);
-  document.getElementById('tickerContent').textContent = '  ' + deals.join('   •   ') + '  ';
+  }
 }
 
+/* ========= loop + start ========= */
 async function tick(){
-  try { await fetchBoard(); render(); } catch(e){ console.error(e); }
+  try{
+    await fetchBoard();
+    render();
+  }catch(e){
+    // keep the page alive even if API hiccups
+    console.error(e);
+  }
 }
 
-function rotateView(){
-  viewMode = (viewMode + 1) % 4;
-  render();
-}
+document.addEventListener('DOMContentLoaded', () => {
+  // initial UI
+  setPrinciple();
+  setRuleTicker();
+  tick();
 
-// Start
-setPrinciple();
-tick();
-setInterval(tick, 20000);      // fetch every 20s
-setInterval(rotateView, 30000); // rotate view every 30s
-setInterval(setPrinciple, 60_000); // update principle hourly
+  // intervals
+  setInterval(tick, 20_000);            // fetch fresh data every 20s
+  setInterval(setPrinciple, 60_000);    // banner rule re-evaluated hourly-ish
+  setInterval(setRuleTicker, 60*60*1000); // ticker text refresh hourly
+});
