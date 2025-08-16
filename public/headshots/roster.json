@@ -1,69 +1,62 @@
-{
-  "agents": [
-    {
-      "name": "Robert Adams",
-      "email": "robert@rkainsuranceadvisors.com",
-      "photo": "robert-adams.jpg"
-    },
-    {
-      "name": "A C",
-      "email": "andresthehealthagent@gmail.com",
-      "photo": null
-    },
-    {
-      "name": "F N",
-      "email": "fabricio.a.navarrete@gmail.com",
-      "photo": "f-n.jpg"
-    },
-    {
-      "name": "Michelle Landis",
-      "email": "landisagency@gmail.com",
-      "photo": "michelle-landis.jpg"
-    },
-    {
-      "name": "A S",
-      "email": "ajanisenior.healthadvisor@gmail.com",
-      "photo": "a-s.jpg"
-    },
-    {
-      "name": "Philip Baxter",
-      "email": "phil@americanpathinsurance.com",
-      "photo": "baxter.jpg"
-    },
-    {
-      "name": "Joseph Lipari",
-      "email": "joseph@treasurecoastadvisors.com",
-      "photo": "joseph.jpg"
-    },
-    {
-      "name": "Anna Gleason",
-      "email": "anna.ushealthadvisors@gmail.com",
-      "photo": "anna.jpg"
-    },
-    {
-      "name": "Eli Thermilus",
-      "email": "eli.thermilushealthadvisor@gmail.com",
-      "photo": "eli.jpg"
-    },
-    {
-      "name": "Marie Saint Cyr",
-      "email": "maries.healthadvisor@gmail.com",
-      "photo": "marie.jpg"
-    },
-    {
-      "name": "Fraitzline Gustave",
-      "email": "fraitzlineg.healthadvisor@gmail.com",
-      "photo": "fraitzline.jpg"
-    },
-    {
-      "name": "Abigail Austin",
-      "email": "abigailaustin.healthadvisor@gmail.com",
-      "photo": null
-    },
-    {
-      "name": "Nathan Johnson",
-      "email": "nathanjohnson.healthadvisor@gmail.com",
-      "photo": null
-    }
-  ]
-}
+[
+  {
+    "name": "Robert Adams",
+    "email": "robert@rainsuranceadvisors.com",
+    "photo": "robert-adams.jpg"
+  },
+  {
+    "name": "A C",
+    "email": "andresthehealthagent@gmail.com",
+    "photo": null
+  },
+  {
+    "name": "F N",
+    "email": "fabricio.a.navarrete@gmail.com",
+    "photo": "f-n.jpg"
+  },
+  {
+    "name": "Michelle Landis",
+    "email": "landisagency@gmail.com",
+    "photo": "michelle-landis.jpg"
+  },
+  {
+    "name": "A S",
+    "email": "ajansenior.healthadvisor@gmail.com",
+    "photo": "a-s.jpg"
+  },
+  {
+    "name": "Philip Baxter",
+    "email": "phil@americanpathinsurance.com",
+    "photo": "baxter.jpg"
+  },
+  {
+    "name": "Joseph Lipari",
+    "email": "joseph@treasurecoastadvisors.com",
+    "photo": "joseph.jpg"
+  },
+  {
+    "name": "Anna Gleason",
+    "email": "anna.ushealthadvisors@gmail.com",
+    "photo": "anna.jpg"
+  },
+  {
+    "name": "Eli Thermilus",
+    "email": "eli.thermilushealthadvisor@gmail.com",
+    "photo": "eli.jpg"
+  },
+  {
+    "name": "Marie Saint Cyr",
+    "email": "maries.healthadvisor@gmail.com",
+    "photo": "marie.jpg"
+  },
+  {
+    "name": "Fraitzline Gustave",
+    "email": "fraitzlineg.healthadvisor@gmail.com",
+    "photo": "fraitzline.jpg"
+  },
+  {
+    "name": "Nathan Johnson",
+    "email": "nathanjohnson.healthadvisor@gmail.com",
+    "photo": null
+  }
+]
