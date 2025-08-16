@@ -1,22 +1,3 @@
-[functions]
-  node_bundler = "esbuild"
-  directory = "netlify/functions"
-  included_files = ["public/headshots/*"]
-
-# Allow preflight; real allow-list enforced in function CORS
-[[headers]]
-  for = "/api/*"
-  [headers.values]
-    Access-Control-Allow-Origin = "*"
-    Access-Control-Allow-Methods = "GET, OPTIONS"
-    Access-Control-Allow-Headers = "Content-Type, Authorization"
-    Vary = "Origin"
-
-# Route /api/* to functions
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
 [build]
   publish = "public"
   functions = "netlify/functions"
@@ -24,3 +5,18 @@
 [functions]
   node_bundler = "esbuild"
   external_node_modules = []
+
+# Route /api/* to serverless functions
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# CORS for functions (include POST for JSON)
+[headers]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type, Authorization"
+    Vary = "Origin"
