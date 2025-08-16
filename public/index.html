@@ -1,55 +1,33 @@
 <!doctype html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>The Few — Live Board</title>
-    <link rel="stylesheet" href="/dashboard.css" />
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>The Few — Live Board</title>
+  <link rel="stylesheet" href="/dashboard.css?v=3" />
+</head>
+<body>
 
-    <!-- headline pulse: slower + gold at the peak -->
-    <style>
-      .title { transition: color .2s ease; }
-      .pulse {
-        animation: pulseGold 5.5s ease-in-out infinite; /* slower */
-        will-change: transform, text-shadow, color;
-      }
-      @keyframes pulseGold {
-        0%   { color:#fff;      text-shadow:0 0 12px rgba(255,215,120,.25); transform:scale(1.00); }
-        50%  { color:#ffd36e;   text-shadow:0 0 32px rgba(255,210,100,.85); transform:scale(1.02); }
-        100% { color:#fff;      text-shadow:0 0 12px rgba(255,215,120,.25); transform:scale(1.00); }
-      }
-      .mode-label { text-align:center; margin:6px 0 12px; color:#ffd36e; font-weight:700; }
-      .avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; margin-right:10px; vertical-align:middle; }
-      .agent-cell { display:flex; align-items:center; gap:10px; }
-      .initials {
-        width:28px; height:28px; border-radius:50%;
-        background:#2a2f45; border:1px solid #4050a8; color:#dfe7ff;
-        display:inline-flex; align-items:center; justify-content:center;
-        font-size:.8rem; font-weight:700;
-      }
-    </style>
-  </head>
-  <body>
-    <!-- Rule of the day (daily) -->
-    <div id="rule-ticker" class="ticker"><span id="rule-ticker-text"></span></div>
+  <!-- Rule of the day (scrolling) -->
+  <div id="rule-ticker" class="ticker"><span id="rule-ticker-text"></span></div>
 
-    <!-- Big headline -->
-    <div id="banner">
-      <div class="title pulse">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
-      <div id="principle" class="subtitle"></div>
-    </div>
+  <!-- Big headline (gold pulse, slow) -->
+  <div id="banner">
+    <div class="title pulse-gold">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
+    <div id="principle" class="subtitle"></div>
+  </div>
 
-    <!-- Current view label (changes when rotating) -->
-    <div id="mode" class="mode-label">Today — Roster</div>
+  <!-- View label -->
+  <div id="view-title" class="view-title">Today — Roster</div>
 
-    <!-- Table -->
-    <div id="view">
-      <table id="table">
-        <thead id="thead"></thead>
-        <tbody id="tbody"></tbody>
-      </table>
-    </div>
+  <!-- Table -->
+  <div id="view">
+    <table id="table">
+      <thead id="thead"></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
 
-    <script src="/dashboard.js?v=rot_v2"></script>
-  </body>
+  <script src="/dashboard.js?v=3"></script>
+</body>
 </html>
