@@ -1,89 +1,107 @@
-// netlify/functions/calls_diag.js
+// netlify/functions/sales_diag.js
 const { rangeForDays } = require("./_util.js");
 
-// Accept whichever env names you already set
-const REC_KEY =
-  process.env.RINGY_API_KEY_RECORDINGS ||
-  process.env.RINGY_CALLS_API_KEY ||      // fallback if you reused this name
-  process.env.RINGY_API_KEY ||            // last-resort generic
+// Keys: accept several names (matches what you already set in Netlify)
+const SALES_KEY =
+  process.env.RINGY_API_KEY_SOLD ||
+  process.env.RINGY_SALES_API_KEY ||
+  process.env.RINGY_API_KEY ||
   "";
 
-const CALL_KEY =
-  process.env.RINGY_API_KEY_CALL_DETAIL ||
-  process.env.RINGY_API_KEY_CALLS ||
-  REC_KEY; // fallback to recordings key if same
+const LEADS_KEY =
+  process.env.RINGY_API_KEY_LEADS ||
+  process.env.RINGY_API_KEY ||
+  "";
 
-const REC_URL =
-  process.env.RINGY_RECORDINGS_URL ||
-  process.env.RINGY_RECORDINGS_ENDPOINT ||
-  "https://app.ringy.com/api/public/external/get-call-recordings";
+// Endpoints (yours are already set in Netlify > Environment Variables)
+const SALES_ENDPOINT =
+  process.env.RINGY_SALES_ENDPOINT ||
+  process.env.RINGY_SOLD_URL ||
+  "https://app.ringy.com/api/public/external/get-lead-sold-products";
 
-const CALL_URL =
-  process.env.RINGY_CALL_DETAIL_URL ||
-  process.env.RINGY_CALLS_ENDPOINT ||
-  "https://app.ringy.com/api/public/external/get-calls";
+const LEAD_ENDPOINT =
+  process.env.RINGY_LEAD_LOOKUP_URL ||
+  "https://app.ringy.com/api/public/external/get-lead";
+
+// modest concurrency to avoid hammering Ringy
+async function mapLimit(items, limit, worker) {
+  const ret = [];
+  let i = 0;
+  const running = new Set();
+  async function runOne(idx) {
+    const p = (async () => worker(items[idx], idx))()
+      .then((v) => (ret[idx] = v))
+      .finally(() => running.delete(p));
+    running.add(p);
+    if (running.size >= limit) await Promise.race(running);
+  }
+  while (i < items.length) await runOne(i++);
+  await Promise.all(running);
+  return ret;
+}
 
 exports.handler = async (event) => {
   try {
+    if (!SALES_KEY) throw new Error("Missing Ringy API key for sales");
+
     const params = event.queryStringParameters || {};
-    const days = Number(params.days || 7);
-    const limit = Math.min(Number(params.limit || 1000), 5000);
+    const days = Number(params.days || 30);
+    const limit = Math.min(Number(params.limit || 5000), 5000);
     const { startDate, endDate } = rangeForDays(days);
 
-    if (!REC_KEY) throw new Error("Missing Ringy recordings API key");
-    if (!CALL_KEY) throw new Error("Missing Ringy call-detail API key");
-
-    // 1) Fetch call recordings for time window
-    const recBody = { apiKey: REC_KEY, startDate, endDate, limit };
-    const recRes = await fetch(REC_URL, {
+    // 1) Pull sold products
+    const body = { apiKey: SALES_KEY, startDate, endDate, limit };
+    const res = await fetch(SALES_ENDPOINT, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(recBody),
+      body: JSON.stringify(body),
     });
-    if (!recRes.ok) {
-      const t = await recRes.text();
-      throw new Error(`Ringy recordings ${recRes.status}: ${t}`);
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new Error(`Ringy sales ${res.status}: ${txt}`);
     }
-    const recordings = await recRes.json(); // array
+    const data = await res.json(); // Ringy returns an array
+    const sales = Array.isArray(data) ? data : data?.data || [];
 
-    // Unique call IDs to look up
-    const callIds = Array.from(
-      new Set((recordings || []).map((r) => r.callId).filter(Boolean))
-    );
+    // 2) Try to enrich each sale with owner info by looking up the lead.
+    // NOTE: Ringy public get-lead often does NOT include owner fields.
+    // We still attempt it; if not present, we leave ownerEmail/ownerName blank.
+    const canLookupLead = !!LEADS_KEY && !!LEAD_ENDPOINT;
 
-    // 2) For each callId, fetch details (batches)
-    const details = [];
-    const BATCH = 50;
-    for (let i = 0; i < callIds.length; i += BATCH) {
-      const slice = callIds.slice(i, i + BATCH);
-      const batch = await Promise.all(
-        slice.map(async (callId) => {
-          const dRes = await fetch(CALL_URL, {
+    const enriched = await mapLimit(sales, 6, async (r) => {
+      let ownerEmail = "";
+      let ownerName = "";
+
+      if (canLookupLead && r?.leadId) {
+        try {
+          const lr = await fetch(LEAD_ENDPOINT, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ apiKey: CALL_KEY, callId }),
+            body: JSON.stringify({ apiKey: LEADS_KEY, leadId: r.leadId }),
           });
-          if (!dRes.ok) return null;
-          try {
-            return await dRes.json();
-          } catch {
-            return null;
+          if (lr.ok) {
+            const lead = await lr.json();
+            // If Ringy ever exposes owner fields, prefer them here:
+            ownerEmail =
+              lead.ownerEmail ||
+              lead.agentEmail ||
+              lead.assignedToEmail ||
+              "";
+            ownerName =
+              lead.ownerName || lead.agentName || lead.assignedTo || "";
+          } else {
+            // swallow; we still return the sale record
+            await lr.text();
           }
-        })
-      );
-      details.push(...batch.filter(Boolean));
-    }
-    const byId = new Map(details.map((d) => [d.id, d]));
+        } catch (_) {
+          /* ignore */
+        }
+      }
 
-    // 3) Merge minimal fields we need client-side
-    const merged = (recordings || []).map((r) => {
-      const d = byId.get(r.callId) || {};
       return {
-        callId: r.callId,
-        dateRecorded: r.dateRecorded, // "YYYY-MM-DD HH:mm:ss" UTC
-        duration: d.duration || d.duration_seconds || 0, // seconds
-        fromPhoneNumber: d.fromPhoneNumber || "",
-        toPhoneNumber: d.toPhoneNumber || "",
+        ...r,
+        ownerEmail,
+        ownerName,
       };
     });
 
@@ -95,11 +113,11 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify({
         source: "ringy",
-        endpoint: { REC_URL, CALL_URL },
+        endpoint: SALES_ENDPOINT,
         startDate,
         endDate,
-        count: merged.length,
-        records: merged,
+        count: enriched.length,
+        records: enriched,
       }),
     };
   } catch (err) {
