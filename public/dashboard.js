@@ -1,10 +1,10 @@
-/* FEW Dashboard — v6 (Team totals + rotations + ET filtering) */
+/* FEW Dashboard — v7 (30s rotation, team totals, ET filters, sale pop) */
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const log = (...a)=>{ if(DEBUG) console.log(...a); };
 
-const DATA_REFRESH_MS = 30_000;     // refetch cadence
-const ROTATION_MS     = 45_000;     // change to 30_000 if you want faster rotations
-const VIEWS = ['roster','av','sales'];
+const DATA_REFRESH_MS = 30_000;   // refetch cadence
+const ROTATION_MS     = 30_000;   // rotate views every 30s
+const VIEWS = ['roster','av','sales']; // cycle order
 let viewIdx = 0;
 
 const ET_TZ = "America/New_York";
@@ -38,8 +38,8 @@ function setRuleText(rulesObj){
   if(!list.length) return;
   const idx = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||'').replace(/Bonus\)\s*/,'Bonus: ');
-  document.getElementById('ticker').textContent   = `RULE OF THE DAY — ${text}`;
-  document.getElementById('principle').textContent = text;
+  const tik = document.getElementById('ticker'); if(tik) tik.textContent = `RULE OF THE DAY — ${text}`;
+  const sub = document.getElementById('principle'); if(sub) sub.textContent = text;
 }
 
 // ---------- STATE ----------
@@ -55,7 +55,7 @@ const agentKey = a => (a.email || a.name || '').trim().toLowerCase();
 
 // ---------- RENDER ----------
 function setLabel(txt){ const el = document.getElementById('viewLabel'); if(el) el.textContent = txt; }
-function setHead(cols){ document.getElementById('thead').innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>`; }
+function setHead(cols){ const thead=document.getElementById('thead'); thead.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>`; }
 function setBodyRows(rows){
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = rows.length ? rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i>0?'num':''}">${c}</td>`).join('')}</tr>`).join('')
@@ -127,10 +127,10 @@ async function loadStatic(){
   for (const a of STATE.roster){
     const key = agentKey(a);
     for (const raw of (a.phones||[])){
-      const d = cleanDigits(raw);
-      if (!d) continue;
-      STATE.phoneToKey.set(d, key);
-      if (d.length===10) STATE.phoneToKey.set('1'+d, key); // tolerate leading 1
+      const d10 = cleanDigits(raw);
+      if (!d10) continue;
+      STATE.phoneToKey.set(d10, key);                 // 10-digit match
+      if (d10.length===10) STATE.phoneToKey.set('1'+d10, key); // also accept 11-digit with leading 1
     }
   }
   setRuleText(rules);
@@ -196,7 +196,7 @@ async function refreshSales(){
       teamAV      += Number(r.amount||0) * 12;
     }
 
-    // PER-AGENT (best-effort via ownerEmail/ownerName)
+    // PER-AGENT (ownerEmail/ownerName if available)
     const per = new Map();
     function bump(key, amt){
       const obj = per.get(key) || {salesAmt:0,av12x:0};
@@ -227,7 +227,7 @@ async function refreshSales(){
     STATE.team.av    = teamAV;
     STATE.team.unassigned = Math.max(0, teamSalesAmt - attributed);
 
-    // Sale pop (last record)
+    // Sale pop (last record new)
     const last = rows[rows.length-1];
     if (last){
       const h = `${last.leadId}|${last.soldProductId}|${last.dateSold}`;
