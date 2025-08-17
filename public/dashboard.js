@@ -1,11 +1,10 @@
-/* FEW Dashboard — v5 (rotations + ET week + sale pop + phone-based calls) */
+/* FEW Dashboard — v6 (Team totals + rotations + ET filtering) */
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const log = (...a)=>{ if(DEBUG) console.log(...a); };
 
-const DATA_REFRESH_MS = 30_000;   // how often to refetch
-const ROTATION_MS     = 45_000;   // change to 30_000 if you want 30s rotations
-
-const VIEWS = ['roster','av','sales']; // rotation order
+const DATA_REFRESH_MS = 30_000;     // refetch cadence
+const ROTATION_MS     = 45_000;     // change to 30_000 if you want faster rotations
+const VIEWS = ['roster','av','sales'];
 let viewIdx = 0;
 
 const ET_TZ = "America/New_York";
@@ -15,29 +14,32 @@ function bust(url){ return url + (url.includes('?')?'&':'?') + 't=' + Date.now()
 async function getJSON(url){ const r=await fetch(bust(url),{cache:'no-store'}); if(!r.ok) throw new Error(`${url} ${r.status}`); return r.json(); }
 function toET(d){ return new Date(new Date(d).toLocaleString('en-US',{timeZone:ET_TZ})); }
 function initials(n=''){ return n.trim().split(/\s+/).map(s=>s[0]||'').join('').slice(0,2).toUpperCase(); }
-function cleanDigits(s){ return String(s||'').replace(/\D/g,'').replace(/^1/,''); }
+function cleanDigits(s){ return String(s||'').replace(/\D/g,''); }
 function readCallMin(r){ const sec = r.duration ?? r.callDuration ?? 0; return sec/60; }
 
+function todayETRange(){
+  const now = toET(new Date());
+  const start = new Date(now); start.setHours(0,0,0,0);
+  const end = new Date(start); end.setDate(end.getDate()+1);
+  return [start,end];
+}
 function currentSalesWeekRangeET(){
   const now = toET(new Date());
   const day = now.getDay(); // 0..6
   const daysSinceFri = (day + 2) % 7; // Fri=0
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate()-daysSinceFri);
   const end = new Date(start); end.setDate(end.getDate()+7);
-  return [start,end]; // [Fri 00:00 ET, next Fri 00:00 ET)
+  return [start,end];
 }
 
 // ---------- RULE/TICKER ----------
 function setRuleText(rulesObj){
-  const list = Array.isArray(rulesObj) ? rulesObj :
-               Array.isArray(rulesObj?.rules) ? rulesObj.rules : [];
+  const list = Array.isArray(rulesObj) ? rulesObj : (Array.isArray(rulesObj?.rules)?rulesObj.rules:[]);
   if(!list.length) return;
   const idx = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||'').replace(/Bonus\)\s*/,'Bonus: ');
-  const tik = document.getElementById('ticker');
-  const sub = document.getElementById('principle');
-  if (tik) tik.textContent = `RULE OF THE DAY — ${text}`;
-  if (sub) sub.textContent = text;
+  document.getElementById('ticker').textContent   = `RULE OF THE DAY — ${text}`;
+  document.getElementById('principle').textContent = text;
 }
 
 // ---------- STATE ----------
@@ -46,30 +48,32 @@ const STATE = {
   phoneToKey: new Map(),      // phone -> agentKey
   callsByKey: new Map(),      // key -> {calls,talkMin}
   salesByKey: new Map(),      // key -> {salesAmt,av12x}
+  team: { calls:0, talk:0, sales:0, av:0, unassigned:0 },
   seenSaleHashes: new Set()
 };
+const agentKey = a => (a.email || a.name || '').trim().toLowerCase();
 
-function agentKey(a){ return (a.email || a.name || '').trim().toLowerCase(); }
-
-// ---------- RENDERERS ----------
+// ---------- RENDER ----------
 function setLabel(txt){ const el = document.getElementById('viewLabel'); if(el) el.textContent = txt; }
-function setHead(cols){
-  const thead = document.getElementById('thead');
-  thead.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>`;
-}
+function setHead(cols){ document.getElementById('thead').innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>`; }
 function setBodyRows(rows){
   const tbody = document.getElementById('tbody');
-  if(!rows.length){ tbody.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`; return; }
-  tbody.innerHTML = rows.map(r=>`<tr>${r.map((cell,i)=>`<td class="${i>0?'num':''}">${cell}</td>`).join('')}</tr>`).join('');
+  tbody.innerHTML = rows.length ? rows.map(r=>`<tr>${r.map((c,i)=>`<td class="${i>0?'num':''}">${c}</td>`).join('')}</tr>`).join('')
+                                : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
-
 function avatarCell(a){
   const src = a.photo ? `/headshots/${a.photo}` : '';
   const img = src ? `<img class="avatar" src="${src}" onerror="this.remove();this.insertAdjacentHTML('beforebegin','<div class=&quot;avatar-fallback&quot;>${initials(a.name)}</div>')">`
                   : `<div class="avatar-fallback">${initials(a.name)}</div>`;
   return `<div class="agent">${img}<span>${a.name}</span></div>`;
 }
-
+function renderSummary(){
+  document.getElementById('sumCalls').textContent      = STATE.team.calls.toLocaleString('en-US');
+  document.getElementById('sumTalk').textContent       = Math.round(STATE.team.talk).toLocaleString('en-US');
+  document.getElementById('sumSales').textContent      = fmtMoney(STATE.team.sales);
+  document.getElementById('sumAV').textContent         = fmtMoney(STATE.team.av);
+  document.getElementById('sumUnassigned').textContent = fmtMoney(STATE.team.unassigned);
+}
 function renderRoster(){
   setLabel('Today — Roster');
   setHead(['Agent','Calls','Talk Time (min)','Sales','Submitted AV (12×)']);
@@ -81,25 +85,22 @@ function renderRoster(){
   });
   setBodyRows(rows);
 }
-
-function renderLeaderboard(metric){ // 'av' or 'sales'
+function renderLeaderboard(metric){
   const isAV = metric === 'av';
   const label = isAV ? 'This Week — Leaderboard (Submitted AV)' : 'This Week — Leaderboard (Sales)';
   setLabel(label);
   setHead(['Agent', isAV ? 'Submitted AV (12×)' : 'Sales']);
-  // prepare rows with value
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
     const s = STATE.salesByKey.get(k) || {salesAmt:0,av12x:0};
     const val = isAV ? s.av12x : s.salesAmt;
     return { a, val };
-  })
-  .sort((x,y)=> (y.val||0) - (x.val||0))
-  .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
+  }).sort((x,y)=> (y.val||0) - (x.val||0))
+    .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
   setBodyRows(rows);
 }
-
 function renderCurrent(){
+  renderSummary();
   const v = VIEWS[viewIdx];
   if (v === 'roster') renderRoster();
   else if (v === 'av') renderLeaderboard('av');
@@ -109,7 +110,7 @@ function renderCurrent(){
 // ---------- SALE POP ----------
 function showSalePop({ name, product, amount }){
   const el = document.getElementById('salePop'); if(!el) return;
-  el.textContent = `🔥 ${name} sold ${product} — ${fmtMoney(amount)}`;
+  el.textContent = `🔥 ${name || 'Team'} sold ${product || 'Product'} — ${fmtMoney(amount)}`;
   el.classList.add('show');
   setTimeout(()=>el.classList.remove('show'), 7000);
 }
@@ -122,7 +123,6 @@ async function loadStatic(){
   ]);
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw)?rosterRaw:[]);
   STATE.roster = list.map(a=>({ name:a.name, email:a.email||'', photo:a.photo||'', phones:Array.isArray(a.phones)?a.phones:[] }));
-  // build phone index
   STATE.phoneToKey = new Map();
   for (const a of STATE.roster){
     const key = agentKey(a);
@@ -130,7 +130,7 @@ async function loadStatic(){
       const d = cleanDigits(raw);
       if (!d) continue;
       STATE.phoneToKey.set(d, key);
-      if (d.length===10) STATE.phoneToKey.set('1'+d, key); // tolerate leading 1 from APIs
+      if (d.length===10) STATE.phoneToKey.set('1'+d, key); // tolerate leading 1
     }
   }
   setRuleText(rules);
@@ -142,20 +142,35 @@ async function refreshCalls(){
     const rows = (payload.records || payload.data || []).filter(Boolean);
     log('calls count', rows.length);
 
-    const map = new Map(); // key -> {calls,talkMin}
+    const [start,end] = todayETRange();
+
+    // TEAM TOTALS (no attribution needed)
+    let teamCalls = 0, teamTalk = 0;
+    for (const rec of rows){
+      const when = toET((rec.callStartDate || rec.dateRecorded || '').replace(' ','T')+'Z');
+      if (!(when >= start && when < end)) continue;
+      teamCalls += 1;
+      teamTalk  += readCallMin(rec);
+    }
+    STATE.team.calls = teamCalls;
+    STATE.team.talk  = teamTalk;
+
+    // PER-AGENT (best-effort attribution)
+    const map = new Map();
     function bump(key, rec){
       const obj = map.get(key) || {calls:0,talkMin:0};
       obj.calls += 1;
       obj.talkMin += readCallMin(rec);
       map.set(key,obj);
     }
-
     for (const rec of rows){
+      const when = toET((rec.callStartDate || rec.dateRecorded || '').replace(' ','T')+'Z');
+      if (!(when >= start && when < end)) continue;
       const to = cleanDigits(rec.toPhoneNumber);
       const from = cleanDigits(rec.fromPhoneNumber);
+      const candidates = [to, from, to.replace(/^1/,''), from.replace(/^1/,'')];
       const seen = new Set();
-      for (const num of [to, from]){
-        if (!num) continue;
+      for (const num of candidates){
         const key = STATE.phoneToKey.get(num);
         if (key && !seen.has(key)){ bump(key, rec); seen.add(key); }
       }
@@ -171,51 +186,65 @@ async function refreshSales(){
     log('sales count', rows.length);
 
     const [start,end] = currentSalesWeekRangeET();
-    const map = new Map(); // key -> {salesAmt,av12x}
-    function bump(key, amount){
-      const obj = map.get(key) || {salesAmt:0,av12x:0};
-      obj.salesAmt += Number(amount||0);
-      obj.av12x    += Number(amount||0) * 12;
-      map.set(key,obj);
-    }
 
+    // TEAM TOTALS
+    let teamSalesAmt = 0, teamAV = 0;
     for (const r of rows){
-      // filter to Fri→Thu (ET)
-      const soldAt = toET(r.dateSold?.replace(' ','T') + 'Z');
+      const soldAt = toET((r.dateSold||'').replace(' ','T')+'Z');
       if (!(soldAt >= start && soldAt < end)) continue;
-
-      // prefer email; fallback to name; fallback to Unknown bucket
-      const key = (r.ownerEmail || r.ownerName || 'unknown').trim().toLowerCase();
-      bump(key, r.amount);
+      teamSalesAmt += Number(r.amount||0);
+      teamAV      += Number(r.amount||0) * 12;
     }
 
-    // project onto roster keys so everyone shows
+    // PER-AGENT (best-effort via ownerEmail/ownerName)
+    const per = new Map();
+    function bump(key, amt){
+      const obj = per.get(key) || {salesAmt:0,av12x:0};
+      obj.salesAmt += amt;
+      obj.av12x    += amt*12;
+      per.set(key,obj);
+    }
+    for (const r of rows){
+      const soldAt = toET((r.dateSold||'').replace(' ','T')+'Z');
+      if (!(soldAt >= start && soldAt < end)) continue;
+      const key = (r.ownerEmail || r.ownerName || '').trim().toLowerCase();
+      if (key) bump(key, Number(r.amount||0));
+    }
+
+    // Project onto roster keys
     const out = new Map();
+    let attributed = 0;
     for (const a of STATE.roster){
-      const k1 = agentKey(a);
-      const v = map.get(k1) || map.get((a.name||'').trim().toLowerCase()) || {salesAmt:0,av12x:0};
-      out.set(k1, v);
+      const k = agentKey(a);
+      const v = per.get(k) || per.get((a.name||'').trim().toLowerCase()) || {salesAmt:0,av12x:0};
+      attributed += v.salesAmt;
+      out.set(k, v);
     }
     STATE.salesByKey = out;
 
-    // sale pop for newest unseen sale
+    // Summary
+    STATE.team.sales = teamSalesAmt;
+    STATE.team.av    = teamAV;
+    STATE.team.unassigned = Math.max(0, teamSalesAmt - attributed);
+
+    // Sale pop (last record)
     const last = rows[rows.length-1];
     if (last){
       const h = `${last.leadId}|${last.soldProductId}|${last.dateSold}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        showSalePop({ name: last.ownerName || last.ownerEmail || 'Unknown', product: last.soldProductName || 'Product', amount: last.amount || 0 });
+        showSalePop({ name: last.ownerName || last.ownerEmail || 'Team', product: last.soldProductName || 'Product', amount: last.amount || 0 });
       }
     }
   }catch(e){ log('sales error', e.message||e); }
 }
 
-// ---------- BOOT & ROTATION ----------
+// ---------- BOOT ----------
 async function boot(){
   await loadStatic();
-  renderCurrent();        // render immediately (roster visible)
+  renderCurrent();
   await Promise.all([refreshCalls(), refreshSales()]);
-  renderCurrent();        // render with data
+  renderCurrent();
   setInterval(async ()=>{ await refreshCalls(); await refreshSales(); renderCurrent(); }, DATA_REFRESH_MS);
   setInterval(()=>{ viewIdx = (viewIdx+1)%VIEWS.length; renderCurrent(); }, ROTATION_MS);
 }
