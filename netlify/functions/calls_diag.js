@@ -1,20 +1,23 @@
 // netlify/functions/calls_diag.js
 const { rangeForDays } = require("./_util.js");
 
-// Pick up your various env names
+// Accept whichever env names you already set
 const REC_KEY =
   process.env.RINGY_API_KEY_RECORDINGS ||
-  process.env.RINGY_CALLS_API_KEY ||
-  process.env.RINGY_API_KEY ||
+  process.env.RINGY_CALLS_API_KEY ||      // fallback if you reused this name
+  process.env.RINGY_API_KEY ||            // last-resort generic
   "";
+
 const CALL_KEY =
   process.env.RINGY_API_KEY_CALL_DETAIL ||
   process.env.RINGY_API_KEY_CALLS ||
-  REC_KEY;
+  REC_KEY; // fallback to recordings key if same
+
 const REC_URL =
   process.env.RINGY_RECORDINGS_URL ||
   process.env.RINGY_RECORDINGS_ENDPOINT ||
   "https://app.ringy.com/api/public/external/get-call-recordings";
+
 const CALL_URL =
   process.env.RINGY_CALL_DETAIL_URL ||
   process.env.RINGY_CALLS_ENDPOINT ||
@@ -30,7 +33,7 @@ exports.handler = async (event) => {
     if (!REC_KEY) throw new Error("Missing Ringy recordings API key");
     if (!CALL_KEY) throw new Error("Missing Ringy call-detail API key");
 
-    // 1) get-call-recordings (time window)
+    // 1) Fetch call recordings for time window
     const recBody = { apiKey: REC_KEY, startDate, endDate, limit };
     const recRes = await fetch(REC_URL, {
       method: "POST",
@@ -43,12 +46,12 @@ exports.handler = async (event) => {
     }
     const recordings = await recRes.json(); // array
 
-    // Build unique callId set
+    // Unique call IDs to look up
     const callIds = Array.from(
-      new Set(recordings.map((r) => r.callId).filter(Boolean))
+      new Set((recordings || []).map((r) => r.callId).filter(Boolean))
     );
 
-    // 2) fetch details for callIds in small batches
+    // 2) For each callId, fetch details (batches)
     const details = [];
     const BATCH = 50;
     for (let i = 0; i < callIds.length; i += BATCH) {
@@ -72,12 +75,12 @@ exports.handler = async (event) => {
     }
     const byId = new Map(details.map((d) => [d.id, d]));
 
-    // 3) merge minimal fields we need client-side
-    const merged = recordings.map((r) => {
+    // 3) Merge minimal fields we need client-side
+    const merged = (recordings || []).map((r) => {
       const d = byId.get(r.callId) || {};
       return {
         callId: r.callId,
-        dateRecorded: r.dateRecorded, // UTC "YYYY-MM-DD HH:mm:ss"
+        dateRecorded: r.dateRecorded, // "YYYY-MM-DD HH:mm:ss" UTC
         duration: d.duration || d.duration_seconds || 0, // seconds
         fromPhoneNumber: d.fromPhoneNumber || "",
         toPhoneNumber: d.toPhoneNumber || "",
