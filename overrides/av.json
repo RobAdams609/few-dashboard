@@ -1,0 +1,11 @@
+{
+  "weekStartET": "2025-08-15",
+  "mode": "replace",
+  "note": "Fri→Thu ET. AV amounts are already 12×. Mapping: F N = Fabricio, A S = Ajani.",
+  "entries": [
+    { "email": "fabricio.a.navarrete@gmail.com",       "name": "F N",            "av12x": 8590 },
+    { "email": "ajansenior.healthadvisor@gmail.com",   "name": "A S",            "av12x": 4708 },
+    { "email": "eli.thermilushealthadvisor@gmail.com", "name": "Eli Thermilus",  "av12x": 4242 },
+    { "email": "anna.ushealthadvisors@gmail.com",      "name": "Anna Gleason",   "av12x": 1102 }
+  ]
+}
