@@ -250,3 +250,118 @@ async function boot(){
 }
 
 window.addEventListener('DOMContentLoaded', boot);
+// ===== FEW: AV override + simple KPI trim (drop-in) =====
+
+// Read /av_week_override.json and paint per-agent AV + Team AV tile
+async function loadAVOverrideAndPaint() {
+  try {
+    const override = await (await fetch('/av_week_override.json', { cache: 'no-store' })).json();
+    if (!override || typeof override !== 'object') return;
+
+    // Crosswalk emails -> names via roster.json
+    const roster = await (await fetch('/headshots/roster.json', { cache: 'no-store' })).json();
+    const list = Array.isArray(roster) ? roster : (roster?.agents || []);
+    const nameByEmail = new Map(list.map(r => [
+      (r.email || '').trim().toLowerCase(),
+      (r.name || '').trim()
+    ]));
+
+    const avByName = new Map(
+      Object.entries(override).map(([email, av]) => [
+        (nameByEmail.get((email || '').trim().toLowerCase()) || '').trim().toLowerCase(),
+        Number(av) || 0
+      ])
+    );
+
+    // Update table cells (expects first <td> is name, last <td data-col="av"> is AV)
+    const tbody = document.querySelector('#tableBody') || document.querySelector('tbody');
+    if (tbody) {
+      for (const tr of Array.from(tbody.querySelectorAll('tr'))) {
+        const nameCell = tr.querySelector('td');
+        const avCell = tr.querySelector('td[data-col="av"]') || tr.lastElementChild;
+        if (!nameCell || !avCell) continue;
+        const rowName = nameCell.textContent.trim().toLowerCase();
+        if (avByName.has(rowName)) {
+          const av = avByName.get(rowName);
+          avCell.textContent = `$${av.toLocaleString()}`;
+        }
+      }
+    }
+
+    // Update Team AV KPI value
+    const teamTotal = [...avByName.values()].reduce((a, b) => a + b, 0);
+    const avKpiValue =
+      document.querySelector('#kpi-week-av') ||
+      document.querySelector('[data-kpi="team-av"] .value') ||
+      (() => {
+        const tiles = Array.from(document.querySelectorAll('div,section,article'));
+        for (const t of tiles) {
+          if (/team av/i.test(t.textContent || '')) {
+            const leafs = Array.from(t.querySelectorAll('*')).reverse();
+            const node = leafs.find(n => /^\$?\d[\d,]*$/.test((n.textContent || '').trim()));
+            if (node) return node;
+          }
+        }
+        return null;
+      })();
+
+    if (avKpiValue) avKpiValue.textContent = `$${teamTotal.toLocaleString()}`;
+  } catch (err) {
+    console.warn('AV override not applied:', err);
+  }
+}
+
+// Keep only three KPI tiles (Week Calls, Week Talk, Week AV) and fill calls/talk from /api/calls_diag
+async function updateWeekKpisOnly() {
+  // 1) Pull week calls/talk
+  let weekCalls = 0, weekTalkMin = 0;
+  try {
+    const calls = await (await fetch('/api/calls_diag?days=7', { cache: 'no-store' })).json();
+    const rows = calls?.records || calls?.data || calls || [];
+    weekCalls = rows.length;
+    weekTalkMin = Math.round(rows.reduce((s, r) => s + (Number(r.duration || r.talk_time_seconds || 0) / 60), 0));
+  } catch {}
+
+  // 2) Utility to find a tile by label text
+  const all = Array.from(document.querySelectorAll('div,section,article'));
+  const findTile = (label) => all.find(n => new RegExp(label, 'i').test(n.textContent || ''));
+
+  // Hide extra tiles
+  for (const label of ['This Week — Team Sales', 'Unassigned Sales']) {
+    const el = findTile(label);
+    if (el) el.style.display = 'none';
+  }
+
+  // Relabel/replace values on “Today — Team Calls/Talk” tiles to week versions
+  const relabel = (oldLabelRegex, newLabel, value) => {
+    const el = findTile(oldLabelRegex);
+    if (!el) return;
+    const labelNode = Array.from(el.querySelectorAll('*')).find(n => /today|team calls|team talk|\(min\)/i.test(n.textContent || ''));
+    if (labelNode) labelNode.textContent = newLabel;
+    const leafs = Array.from(el.querySelectorAll('*')).reverse();
+    const valNode = leafs.find(n => /^\$?\d[\d,]*$/.test((n.textContent || '').trim()));
+    if (valNode) valNode.textContent = String(value);
+  };
+
+  relabel(/Today\s*—\s*Team Calls/i, 'This Week — Team Calls', weekCalls);
+  relabel(/Today\s*—\s*Team Talk/i,  'This Week — Team Talk (min)', weekTalkMin);
+
+  // Ensure AV tile label says “This Week — Team AV (12x)”
+  const avTile = findTile(/Team AV/i);
+  if (avTile) {
+    const labelNode = Array.from(avTile.querySelectorAll('*')).find(n => /team av/i.test(n.textContent || ''));
+    if (labelNode) labelNode.textContent = 'This Week — Team AV (12x)';
+  }
+}
+
+// Run once on load, then once per minute (no need to touch your existing refresh code)
+window.addEventListener('load', () => {
+  updateWeekKpisOnly();
+  loadAVOverrideAndPaint();
+});
+setInterval(() => {
+  updateWeekKpisOnly();
+  loadAVOverrideAndPaint();
+}, 60_000);
+
+// ===== END FEW drop-in =====
