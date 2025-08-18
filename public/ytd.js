@@ -57,3 +57,5 @@ async function boot(){
 }
 
 window.addEventListener("DOMContentLoaded", boot);
+// run it
+window.addEventListener('DOMContentLoaded', () => { boot().catch(console.error); });
