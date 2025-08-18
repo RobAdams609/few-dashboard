@@ -1,3 +1,7 @@
+// === FEW — YTD AV board ===============================================
+// Keeps your existing behavior, plus supports an optional team-total
+// override via /ytd_total.json  ->  { "teamTotal": 3409684 }
+
 const ET = "America/New_York";
 const bust = u => u + (u.includes("?") ? "&" : "?") + "t=" + Date.now();
 const fmt = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
@@ -32,20 +36,35 @@ async function boot(){
     const email = norm(it.email);
     const av    = Number(String(it.av||0).toString().replace(/[^\d.]/g,"")) || 0;
 
-    let match = (email && byEmail.get(email)) || byName.get(norm(name));
+    const match = (email && byEmail.get(email)) || byName.get(norm(name));
     const photo = match?.photo || "";
     const displayName = match?.name || name;
     return { name: displayName, photo, av };
   });
 
+  // Sort high → low
   items.sort((a,b)=> (b.av||0) - (a.av||0));
-  const teamTotal = items.reduce((s,x)=> s + (x.av||0), 0);
 
+  // Base team total from the list
+  let teamTotal = items.reduce((s,x)=> s + (x.av||0), 0);
+
+  // Optional: override from /ytd_total.json  -> { "teamTotal": 3409684 }
+  try {
+    const over = await getJSON("/ytd_total.json");
+    if (over && over.teamTotal != null && !Number.isNaN(Number(over.teamTotal))) {
+      teamTotal = Number(over.teamTotal);
+    }
+  } catch {
+    // no override file — ignore
+  }
+
+  // KPIs
   document.getElementById("teamYtd").textContent = fmt(teamTotal);
   document.getElementById("agentCount").textContent = String(items.length);
   document.getElementById("updatedAt").textContent =
     new Date().toLocaleString("en-US",{ timeZone: ET, dateStyle:"medium", timeStyle:"short" });
 
+  // Table
   const tbody = document.getElementById("tbody");
   tbody.innerHTML = items.map((row,i)=>
     `<tr>
@@ -56,6 +75,5 @@ async function boot(){
   ).join("") || `<tr><td colspan="3" style="padding:18px;color:#5c6c82;">No YTD records.</td></tr>`;
 }
 
-window.addEventListener("DOMContentLoaded", boot);
 // run it
-window.addEventListener('DOMContentLoaded', () => { boot().catch(console.error); });
+window.addEventListener("DOMContentLoaded", () => { boot().catch(console.error); });
