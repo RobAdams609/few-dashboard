@@ -25,11 +25,12 @@
     "email": "landisagency@gmail.com",
     "photo": "michelle-landis.jpg"
   },
-  {
-    "name": "A S",
-    "email": "ajansenior.healthadvisor@gmail.com",
-    "photo": "a-s.jpg"
-  },
+ {
+  "name": "A S",
+  "email": "ajanisenior.healthadvisor@gmail.com",
+  "photo": "a-s.jpg",
+  "phones": []
+},
   {
     "name": "Philip Baxter",
     "email": "phil@americanpathinsurance.com",
