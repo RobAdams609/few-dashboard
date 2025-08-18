@@ -1,3 +1,5 @@
+// ===================== FEW Dashboard (clean labels, 30s rotation) =====================
+
 // ------------------------ Config ------------------------
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const log = (...a)=>{ if(DEBUG) console.log('[DBG]', ...a); };
@@ -55,7 +57,7 @@ const agentKey = a => (a.email || a.name || '').trim().toLowerCase();
 
 // ------------------------ Layout (self-contained) -------
 function ensureUI(){
-  // If you still have the old markup, hide extra KPI tiles we don't use
+  // Hide any legacy tiles we don't use
   for (const label of ['This Week — Team Sales','Unassigned Sales']) {
     $$( 'div,section,article' ).forEach(el => {
       if (new RegExp(label,'i').test(el.textContent||'')) el.style.display='none';
@@ -84,13 +86,13 @@ function ensureUI(){
     root.appendChild(wrap);
     document.body.prepend(root);
   }
-  // KPI tiles: only 3, recreate each time for safety
+  // KPI tiles: only 3
   const k = $('#kpis');
   if (k) {
     k.innerHTML =
       tile('kpi-calls','This Week — Team Calls','0') +
       tile('kpi-talk','This Week — Team Talk (min)','0') +
-      tile('kpi-av','This Week — Team AV (12×)','$0');
+      tile('kpi-av','This Week — Team AV','$0'); // <- no "×12" in label
   }
   function tile(id,label,val){
     return `<div class="kpi"><div class="label">${label}</div><div id="${id}" class="value">${val}</div></div>`;
@@ -159,7 +161,7 @@ function avatarCell(a){
 
 function renderRoster(){
   setLabel('Today — Roster');
-  setHead(['Agent','Calls','Talk Time (min)','Sales','Submitted AV (12×)']);
+  setHead(['Agent','Calls','Talk Time (min)','Sales','Submitted AV']); // <- no "×12"
   const tbody = $('#tbody');
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
@@ -177,15 +179,15 @@ function renderRoster(){
 }
 
 function renderLeaderboard(metric){
-  const isAV = metric==='av';
+  const isAV = (metric==='av');
   setLabel(isAV ? 'This Week — Leaderboard (Submitted AV)' : 'This Week — Leaderboard (Sales)');
-  setHead(['Agent', isAV ? 'Submitted AV (12×)' : 'Sales']);
+  setHead(['Agent', isAV ? 'Submitted AV' : 'Sales']); // <- no "×12"
   const tbody = $('#tbody');
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
     const s = STATE.salesByKey.get(k) || {salesAmt:0,av12x:0};
     return { a, val: isAV ? s.av12x : s.salesAmt };
-  }).sort((x,y)=> (y.val||0)-(x.val||0))
+  }).sort((x,y)=> (y.val||0) - (x.val||0))   // descending
     .map(({a,val})=> `<tr><td>${avatarCell(a)}</td><td class="num">${fmtMoney(val)}</td></tr>`)
     .join('');
   tbody.innerHTML = rows || `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
@@ -210,8 +212,9 @@ function showSalePop({ name, product, amount }){
 // ------------------------ Data refresh ------------------
 async function refreshCalls(){
   try{
-    const rows = (await getJSON('/api/calls_diag?days=7&limit=2000')).records || [];
-    const [weekStart, weekEnd] = currentWeekRangeET();
+    const payload = await getJSON('/api/calls_diag?days=7&limit=2000');
+    const rows = payload.records || payload.data || payload || [];
+    const [weekStart, weekEnd]   = currentWeekRangeET();
     const [todayStart, todayEnd] = todayETRange();
 
     // Team totals (week) — independent of attribution
@@ -223,7 +226,6 @@ async function refreshCalls(){
 
     // Apply overrides (by email) if present
     if (STATE.overrides.calls && typeof STATE.overrides.calls==='object'){
-      // Recompute by summing only roster emails present in override
       let oc=0, ot=0;
       for (const a of STATE.roster){
         const o = STATE.overrides.calls[a.email];
@@ -237,7 +239,7 @@ async function refreshCalls(){
     STATE.team.calls = wkCalls;
     STATE.team.talk  = wkTalk;
 
-    // Per-agent calls for **today** (roster table column)
+    // Per-agent calls for today (roster column)
     const map = new Map();
     function bump(key, rec){
       const obj = map.get(key) || {calls:0,talkMin:0};
@@ -252,7 +254,7 @@ async function refreshCalls(){
 
       const to   = cleanDigits(r.toPhoneNumber);
       const from = cleanDigits(r.fromPhoneNumber);
-      const candidates = [to,from, to.replace(/^1/,''), from.replace(/^1/,'')];
+      const candidates = [to,from, to?.replace(/^1/,''), from?.replace(/^1/,'')].filter(Boolean);
       const seen = new Set();
       for (const num of candidates){
         const key = STATE.phoneToKey.get(num);
@@ -265,7 +267,8 @@ async function refreshCalls(){
 
 async function refreshSales(){
   try{
-    const rows = (await getJSON('/api/sales_diag?days=30&limit=1000')).records || [];
+    const payload = await getJSON('/api/sales_diag?days=30&limit=1000');
+    const rows = payload.records || payload.data || payload || [];
     const [weekStart, weekEnd] = currentWeekRangeET();
 
     // Aggregate sales by owner (email/name), week filter
@@ -289,7 +292,6 @@ async function refreshSales(){
     const out = new Map();
     for (const a of STATE.roster){
       const k = agentKey(a);
-      // prefer email match, else name match
       const v = byKey.get(a.email) || byKey.get((a.name||'').trim().toLowerCase()) || {salesAmt:0,av12x:0};
       out.set(k, v);
     }
@@ -343,7 +345,6 @@ async function boot(){
 window.addEventListener('DOMContentLoaded', boot);
 
 // ------------------------ Minimal styles (optional) -----
-// Uses your existing CSS; keep this tiny fallback if needed.
 const FALLBACK_CSS = `
 .few-root{padding:12px}
 .title{margin:6px 0 2px;font-size:28px;text-align:center;color:#ffeaa7;text-shadow:0 0 12px #222}
@@ -364,8 +365,4 @@ const FALLBACK_CSS = `
 .sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
 .sale-pop.show{opacity:1}
 `;
-(() => {
-  const s = document.createElement('style');
-  s.textContent = FALLBACK_CSS;
-  document.head.appendChild(s);
-})();
+(() => { const s = document.createElement('style'); s.textContent = FALLBACK_CSS; document.head.appendChild(s); })();
