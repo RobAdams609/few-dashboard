@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>The FEW — YTD AV</title>
+  <link rel="stylesheet" href="/dashboard.css" />
+  <style>
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 16px; }
+    .title { font-size: 28px; font-weight: 800; text-align: center; margin: 8px 0 2px; color: #ffeaa7; text-shadow: 0 0 18px #fbc531; }
+    .sub { text-align: center; color: #93a4b7; margin-bottom: 18px; }
+    .kpis { display: grid; grid-template-columns: repeat(1,minmax(0,1fr)); gap: 14px; margin-bottom: 18px; }
+    @media (min-width: 700px){ .kpis{ grid-template-columns: repeat(3,1fr);} }
+    .kpi { background:#0f1722; border:1px solid #1f2a3a; border-radius:12px; padding:14px 16px; }
+    .kpi .label { color:#93a4b7; font-size:13px; margin-bottom:6px; }
+    .kpi .value { font-size:26px; font-weight:800; color:#ffeaa7; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #1f2a3a; padding: 10px 12px; }
+    th { text-align: left; font-weight:700; color:#93a4b7; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .agent { display:flex; align-items:center; gap:10px; }
+    .avatar { width:28px; height:28px; border-radius:50%; object-fit:cover; }
+    .avatar-fallback{ width:28px;height:28px;border-radius:50%;background:#223048;color:#e5eef9;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700; }
+    .rank { width: 60px; color:#93a4b7; }
+    .footnote { margin-top:12px; color:#5c6c82; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">THE FEW — YTD AV</div>
+    <div class="sub">Manual YTD leaderboard (updates when you edit <code>ytd_av.json</code>)</div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="label">Team YTD AV (12×)</div><div id="teamYtd" class="value">$0</div></div>
+      <div class="kpi"><div class="label">Updated</div><div id="updatedAt" class="value">—</div></div>
+      <div class="kpi"><div class="label">Agents on board</div><div id="agentCount" class="value">0</div></div>
+    </div>
+
+    <table>
+      <thead>
+        <tr><th class="rank">Rank</th><th>Agent</th><th class="num">YTD AV (12×)</th></tr>
+      </thead>
+      <tbody id="tbody"><tr><td colspan="3" style="padding:18px;color:#5c6c82;">Loading…</td></tr></tbody>
+    </table>
+
+    <div class="footnote">Names match your roster when possible for headshots. If a person isn’t in roster, we show initials.</div>
+  </div>
+
+  <script src="/ytd.js"></script>
+</body>
+</html>
