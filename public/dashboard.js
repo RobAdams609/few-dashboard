@@ -190,7 +190,7 @@ async function refreshCalls(){
     STATE.team.calls = wkCalls;
     STATE.team.talk  = wkTalk;
 
-    // Per-agent calls/talk for TODAY (roster columns)
+    // Per-agent calls/talk for TODAY (fallback if no override below)
     const map = new Map();
     function bump(key, rec){
       const obj = map.get(key) || {calls:0,talkMin:0};
@@ -292,9 +292,16 @@ function renderRoster(){
   setHead(["Agent","Calls","Talk Time (min)","Logged (h:mm)","Submitted AV"]);
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
-    const c = STATE.callsTodayByKey.get(k) || {calls:0,talkMin:0};
+
+    // UPDATED: prefer per-agent override numbers when provided
+    const o = (STATE.overrides.calls && STATE.overrides.calls[a.email]) || null;
+    const cOverride = o ? { calls: Number(o.calls||0), talkMin: Number(o.talkMin||0) } : null;
+    const cToday    = STATE.callsTodayByKey.get(k) || {calls:0,talkMin:0};
+    const c         = cOverride || cToday;
+
     const s = STATE.salesByKey.get(k) || {av12x:0};
     const loggedMin = STATE.loggedByKey.get(k) || 0;
+
     return `<tr>
       <td>${avatarCell(a)}</td>
       <td class="num">${fmtInt(c.calls)}</td>
