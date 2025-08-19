@@ -1,15 +1,18 @@
 [
-  { "name": "Fabricio Navarrete Cervant", "email": "fabricio.a.navarrete@gmail.com", "av": 534713 },
-  { "name": "Robert Adams",            "email": "robert@rainsuranceadvisors.com",         "av": 455155 },
-  { "name": "Philip Baxter",           "email": "phil@americanpathinsurance.com",         "av": 453414 },
-  { "name": "Marie Saint Cyr",         "email": "maries.healthadvisor@gmail.com",         "av": 338718 },
-  { "name": "Ajani Senior",            "email": "ajanisenior.healthadvisor@gmail.com",    "av": 324300 },
-  { "name": "Eli Thermilus",           "email": "eli.thermilushealthadvisor@gmail.com",   "av": 299707 },
-  { "name": "Anna Gleason",            "email": "anna.ushealthadvisors@gmail.com",        "av": 239233 },
-  { "name": "Fraitzline Gustave",      "email": "fraitzlineg.healthadvisor@gmail.com",    "av": 170429 },
-  { "name": "Joseph Lipari",           "email": "joseph@treasurecoastadvisors.com",       "av": 162260 },
-  { "name": "Michelle Landis",         "email": "landisagency@gmail.com",                 "av": 110535 },
-  { "name": "Bianca",                  "av": 72757 },
-  { "name": "Alan",                    "av": 58860 },
-  { "name": "Andres",                  "email": "andresthehealthagent@gmail.com",         "av": 22018 }
+  { "name": "Fabricio Navarrete Cervant", "email": "fabricio.a.navarrete@gmail.com",      "av": 540676 },
+  { "name": "Robert Adams",               "email": "robert@rainsuranceadvisors.com",      "av": 457055 },
+  { "name": "Philip Baxter",              "email": "phil@americanpathinsurance.com",      "av": 453414 },
+  { "name": "Marie Saint Cyr",            "email": "maries.healthadvisor@gmail.com",      "av": 338718 },
+  { "name": "Ajani Senior",               "email": "ajanisenior.healthadvisor@gmail.com", "av": 325915 },
+  { "name": "Eli Thermilus",              "email": "eli.thermilushealthadvisor@gmail.com","av": 299707 },
+  { "name": "Anna Gleason",               "email": "anna.ushealthadvisors@gmail.com",     "av": 240335 },
+  { "name": "Fraitlzine Gustave",         "email": "fraitzlineg.healthadvisor@gmail.com", "av": 170429 },
+  { "name": "Joseph Lipari",              "email": "joseph@treasurecoastadvisors.com",    "av": 162260 },
+  { "name": "Michelle Landis",            "email": "landisagency@gmail.com",              "av": 110535 },
+  { "name": "Alrens Antoine",             "email": "",                                    "av": 92487  },
+  { "name": "Bianca Nunez",               "email": "",                                    "av": 72757  },
+  { "name": "Alan Cole",                  "email": "",                                    "av": 58860  },
+  { "name": "Andres",                     "email": "andresthehealthagent@gmail.com",      "av": 22018  },
+
+  { "teamTotal": 3420263 }
 ]
