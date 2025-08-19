@@ -248,18 +248,21 @@ function renderRoster(){
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0 };
     const s = STATE.salesWeekByKey.get(k) || { salesAmt:0, av12x:0 };
+    const avCell = (s.av12x > 0)
+      ? fmtMoney(s.av12x)
+      : `<span class="poop" title="No AV this week">💩</span>`;
     return [
       avatarCell(a),
       fmtInt(c.calls),
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
-      fmtMoney(s.av12x)
+      avCell
     ];
   });
   setRows(rows);
 }
 
-// ===== NEW: AV Leaderboard with glow/sparkle for the #1 row =====
+// ===== AV Leaderboard with glow for #1 and 💩 for $0 =====
 function renderWeekAV(){
   setLabel('This Week — Leaderboard (Submitted AV)');
   setHead(['Agent','Submitted AV']);
@@ -272,16 +275,20 @@ function renderWeekAV(){
     })
     .sort((x,y)=> (y.val)-(x.val));
 
-  // Build rows manually so we can add a class to the first (leader) row
   const tbody = $('#tbody');
   if (!ranked.length){
     tbody.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
     return;
   }
+
   let html = '';
   ranked.forEach(({a,val}, i)=>{
-    const leader = (i === 0 && val > 0) ? ' class="leader"' : '';
-    html += `<tr${leader}><td>${avatarCell(a)}</td><td class="num">${fmtMoney(val)}</td></tr>`;
+    const isLeader = (i === 0 && val > 0);
+    const trClass  = isLeader ? ' class="leader"' : (val === 0 ? ' class="pooper"' : '');
+    const valueHtml = val > 0
+      ? fmtMoney(val)
+      : `<span class="poop" title="No AV this week">💩</span>`;
+    html += `<tr${trClass}><td>${avatarCell(a)}</td><td class="num">${valueHtml}</td></tr>`;
   });
   tbody.innerHTML = html;
 }
@@ -363,7 +370,7 @@ const CSS = `
 .sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
 .sale-pop.show{opacity:1}
 
-/* Leader glow/sparkle on AV leaderboard */
+/* ✨ Leader glow/sparkle on AV leaderboard */
 .leader .agent{position:relative}
 .leader .agent span{
   animation: leaderGlow 1.8s ease-in-out infinite alternate;
@@ -388,5 +395,15 @@ const CSS = `
   50% { transform:translateY(-50%) scale(1.2) rotate(20deg); opacity:1;  }
   100%{ transform:translateY(-50%) scale(1) rotate(0deg);   opacity:.7; }
 }
+
+/* 💩 for zero weekly AV */
+.poop{
+  display:inline-block;
+  font-size:18px;
+  line-height:1;
+  filter: drop-shadow(0 0 4px #b66);
+  vertical-align: -2px;
+}
+.pooper td { opacity: .9; }
 `;
 (() => { const s = document.createElement('style'); s.textContent = CSS; document.head.appendChild(s); })();
