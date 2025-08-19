@@ -3,8 +3,8 @@ const DEBUG = new URLSearchParams(location.search).has('debug');
 const log = (...a)=>{ if (DEBUG) console.log('[DBG]', ...a); };
 
 const ET_TZ       = "America/New_York";
-const DATA_MS     = 30_000;                 // refresh cadence
-const ROTATE_MS   = 30_000;                 // rotate views
+const DATA_MS     = 30_000;                  // refresh cadence
+const ROTATE_MS   = 30_000;                  // rotate views
 const VIEWS       = ['av', 'ytd', 'roster']; // 1) Week AV, 2) YTD AV, 3) Week roster
 let   viewIdx     = 0;
 
@@ -259,18 +259,31 @@ function renderRoster(){
   setRows(rows);
 }
 
+// ===== NEW: AV Leaderboard with glow/sparkle for the #1 row =====
 function renderWeekAV(){
   setLabel('This Week — Leaderboard (Submitted AV)');
   setHead(['Agent','Submitted AV']);
-  const rows = STATE.roster
+
+  const ranked = STATE.roster
     .map(a=>{
       const k = agentKey(a);
       const s = STATE.salesWeekByKey.get(k) || { av12x:0 };
-      return { a, val: s.av12x||0 };
+      return { a, val: Number(s.av12x||0) };
     })
-    .sort((x,y)=> (y.val)-(x.val))
-    .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
-  setRows(rows);
+    .sort((x,y)=> (y.val)-(x.val));
+
+  // Build rows manually so we can add a class to the first (leader) row
+  const tbody = $('#tbody');
+  if (!ranked.length){
+    tbody.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
+    return;
+  }
+  let html = '';
+  ranked.forEach(({a,val}, i)=>{
+    const leader = (i === 0 && val > 0) ? ' class="leader"' : '';
+    html += `<tr${leader}><td>${avatarCell(a)}</td><td class="num">${fmtMoney(val)}</td></tr>`;
+  });
+  tbody.innerHTML = html;
 }
 
 function renderYTD(){
@@ -349,5 +362,31 @@ const CSS = `
 .ticker{font-size:12px;color:#9fb;margin-bottom:4px}
 .sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
 .sale-pop.show{opacity:1}
+
+/* Leader glow/sparkle on AV leaderboard */
+.leader .agent{position:relative}
+.leader .agent span{
+  animation: leaderGlow 1.8s ease-in-out infinite alternate;
+  text-shadow: 0 0 6px #ffd166, 0 0 12px #ffd166;
+}
+.leader .agent::after{
+  content:'✨';
+  position:absolute;
+  right:-18px;
+  top:50%;
+  transform:translateY(-50%);
+  filter:drop-shadow(0 0 6px #ffd166);
+  animation: sparkle 1.2s ease-in-out infinite;
+  opacity:.95;
+}
+@keyframes leaderGlow{
+  from{ text-shadow:0 0 4px #ffe08a, 0 0 10px #ffd166; }
+  to  { text-shadow:0 0 10px #ffe08a, 0 0 20px #ffd166; }
+}
+@keyframes sparkle{
+  0%  { transform:translateY(-50%) scale(1) rotate(0deg);   opacity:.7; }
+  50% { transform:translateY(-50%) scale(1.2) rotate(20deg); opacity:1;  }
+  100%{ transform:translateY(-50%) scale(1) rotate(0deg);   opacity:.7; }
+}
 `;
 (() => { const s = document.createElement('style'); s.textContent = CSS; document.head.appendChild(s); })();
