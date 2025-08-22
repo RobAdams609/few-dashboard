@@ -1,11 +1,12 @@
-// ============ FEW Dashboard (week roster + AV/YTD rotation) ============
+// ============ FEW Dashboard (week roster + AV/YTD/Vendor rotation) ============
 const DEBUG = new URLSearchParams(location.search).has('debug');
 const log = (...a)=>{ if (DEBUG) console.log('[DBG]', ...a); };
 
 const ET_TZ       = "America/New_York";
-const DATA_MS     = 30_000;                  // refresh cadence
-const ROTATE_MS   = 30_000;                  // rotate views
-const VIEWS       = ['av', 'ytd', 'roster']; // 1) Week AV, 2) YTD AV, 3) Week roster
+const DATA_MS     = 30_000;                   // refresh cadence
+const ROTATE_MS   = 30_000;                   // rotate views
+// Order: 1) Week AV, 2) YTD AV, 3) Vendor chart, 4) Roster
+const VIEWS       = ['av', 'ytd', 'vendor', 'roster'];
 let   viewIdx     = 0;
 
 const $  = s => document.querySelector(s);
@@ -221,7 +222,7 @@ async function refreshSales(){
   }catch(e){ log('sales error', e?.message||e); }
 }
 
-// ---------------- Renderers ----------------
+// ---------------- Render helpers ----------------
 function renderKPIs(){
   const { calls, talk, av } = STATE.team;
   const elC = $('#kpi-calls'), elT = $('#kpi-talk'), elA = $('#kpi-av');
@@ -229,17 +230,19 @@ function renderKPIs(){
   if (elT) elT.textContent = fmtInt(Math.round(talk));
   if (elA) elA.textContent = fmtMoney(av);
 }
-
 function setHead(cols){
   $('#thead').innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join('')}</tr>`;
 }
-function setLabel(txt){ const el = $('#viewLabel'); if (el) el.textContent = txt; }
+function setLabel(txt){
+  const el = $('#viewLabel'); if (el) el.textContent = txt;
+}
 function setRows(rows){
   $('#tbody').innerHTML = rows.length
     ? rows.map(r => `<tr>${r.map((c,i)=>`<td class="${i>0?'num':''}">${c}</td>`).join('')}</tr>`).join('')
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
+// ---------------- Renderers ----------------
 function renderRoster(){
   setLabel('This Week — Roster');
   setHead(['Agent','Calls','Talk Time (min)','Logged (h:mm)','Submitted AV']);
@@ -248,21 +251,18 @@ function renderRoster(){
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0 };
     const s = STATE.salesWeekByKey.get(k) || { salesAmt:0, av12x:0 };
-    const avCell = (s.av12x > 0)
-      ? fmtMoney(s.av12x)
-      : `<span class="poop" title="No AV this week">💩</span>`;
     return [
       avatarCell(a),
       fmtInt(c.calls),
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
-      avCell
+      fmtMoney(s.av12x)
     ];
   });
   setRows(rows);
 }
 
-// ===== AV Leaderboard with glow for #1 and 💩 for $0 =====
+// AV Leaderboard with glow/sparkle for #1 and 💩 for zero AV
 function renderWeekAV(){
   setLabel('This Week — Leaderboard (Submitted AV)');
   setHead(['Agent','Submitted AV']);
@@ -280,15 +280,12 @@ function renderWeekAV(){
     tbody.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
     return;
   }
-
   let html = '';
   ranked.forEach(({a,val}, i)=>{
     const isLeader = (i === 0 && val > 0);
-    const trClass  = isLeader ? ' class="leader"' : (val === 0 ? ' class="pooper"' : '');
-    const valueHtml = val > 0
-      ? fmtMoney(val)
-      : `<span class="poop" title="No AV this week">💩</span>`;
-    html += `<tr${trClass}><td>${avatarCell(a)}</td><td class="num">${valueHtml}</td></tr>`;
+    const leaderClass = isLeader ? ' class="leader"' : '';
+    const display = val > 0 ? fmtMoney(val) : '💩';
+    html += `<tr${leaderClass}><td>${avatarCell(a)}</td><td class="num">${display}</td></tr>`;
   });
   tbody.innerHTML = html;
 }
@@ -296,7 +293,6 @@ function renderWeekAV(){
 function renderYTD(){
   setLabel('YTD — Leaderboard (AV)');
   setHead(['Agent','YTD AV']);
-  // Crosswalk to roster for headshots if possible
   const byName  = new Map(STATE.roster.map(r=>[String(r.name||'').trim().toLowerCase(), r]));
   const byEmail = new Map(STATE.roster.map(r=>[String(r.email||'').trim().toLowerCase(), r]));
   const rows = STATE.ytd
@@ -313,11 +309,28 @@ function renderYTD(){
   setRows(rows);
 }
 
+// NEW: Vendor donut image board
+function renderVendorBoard(){
+  setLabel('% of Sales By Lead Vendor');
+  // No table headers for this view
+  $('#thead').innerHTML = '';
+  // One full-width cell with centered image (cache-busted)
+  const src = bust('/boards/sales_by_vendor.png');
+  $('#tbody').innerHTML = `
+    <tr>
+      <td class="img-only">
+        <img class="board-img" src="${src}" alt="% of Sales by Lead Vendor chart">
+      </td>
+    </tr>
+  `;
+}
+
 function renderCurrent(){
   renderKPIs();
   const v = VIEWS[viewIdx];
-  if (v === 'av')  return renderWeekAV();
-  if (v === 'ytd') return renderYTD();
+  if (v === 'av')     return renderWeekAV();
+  if (v === 'ytd')    return renderYTD();
+  if (v === 'vendor') return renderVendorBoard();
   return renderRoster();
 }
 
@@ -370,7 +383,7 @@ const CSS = `
 .sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
 .sale-pop.show{opacity:1}
 
-/* ✨ Leader glow/sparkle on AV leaderboard */
+/* Leader glow/sparkle on AV leaderboard */
 .leader .agent{position:relative}
 .leader .agent span{
   animation: leaderGlow 1.8s ease-in-out infinite alternate;
@@ -396,14 +409,20 @@ const CSS = `
   100%{ transform:translateY(-50%) scale(1) rotate(0deg);   opacity:.7; }
 }
 
-/* 💩 for zero weekly AV */
-.poop{
-  display:inline-block;
-  font-size:18px;
-  line-height:1;
-  filter: drop-shadow(0 0 4px #b66);
-  vertical-align: -2px;
+/* Image board styling */
+.img-only{
+  background:transparent !important;
+  border:0 !important;
+  padding:0 !important;
 }
-.pooper td { opacity: .9; }
+.board-img{
+  display:block;
+  margin:0 auto;
+  max-width:100%;
+  height:auto;
+  max-height:68vh; /* keep it above the fold */
+  border-radius:12px;
+  box-shadow:0 6px 18px rgba(0,0,0,.35);
+}
 `;
 (() => { const s = document.createElement('style'); s.textContent = CSS; document.head.appendChild(s); })();
