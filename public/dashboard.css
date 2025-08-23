@@ -116,3 +116,12 @@ tr:hover td{ background:rgba(255,255,255,.03) }
 
 /* Column show/hide helpers for rotation */
 .hide{ display:none !important; }
+/* Pie board sizing */
+.board-img,
+.board-image {
+  display: block;
+  margin: 12px auto;
+  width: min(92vw, 680px);  /* cap width */
+  height: auto;
+  object-fit: contain;
+}
