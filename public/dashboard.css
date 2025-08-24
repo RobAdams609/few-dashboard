@@ -121,7 +121,7 @@ tr:hover td{ background:rgba(255,255,255,.03) }
 .board-image {
   display: block;
   margin: 12px auto;
-width: min(30vw, 680px);  /* was 92vw */
+width: min(20vw, 680px);  /* was 92vw */
   max-height: 60vh;
   height: auto;
   object-fit: contain;
