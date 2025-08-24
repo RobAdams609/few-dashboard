@@ -1,17 +1,14 @@
 {
-  "robert@rkainsuranceadvisors.com": { "calls": 372, "talkMin": 266, "loggedMin": 759 },
-  "andresthehealthagent@gmail.com":  { "calls":   1, "talkMin":   0, "loggedMin": 276 },
-
-  "fabricio.a.navarrete@gmail.com":  { "calls":  21, "talkMin":  12, "loggedMin": 459 },
-  "landisagency@gmail.com":          { "calls":   0, "talkMin":   0, "loggedMin":  82 },
-  "ajanisenior.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 743 },
-
-  "phil@americanpathinsurance.com":  { "calls":  61, "talkMin": 141, "loggedMin": 781 },
-  "joseph@treasurecoastadvisors.com":{ "calls": 137, "talkMin":  21, "loggedMin": 283 },
-  "anna.ushealthadvisors@gmail.com": { "calls": 220, "talkMin":  55, "loggedMin": 535 },
-
-  "eli.thermilushealthadvisor@gmail.com": { "calls": 32,  "talkMin": 73,  "loggedMin": 714 },
-  "maries.healthadvisor@gmail.com":   { "calls": 477, "talkMin": 310, "loggedMin": 568 },
-  "fraitzlineg.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 4 },
-  "nathanjohnson.healthadvisor@gmail.com": { "calls": 887, "talkMin": 341, "loggedMin": 1568 }
-}f
+  "robert@rkainsuranceadvisors.com": { "calls": 131, "talkMin": 150, "loggedMin": 172 },
+  "andresthehealthagent@gmail.com":  { "calls":   0, "talkMin":   0, "loggedMin":  34 },
+  "fabricio.a.navarrete@gmail.com":  { "calls":   0, "talkMin":   0, "loggedMin": 100 },
+  "landisagency@gmail.com":          { "calls":   0, "talkMin":   0, "loggedMin":  77 },
+  "ajansenior.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 104 },
+  "phil@americanpathinsurance.com":  { "calls":  42, "talkMin":  52, "loggedMin": 157 },
+  "joseph@treasurecoastadvisors.com":{ "calls":   0, "talkMin":   0, "loggedMin":  58 },
+  "anna.ushealthadvisors@gmail.com": { "calls":   0, "talkMin":   0, "loggedMin": 635 },
+  "eli.thermilushealthadvisor@gmail.com": { "calls": 9, "talkMin": 5, "loggedMin": 95 },
+  "maries.healthadvisor@gmail.com":  { "calls":  15, "talkMin":   3, "loggedMin":  30 },
+  "fraitlzineg.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 2 },
+  "nathanjohnson.healthadvisor@gmail.com": { "calls": 196, "talkMin": 26, "loggedMin": 451 }
+}
