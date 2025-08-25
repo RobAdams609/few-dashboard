@@ -122,8 +122,8 @@ tr:hover td{ background:rgba(255,255,255,.03) }
 .board-image {
   display: block;
   margin: 12px auto;
-  width: min(85vw, 560px);   /* was min(100vw, 680px) */
-  max-height: 32vh;          /* was 40vh */
+  width: min(75vw, 400px);   /* was min(100vw, 680px) */
+  max-height: 20vh;          /* was 40vh */
   height: auto;
   object-fit: contain;
 }
