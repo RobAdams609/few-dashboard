@@ -122,7 +122,7 @@ tr:hover td{ background:rgba(255,255,255,.03) }
   display: block;
   margin: 12px auto;
 width: min(10vw, 680px);  /* was 92vw */
-  max-height: 50vh;
+  max-height: 40vh;
   height: auto;
   object-fit: contain;
 }
