@@ -117,12 +117,13 @@ tr:hover td{ background:rgba(255,255,255,.03) }
 /* Column show/hide helpers for rotation */
 .hide{ display:none !important; }
 /* Pie board sizing */
+/* Pie board sizing (smaller so it fits on TV screens) */
 .board-img,
 .board-image {
   display: block;
   margin: 12px auto;
-width: min(10vw, 680px);  /* was 92vw */
-  max-height: 40vh;
+  width: min(85vw, 560px);   /* was min(100vw, 680px) */
+  max-height: 32vh;          /* was 40vh */
   height: auto;
   object-fit: contain;
 }
