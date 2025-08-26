@@ -1,15 +1,15 @@
 [
-{
-  "name": "Robert Adams",
-  "email": "robert@rkainsuranceadvisors.com",
-  "photo": "robert-adams.jpg",
-  "phones": [
-    "8634856540","5615566604","7629991779","7659864520","9133793527","2708383642",
-    "5042945651","6672223419","5863156778","4177833353","6605383221","9804146612",
-    "7752628877","7753079834","3803336115","8396663826","7319821962","9798594560",
-    "8324027028","3852179035","8044098721","7156414767"
-  ]
-},
+  {
+    "name": "Robert Adams",
+    "email": "robert@rkainsuranceadvisors.com",
+    "photo": "robert-adams.jpg",
+    "phones": [
+      "8634856540","5615566604","7629991779","7659864520","9133793527","2708383642",
+      "5042945651","6672223419","5863156778","4177833353","6605383221","9804146612",
+      "7752628877","7753079834","3803336115","8396663826","7319821962","9798594560",
+      "8324027028","3852179035","8044098721","7156414767"
+    ]
+  },
   {
     "name": "A C",
     "email": "andresthehealthagent@gmail.com",
@@ -25,12 +25,12 @@
     "email": "landisagency@gmail.com",
     "photo": "michelle-landis.jpg"
   },
- {
-  "name": "A S",
-  "email": "ajanisenior.healthadvisor@gmail.com",
-  "photo": "a-s.jpg",
-  "phones": []
-},
+  {
+    "name": "A S",
+    "email": "ajanisenior.healthadvisor@gmail.com",
+    "photo": "a-s.jpg",
+    "phones": []
+  },
   {
     "name": "Philip Baxter",
     "email": "phil@americanpathinsurance.com",
@@ -61,16 +61,16 @@
     "email": "fraitzlineg.healthadvisor@gmail.com",
     "photo": "fraitzline.jpg"
   },
- {
-  "name": "Nathan Johnson",
-  "email": "nathanjohnson.healthadvisor@gmail.com",
-  "photo": null,
-  "phones": ["9048496304","7627583371","7433006125","2542745197","2762925599"]
-}
-{
-  "name": "Bianca Nunez",
-  "email": "bianca.nunez@few.local",
-  "photo": "bianca.jpg",
-  "phones": []
-}
+  {
+    "name": "Nathan Johnson",
+    "email": "nathanjohnson.healthadvisor@gmail.com",
+    "photo": null,
+    "phones": ["9048496304","7627583371","7433006125","2542745197","2762925599"]
+  },
+  {
+    "name": "Bianca Nunez",
+    "email": "bianca.nunez@few.local",
+    "photo": null,
+    "phones": []
+  }
 ]
