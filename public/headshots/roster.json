@@ -67,4 +67,10 @@
   "photo": null,
   "phones": ["9048496304","7627583371","7433006125","2542745197","2762925599"]
 }
+{
+  "name": "Bianca Nunez",
+  "email": "bianca.nunez@few.local",
+  "photo": "bianca.jpg",
+  "phones": []
+}
 ]
