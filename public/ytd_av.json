@@ -1,19 +1,18 @@
 [
-  { "name": "Fabricio Navarrete Cervantes", "email": "fabricio.a.navarrete@gmail.com", "av": 547785 },
-  { "name": "Robert Adams", "email": "robert@rkainsuranceadvisors.com", "av": 475020 },
-  { "name": "Philip Baxter", "email": "phil@americanpathinsurance.com", "av": 454419 },
-
-  { "name": "Ajani Senior", "email": "ajanisenior.healthadvisor@gmail.com", "av": 346318 },
-
-  { "name": "Marie Saint Cyr", "email": "maries.healthadvisor@gmail.com", "av": 346010 },
-  { "name": "Eli Thermilus", "email": "eli.thermilushealthadvisor@gmail.com", "av": 311564 },
-  { "name": "Anna Gleason", "email": "anna.ushealthadvisors@gmail.com", "av": 245112 },
-  { "name": "Fraitzline Gustave", "email": "fraitzlineg.healthadvisor@gmail.com", "av": 171451 },
-  { "name": "Joseph Lipari", "email": "joseph@treasurecoastadvisors.com", "av": 162260 },
-  { "name": "Michelle Landis", "email": "landisagency@gmail.com", "av": 110535 },
-  { "name": "Alrens Antoine", "email": "", "av": 92487 },
-  { "name": "Bianca Nunez", "email": "", "av": 72757 },
-  { "name": "Alan Cole", "email": "", "av": 58860 },
-  { "name": "Tyler Sergi", "email": "", "av": 42250 },
-  { "name": "Abigail Austin", "email": "", "av": 31133 }
+  { "name": "Fabricio Navarrete Cervantes", "ytd_av": 547785 },
+  { "name": "Robert Adams",                 "ytd_av": 475587 },
+  { "name": "Philip Baxter",                "ytd_av": 458827 },
+  { "name": "Marie Saint Cyr",              "ytd_av": 354537 },
+  { "name": "Ajani Senior",                 "ytd_av": 347271 },
+  { "name": "Eli Thermilus",                "ytd_av": 311564 },
+  { "name": "Anna Gleason",                 "ytd_av": 248878 },
+  { "name": "Fraitzline Gustave",           "ytd_av": 171451 },
+  { "name": "Joseph Lipari",                "ytd_av": 162260 },
+  { "name": "Michelle Landis",              "ytd_av": 113841 },
+  { "name": "Alrens Antoine",               "ytd_av": 92487  },
+  { "name": "Bianca Nunez",                 "ytd_av": 73865  },
+  { "name": "Alan Cole",                    "ytd_av": 58860  },
+  { "name": "Tyler Sergi",                  "ytd_av": 42250  },
+  { "name": "Abigail Austin",               "ytd_av": 31133  },
+  { "name": "Andres Castro",                "ytd_av": 24076  }
 ]
