@@ -1,15 +1,15 @@
 {
-  "robert@rkainsuranceadvisors.com":        { "calls": 419, "talkMin": 362, "loggedMin": 806 },
-  "andresthehealthagent@gmail.com":         { "calls": 1,   "talkMin": 1,   "loggedMin": 343 },
-  "fabricio.a.navarrete@gmail.com":         { "calls": 0,   "talkMin": 0,   "loggedMin": 206 },
-  "landisagency@gmail.com":                 { "calls": 0,   "talkMin": 0,   "loggedMin": 138 },
-  "ajanisenior.healthadvisor@gmail.com":    { "calls": 0,   "talkMin": 0,   "loggedMin": 397 },
-  "phil@americanpathinsurance.com":         { "calls": 44,  "talkMin": 53,  "loggedMin": 170 },
-  "joseph@treasurecoastadvisors.com":       { "calls": 0,   "talkMin": 0,   "loggedMin": 58 },
-  "anna.ushealthadvisors@gmail.com":        { "calls": 38,  "talkMin": 4,   "loggedMin": 1109 },
-  "eli.thermilushealthadvisor@gmail.com":   { "calls": 15,  "talkMin": 6,   "loggedMin": 507 },
-  "maries.healthadvisor@gmail.com":         { "calls": 223, "talkMin": 90,  "loggedMin": 390 },
-  "fraitzlineg.healthadvisor@gmail.com":    { "calls": 0,   "talkMin": 0,   "loggedMin": 2 },
-  "abigailaustin.healthadvisor@gmail.com":  { "calls": 194, "talkMin": 0,   "loggedMin": 1834 },
-  "nathanjohnson.healthadvisor@gmail.com":  { "calls": 691, "talkMin": 195, "loggedMin": 1397 }
+  "robert@rkainsuranceadvisors.com": { "calls": 522, "talkMin": 395, "loggedMin": 1065 },
+  "andresthehealthagent@gmail.com": { "calls": 1,   "talkMin": 0,   "loggedMin": 462 },
+  "fabricio.a.navarrete@gmail.com": { "calls": 0,   "talkMin": 0,   "loggedMin": 296 },
+  "landisagency@gmail.com":         { "calls": 0,   "talkMin": 0,   "loggedMin": 161 },
+  "ajanisenior.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0,   "loggedMin": 582 },
+  "phil@americanpathinsurance.com": { "calls": 44,  "talkMin": 53,  "loggedMin": 170 },
+  "joseph@treasurecoastadvisors.com": { "calls": 0, "talkMin": 0,   "loggedMin": 66 },
+  "anna.ushealthadvisors@gmail.com": { "calls": 125, "talkMin": 16, "loggedMin": 1244 },
+  "eli.thermilushealthadvisor@gmail.com": { "calls": 15, "talkMin": 6, "loggedMin": 654 },
+  "maries.healthadvisor@gmail.com": { "calls": 321, "talkMin": 108, "loggedMin": 559 },
+  "fraitzlineg.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 2 },
+  "abigailaustin.healthadvisor@gmail.com": { "calls": 194, "talkMin": 101, "loggedMin": 2251 },
+  "nathanjohnson.healthadvisor@gmail.com": { "calls": 816, "talkMin": 325, "loggedMin": 1586 }
 }
