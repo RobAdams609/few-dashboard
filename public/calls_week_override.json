@@ -1,15 +1,12 @@
 {
-  "robert@rkainsuranceadvisors.com": { "calls": 522, "talkMin": 395, "loggedMin": 1065 },
-  "andresthehealthagent@gmail.com": { "calls": 1,   "talkMin": 0,   "loggedMin": 462 },
-  "fabricio.a.navarrete@gmail.com": { "calls": 0,   "talkMin": 0,   "loggedMin": 296 },
-  "landisagency@gmail.com":         { "calls": 0,   "talkMin": 0,   "loggedMin": 161 },
-  "ajanisenior.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0,   "loggedMin": 582 },
-  "phil@americanpathinsurance.com": { "calls": 44,  "talkMin": 53,  "loggedMin": 170 },
-  "joseph@treasurecoastadvisors.com": { "calls": 0, "talkMin": 0,   "loggedMin": 66 },
-  "anna.ushealthadvisors@gmail.com": { "calls": 125, "talkMin": 16, "loggedMin": 1244 },
-  "eli.thermilushealthadvisor@gmail.com": { "calls": 15, "talkMin": 6, "loggedMin": 654 },
-  "maries.healthadvisor@gmail.com": { "calls": 321, "talkMin": 108, "loggedMin": 559 },
-  "fraitzlineg.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 2 },
-  "abigailaustin.healthadvisor@gmail.com": { "calls": 194, "talkMin": 101, "loggedMin": 2251 },
-  "nathanjohnson.healthadvisor@gmail.com": { "calls": 816, "talkMin": 325, "loggedMin": 1586 }
+  "robert@rkainsuranceadvisors.com": { "calls": 340, "talkMin": 173, "loggedMin": 621 },
+  "fabricio.a.navarrete@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 136 },
+  "landisagency@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 0 },
+  "ajansenior.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 107 },
+  "phil@americanpathinsurance.com": { "calls": 6, "talkMin": 0, "loggedMin": 43 },
+  "anna.ushealthadvisors@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 0 },
+  "eli.thermilushealthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 221 },
+  "maries.healthadvisor@gmail.com": { "calls": 58, "talkMin": 5, "loggedMin": 125 },
+  "fraitzlineg.healthadvisor@gmail.com": { "calls": 0, "talkMin": 0, "loggedMin": 1 },
+  "nathanjohnson.healthadvisor@gmail.com": { "calls": 171, "talkMin": 53, "loggedMin": 526 }
 }
