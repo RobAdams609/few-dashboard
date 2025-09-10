@@ -1,19 +1,19 @@
-{
-  "fabricio.a.navarrete@gmail.com": 581268,
-  "robert@rkainsuranceadvisors.com": 500300,
-  "phil@americanpathinsurance.com": 460929,
-  "maries.healthadvisor@gmail.com": 357986,
-  "ajanisenior.healthadvisor@gmail.com": 356598,
-  "eli.thermilushealthadvisor@gmail.com": 346809,
-  "anna.ushealthadvisors@gmail.com": 262743,
-  "fraitzlineg.healthadvisor@gmail.com": 171451,
-  "joseph@treasurecoastadvisors.com": 162260,
-  "landisagency@gmail.com": 116972,
-  "alrens.healthadvisor@gmail.com": 92487,
-  "bianca.nunez@few.local": 77409,
-  "alan.cole@few.local": 58860,
-  "tyler.sergi@few.local": 42250,
-  "abigailaustin.healthadvisor@gmail.com": 31133,
-  "andres.castro@few.local": 26786,
-  "kadin.whatley@few.local": 1714
-}
+[
+  { "email": "fabricio.a.navarrete@gmail.com", "total": 581268 },
+  { "email": "robert@rkainsuranceadvisors.com", "total": 500300 },
+  { "email": "phil@americanpathinsurance.com", "total": 460929 },
+  { "email": "maries.healthadvisor@gmail.com", "total": 357986 },
+  { "email": "ajanisenior.healthadvisor@gmail.com", "total": 356598 },
+  { "email": "eli.thermilushealthadvisor@gmail.com", "total": 346809 },
+  { "email": "anna.ushealthadvisors@gmail.com", "total": 262743 },
+  { "email": "fraitlzineg.healthadvisor@gmail.com", "total": 171451 },
+  { "email": "joseph@treasurecoastadvisors.com", "total": 162260 },
+  { "email": "landisagency@gmail.com", "total": 116972 },
+  { "email": "alrens.healthadvisor@gmail.com", "total": 92487 },
+  { "email": "bianca.nunez@few.local", "total": 77409 },
+  { "email": "alan.cole@few.local", "total": 58860 },
+  { "email": "tyler.sergi@few.local", "total": 42250 },
+  { "email": "abigailaustin.healthadvisor@gmail.com", "total": 31133 },
+  { "email": "andres.castro@few.local", "total": 26786 },
+  { "email": "kadin.whatley@few.local", "total": 1714 }
+]
