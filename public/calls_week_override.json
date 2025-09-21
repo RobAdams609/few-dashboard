@@ -1,13 +1,13 @@
 [
-  { "name": "Robert Adams", "email": "robert@rkainsuranceadvisors.com", "leads": 75, "sold": 4, "calls": 454, "talk_time": "2 hrs 36 mins", "login_time": "18 hrs 51 mins" },
-  { "name": "Fabricio Navarrete Cervantes", "email": "fabricio.a.navarrete@gmail.com", "leads": 31, "sold": 3, "calls": 1, "talk_time": "0", "login_time": "3 hrs 58 mins" },
-  { "name": "Michelle Landis", "email": "landisagency@gmail.com", "leads": 10, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "50 mins" },
-  { "name": "Ajani Senior", "email": "ajanisenior.healthadvisor@gmail.com", "leads": 44, "sold": 1, "calls": 0, "talk_time": "0", "login_time": "10 hrs 11 mins" },
-  { "name": "Philip Baxter", "email": "phil@americanpathinsurance.com", "leads": 57, "sold": 3, "calls": 119, "talk_time": "4 hrs 16 mins", "login_time": "5 hrs 42 mins" },
-  { "name": "Anna Gleason", "email": "anna.ushealthadvisors@gmail.com", "leads": 0, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "0" },
-  { "name": "Eli Thermilus", "email": "eli.thermilushealthadvisor@gmail.com", "leads": 28, "sold": 4, "calls": 0, "talk_time": "0", "login_time": "9 hrs 44 mins" },
-  { "name": "Marie Saint Cyr", "email": "maries.healthadvisor@gmail.com", "leads": 13, "sold": 4, "calls": 215, "talk_time": "1 hr 53 mins", "login_time": "7 hrs 12 mins" },
-  { "name": "Fraitlzine Gustave", "email": "fraitlzineg.healthadvisor@gmail.com", "leads": 0, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "3 mins" },
-  { "name": "Nathan Johnson", "email": "nathanjohnson.healthadvisor@gmail.com", "leads": 87, "sold": 2, "calls": 746, "talk_time": "2 hrs 41 mins", "login_time": "33 hrs 57 mins" },
-  { "name": "Sebastian Beltran", "email": "sebastianbeltran.healthadvisor@gmail.com", "leads": 67, "sold": 2, "calls": 327, "talk_time": "3 hrs 6 mins", "login_time": "13 hrs 15 mins" }
+  { "name": "Robert Adams", "email": "robert@rkainsuranceadvisors.com", "leads": 12, "sold": 3, "calls": 112, "talk_time": "18 mins", "login_time": "5 hrs 12 mins" },
+  { "name": "Fabricio Navarrete Cervantes", "email": "fabricio.a.navarrete@gmail.com", "leads": 0, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "0" },
+  { "name": "Michelle Landis", "email": "landisagency@gmail.com", "leads": 2, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "13 mins" },
+  { "name": "Ajani Senior", "email": "ajanisenior.healthadvisor@gmail.com", "leads": 12, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "37 mins" },
+  { "name": "Philip Baxter", "email": "phil@americanpathinsurance.com", "leads": 14, "sold": 2, "calls": 23, "talk_time": "59 mins", "login_time": "1 hr 44 mins" },
+  { "name": "Anna Gleason", "email": "anna.ushealthadvisors@gmail.com", "leads": 0, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "22 mins" },
+  { "name": "Eli Thermilus", "email": "eli.thermilushealthadvisor@gmail.com", "leads": 1, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "2 hrs 1 min" },
+  { "name": "Marie Saint Cyr", "email": "maries.healthadvisor@gmail.com", "leads": 0, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "0" },
+  { "name": "Fraitzline Gustave", "email": "fraitzlineg.healthadvisor@gmail.com", "leads": 0, "sold": 0, "calls": 0, "talk_time": "0", "login_time": "2 mins" },
+  { "name": "Nathan Johnson", "email": "nathanjohnson.healthadvisor@gmail.com", "leads": 27, "sold": 1, "calls": 179, "talk_time": "32 mins", "login_time": "5 hrs 5 mins" },
+  { "name": "Sebastian Beltran", "email": "sebastianbeltran.healthadvisor@gmail.com", "leads": 6, "sold": 0, "calls": 201, "talk_time": "24 mins", "login_time": "4 hrs 6 mins" }
 ]
