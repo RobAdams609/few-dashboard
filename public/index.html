@@ -6,52 +6,77 @@
     <title>FEW — Dashboard</title>
     <link rel="stylesheet" href="dashboard.css" />
     <style>
-      body { background:#10151c; color:#cfd7e3; font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif; margin:0; }
+      /* Layout / theme */
+      :root{
+        --bg:#10151c; --panel:#0b0f15; --line:#253041; --muted:#9fb0c8; --text:#cfd7e3; --glow:#fff5d6;
+        --accent:#ffd36a; --good:#00e39b;
+      }
+      html,body{height:100%}
+      body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;}
 
-      .ticker { background:#0b0f15; border-bottom:1px solid #253041; padding:6px 10px; font-size:12px; color:#f0c060; }
+      /* Top ticker: SINGLE source of Rule of the Day */
+      .ticker{
+        position:sticky; top:0; z-index:20;
+        background:var(--panel); border-bottom:1px solid var(--line);
+        padding:6px 10px; font-size:12px; color:#f0c060;
+      }
 
-      .banner { text-align:center; padding:24px 12px 6px; }
-      .title { font-size:44px; font-weight:800; line-height:1.1; color:#fff5d6; text-shadow:0 0 24px rgba(255,210,90,.45); }
-      .subtitle { margin-top:10px; font-size:14px; color:#a9b3c5; }
+      /* Banner title */
+      .banner{ text-align:center; padding:24px 12px 6px; }
+      .title{ font-size:44px; font-weight:800; line-height:1.1; color:var(--glow);
+              text-shadow:0 0 24px rgba(255,210,90,.45); }
+      .subtitle{ margin-top:10px; font-size:14px; color:#a9b3c5; }
 
-      .section-label { text-align:center; margin:14px 0 8px; color:#ffd36a; font-weight:700; }
+      .section-label{ text-align:center; margin:14px 0 8px; color:var(--accent); font-weight:700; }
 
-      .summary { display:grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap:10px; padding:8px 10px 0; }
-      .card { background:#0b0f15; border:1px solid #253041; border-radius:12px; padding:10px; text-align:center; }
-      .card .k { font-size:12px; color:#9fb0c8; }
-      .card .v { font-size:20px; font-weight:800; margin-top:4px; color:#fff5d6; }
+      /* Summary cards (always visible) */
+      .summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; padding:8px 10px 0; }
+      .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center; }
+      .card .k{ font-size:12px; color:var(--muted); }
+      .card .v{ font-size:20px; font-weight:800; margin-top:4px; color:var(--glow); }
 
-      table { width:100%; border-collapse:collapse; background:#0f141c; margin-top:8px; }
-      thead th { background:#0b0f15; color:#9fb0c8; font-size:13px; text-align:left; padding:10px; border-top:1px solid #253041; border-bottom:1px solid #253041; }
-      tbody td { padding:10px; border-bottom:1px solid #1b2534; }
-      td.num { text-align:right; font-variant-numeric:tabular-nums; }
+      /* Board table (rotating views) */
+      table{ width:100%; border-collapse:collapse; background:#0f141c; margin-top:8px; }
+      thead th{ background:var(--panel); color:var(--muted); font-size:13px; text-align:left; padding:10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+      tbody td{ padding:10px; border-bottom:1px solid #1b2534; }
+      td.num{ text-align:right; font-variant-numeric:tabular-nums; }
 
-      .agent { display:flex; align-items:center; gap:10px; }
-      .avatar, .avatar-fallback { width:28px; height:28px; border-radius:50%; background:#1f2a3a; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#89a2c6; }
+      .agent{ display:flex; align-items:center; gap:10px; }
+      .avatar,.avatar-fallback{ width:28px; height:28px; border-radius:50%; background:#1f2a3a; display:inline-flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:#89a2c6; }
 
-      .sale-pop { position:fixed; left:50%; transform:translateX(-50%); bottom:-80px; padding:10px 16px; border-radius:999px;
-        background:#0b5d2a; color:#e7ffe7; font-weight:700; box-shadow:0 10px 30px rgba(0,0,0,.35); transition:bottom .35s ease; z-index:9999; }
-      .sale-pop.show { bottom:18px; }
+      /* Sale pop toast */
+      .sale-pop{
+        position:fixed; left:50%; transform:translateX(-50%); bottom:-80px;
+        padding:10px 16px; border-radius:999px; background:#0b5d2a; color:#e7ffe7; font-weight:700;
+        box-shadow:0 10px 30px rgba(0,0,0,.35); transition:bottom .35s ease; z-index:30;
+      }
+      .sale-pop.show{ bottom:18px; }
 
-      /* OE countdown footer */
-      .oe-footer { text-align:center; padding:8px 10px; font-size:13px; color:#9fb0c8; background:#0b0f15; border-top:1px solid #253041; }
-      .oe-footer span { color:#00d46a; font-weight:700; }
+      /* OE Countdown fixed footer (only element at bottom) */
+      #oeBar{
+        position:fixed; left:0; right:0; bottom:0; z-index:25;
+        background:var(--panel); border-top:1px solid var(--line);
+        padding:6px 10px; font-size:12px; color:var(--muted); text-align:center;
+      }
+      #oeTimer{ color:var(--good); font-weight:700; }
+
+      /* Spacer so the fixed bar doesn’t overlap the table last row */
+      .footer-spacer{ height:32px; }
     </style>
   </head>
+
   <body>
-    <!-- Single ticker -->
+    <!-- SINGLE ticker -->
     <div id="ticker" class="ticker">RULE OF THE DAY — …</div>
 
-    <!-- Single banner -->
     <header class="banner">
       <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
       <div id="principle" class="subtitle">Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.</div>
     </header>
 
-    <!-- One section label -->
     <div id="viewLabel" class="section-label">Today — Roster</div>
 
-    <!-- Summary cards -->
+    <!-- Team totals (always visible) -->
     <div id="summary" class="summary">
       <div class="card"><div class="k">Today — Team Calls</div><div id="sumCalls" class="v">0</div></div>
       <div class="card"><div class="k">Today — Team Talk (min)</div><div id="sumTalk" class="v">0</div></div>
@@ -66,29 +91,34 @@
       <tbody id="tbody"><tr><td style="padding:18px;color:#5c6c82;">Loading…</td></tr></tbody>
     </table>
 
-    <!-- Sale pop -->
+    <!-- Spacer so fixed OE bar doesn’t cover content -->
+    <div class="footer-spacer"></div>
+
+    <!-- Sale celebration toast -->
     <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
 
-    <!-- OE Countdown footer -->
-    <div id="oeFooter" class="oe-footer">
-      OE Countdown: <span id="oeCountdown"></span>
-    </div>
+    <!-- OE Countdown (only footer element) -->
+    <div id="oeBar">OE Countdown: <span id="oeTimer">…</span></div>
 
-    <script src="dashboard.js?v=8" defer></script>
-    <script>
-      // OE countdown to Nov 1, 2025 00:00 ET
-      const oeDate = new Date("2025-11-01T00:00:00-04:00").getTime();
-      const oeEl = document.getElementById("oeCountdown");
-      setInterval(() => {
-        const now = new Date().getTime();
-        const dist = oeDate - now;
-        if (dist <= 0) { oeEl.textContent = "OPEN ENROLLMENT IS LIVE"; return; }
-        const d = Math.floor(dist/(1000*60*60*24));
-        const h = Math.floor((dist%(1000*60*60*24))/(1000*60*60));
-        const m = Math.floor((dist%(1000*60*60))/(1000*60));
-        const s = Math.floor((dist%(1000*60))/1000);
-        oeEl.textContent = `${d}d ${h}h ${m}m ${s}s`;
-      }, 1000);
+    <!-- Scripts (version busts stale cache) -->
+    <script src="dashboard.js?v=7" defer></script>
+    <script defer>
+      // OE countdown init — set your OE start date/time (ET)
+      (function(){
+        const target = new Date('2025-11-01T00:00:00-04:00'); // adjust if needed
+        const el = document.getElementById('oeTimer');
+        function pad(n){return String(n).padStart(2,'0')}
+        function tick(){
+          const now = new Date();
+          let s = Math.max(0, Math.floor((target - now)/1000));
+          const d = Math.floor(s/86400); s%=86400;
+          const h = Math.floor(s/3600); s%=3600;
+          const m = Math.floor(s/60); const sec = s%60;
+          el.textContent = `${d}d ${pad(h)}h ${pad(m)}m ${pad(sec)}s`;
+          requestAnimationFrame(()=>setTimeout(tick, 250));
+        }
+        tick();
+      })();
     </script>
   </body>
 </html>
