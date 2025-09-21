@@ -33,16 +33,17 @@
       background:#0b5d2a; color:#e7ffe7; font-weight:700; box-shadow:0 10px 30px rgba(0,0,0,.35); transition:bottom .35s ease; z-index:9999; }
     .sale-pop.show { bottom:18px; }
 
-    /* --- OE countdown bar --- */
-    body { padding-bottom:46px; } /* keep content above fixed bar */
-    .ticker-bottom {
-      position:fixed; left:0; right:0; bottom:0;
-      background:#0b0f15; border-top:1px solid #253041;
-      color:#00e676; font-weight:800; font-size:14px;
-      padding:10px 12px; text-align:center; z-index:9998;
-      letter-spacing:.2px;
+    /* OE countdown bar */
+    .oe-countdown {
+      background:#0b0f15;
+      border-top:1px solid #253041;
+      padding:8px 0;
+      font-size:16px;
+      font-weight:700;
+      color:#40ff40; /* bright green */
+      text-align:center;
+      letter-spacing:0.5px;
     }
-    .ticker-bottom .label { color:#9fb0c8; font-weight:700; margin-right:8px; }
   </style>
 </head>
 <body>
@@ -73,44 +74,32 @@
   <!-- Sale celebration -->
   <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
 
-  <!-- OE Countdown (fixed bottom ticker) -->
-  <div class="ticker-bottom" aria-live="polite">
-    <span class="label">OE Countdown:</span>
-    <span id="oe-timer">—</span>
-  </div>
+  <!-- OE Countdown -->
+  <div id="oeCountdown" class="oe-countdown"></div>
 
   <!-- version busts stale cache -->
   <script src="dashboard.js?v=7" defer></script>
-
-  <!-- OE countdown script -->
   <script>
-    (function () {
-      // Open Enrollment start (ET). Adjust if your OE date/time changes.
-      const launch = new Date("2025-11-01T00:00:00-04:00").getTime();
+    // OE Countdown target (example: Nov 1, 2025, 00:00 ET)
+    const oeDate = new Date("2025-11-01T00:00:00-04:00").getTime();
+    const oeEl = document.getElementById("oeCountdown");
 
-      function tick() {
-        const now = Date.now();
-        const diff = launch - now;
+    setInterval(() => {
+      const now = new Date().getTime();
+      const diff = oeDate - now;
 
-        const el = document.getElementById('oe-timer');
-        if (!el) return;
-
-        if (diff <= 0) {
-          el.textContent = "OPEN ENROLLMENT IS LIVE!";
-          return;
-        }
-
-        const d = Math.floor(diff / (1000*60*60*24));
-        const h = Math.floor((diff % (1000*60*60*24)) / (1000*60*60));
-        const m = Math.floor((diff % (1000*60*60)) / (1000*60));
-        const s = Math.floor((diff % (1000*60)) / 1000);
-
-        el.textContent = d + "d " + h + "h " + m + "m " + s + "s";
+      if (diff <= 0) {
+        oeEl.textContent = "Open Enrollment is LIVE!";
+        return;
       }
 
-      tick();
-      setInterval(tick, 1000);
-    })();
+      const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+      const h = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+      const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diff % (1000 * 60)) / 1000);
+
+      oeEl.textContent = `OE Countdown: ${d}d ${h}h ${m}m ${s}s`;
+    }, 1000);
   </script>
 </body>
 </html>
