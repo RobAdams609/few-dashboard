@@ -73,8 +73,7 @@
       #oeBar{
         position:fixed; left:0; right:0; bottom:0; z-index:25;
         background:var(--panel); border-top:1px solid var(--line);
-        padding:10px 16px;
-        text-align:center;
+        padding:10px 16px; text-align:center;
       }
       #oeBarInner{
         display:inline-block; min-width:520px; max-width:90vw;
@@ -91,9 +90,9 @@
         100% { box-shadow:0 0 0 0 rgba(0,227,155,0); }
       }
 
-      .footer-spacer{ height:44px; } /* a little taller for the bigger bar */
+      .footer-spacer{ height:44px; } /* taller so bar doesn’t overlap content */
 
-      /* Apple Music dock — auto-minimize toggle */
+      /* Apple Music dock — minimized by default, toggleable, remembers state */
       #musicDock{
         position:fixed; right:15px; bottom:80px; z-index:24;
         border-radius:12px; overflow:hidden; box-shadow:0 5px 18px rgba(0,0,0,.35);
@@ -107,8 +106,7 @@
         cursor:pointer; box-shadow:0 0 10px rgba(0,0,0,.4);
       }
       #musicDock iframe{
-        width:260px; height:120px; border:0;
-        background:transparent;
+        width:260px; height:120px; border:0; background:transparent;
       }
     </style>
   </head>
@@ -145,8 +143,8 @@
     <!-- Sale toast -->
     <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
 
-    <!-- Apple Music dock (auto-minimized) -->
-    <div id="musicDock" class="minimized">
+    <!-- Apple Music dock (starts minimized; click 🎵 to expand) -->
+    <div id="musicDock" class="minimized" aria-label="Apple Music dock">
       <iframe
         allow="autoplay *; encrypted-media *; fullscreen *"
         sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
@@ -163,9 +161,9 @@
     </div>
 
     <!-- App JS -->
-    <script src="dashboard.js?v=8" defer></script>
+    <script src="dashboard.js?v=9" defer></script>
 
-    <!-- OE countdown + music dock toggle -->
+    <!-- OE countdown + music dock logic -->
     <script>
       // OE countdown
       (function(){
@@ -184,22 +182,36 @@
         tick();
       })();
 
-      // Auto-minimize toggle for the Apple Music dock:
-      // - Starts minimized (shows 🎵 button)
-      // - Click the button to expand
-      // - Click anywhere outside to minimize again
+      // Apple Music dock: toggle + remember state + auto-minimize after 8s
       (function(){
         const dock = document.getElementById('musicDock');
         if (!dock) return;
+
+        // restore last state
+        const saved = localStorage.getItem('few.music.minimized');
+        if (saved === 'false') dock.classList.remove('minimized');
+        else dock.classList.add('minimized');
+
+        // click inside dock area toggles when minimized (the 🎵 pill), otherwise minimize on outside click
         document.addEventListener('click', (e)=>{
           if (dock.contains(e.target)){
-            // If minimized and user clicked the 🎵 button -> expand
-            if (dock.classList.contains('minimized')) dock.classList.remove('minimized');
+            if (dock.classList.contains('minimized')) {
+              dock.classList.remove('minimized');
+              localStorage.setItem('few.music.minimized', 'false');
+            }
           } else {
-            // Clicked outside -> minimize
             dock.classList.add('minimized');
+            localStorage.setItem('few.music.minimized', 'true');
           }
         });
+
+        // auto-minimize if left open for a while
+        if (!dock.classList.contains('minimized')) {
+          setTimeout(()=>{
+            dock.classList.add('minimized');
+            localStorage.setItem('few.music.minimized', 'true');
+          }, 8000);
+        }
       })();
     </script>
   </body>
