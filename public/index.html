@@ -6,66 +6,101 @@
     <title>FEW — Dashboard</title>
     <link rel="stylesheet" href="dashboard.css" />
     <style>
-      :root {
+      :root{
         --bg:#10151c; --panel:#0b0f15; --line:#253041; --muted:#9fb0c8;
         --text:#cfd7e3; --glow:#fff5d6; --accent:#ffd36a; --good:#00e39b;
       }
-      html,body { height:100%; margin:0; background:var(--bg); color:var(--text);
-        font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif; }
+      html,body{
+        height:100%; margin:0; background:var(--bg); color:var(--text);
+        font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+      }
 
-      .ticker {
+      /* Ticker */
+      .ticker{
         position:sticky; top:0; z-index:20;
         background:var(--panel); border-bottom:1px solid var(--line);
         padding:6px 10px; font-size:12px; color:#f0c060;
       }
 
-      .banner { text-align:center; padding:24px 12px 6px; }
-      .title { font-size:44px; font-weight:800; line-height:1.1; color:var(--glow);
-        text-shadow:0 0 24px rgba(255,210,90,.45); }
-      .subtitle { margin-top:10px; font-size:14px; color:#a9b3c5; }
+      /* Banner */
+      .banner{ text-align:center; padding:24px 12px 6px; }
+      .title{
+        font-size:44px; font-weight:800; line-height:1.1; color:var(--glow);
+        text-shadow:0 0 24px rgba(255,210,90,.45);
+      }
+      .subtitle{ margin-top:10px; font-size:14px; color:#a9b3c5; }
 
-      .section-label { text-align:center; margin:14px 0 8px; color:var(--accent); font-weight:700; }
+      .section-label{ text-align:center; margin:14px 0 8px; color:var(--accent); font-weight:700; }
 
-      .summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-        gap:10px; padding:8px 10px 0; }
-      .card { background:var(--panel); border:1px solid var(--line);
-        border-radius:12px; padding:10px; text-align:center; }
-      .card .k { font-size:12px; color:var(--muted); }
-      .card .v { font-size:20px; font-weight:800; margin-top:4px; color:var(--glow); }
+      /* KPI cards */
+      .summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; padding:8px 10px 0; }
+      .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center; }
+      .card .k{ font-size:12px; color:var(--muted); }
+      .card .v{ font-size:20px; font-weight:800; margin-top:4px; color:var(--glow); }
 
-      table { width:100%; border-collapse:collapse; background:#0f141c; margin-top:8px; }
-      thead th { background:var(--panel); color:var(--muted); font-size:13px; text-align:left;
-        padding:10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
-      tbody td { padding:10px; border-bottom:1px solid #1b2534; }
-      td.num { text-align:right; font-variant-numeric:tabular-nums; }
+      /* Table */
+      table{ width:100%; border-collapse:collapse; background:#0f141c; margin-top:8px; }
+      thead th{
+        background:var(--panel); color:var(--muted); font-size:13px; text-align:left;
+        padding:10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+      }
+      tbody td{ padding:10px; border-bottom:1px solid #1b2534; }
+      td.num{ text-align:right; font-variant-numeric:tabular-nums; }
 
-      .agent { display:flex; align-items:center; gap:10px; }
-      .avatar,.avatar-fallback { width:28px; height:28px; border-radius:50%;
-        background:#1f2a3a; display:inline-flex; align-items:center; justify-content:center;
-        font-size:12px; font-weight:700; color:#89a2c6; }
+      .agent{ display:flex; align-items:center; gap:10px; }
+      .avatar,.avatar-fallback{
+        width:28px; height:28px; border-radius:50%; background:#1f2a3a;
+        display:inline-flex; align-items:center; justify-content:center;
+        font-size:12px; font-weight:700; color:#89a2c6;
+      }
 
-      .sale-pop {
+      /* Sale toast */
+      .sale-pop{
         position:fixed; left:50%; transform:translateX(-50%); bottom:-80px;
         padding:10px 16px; border-radius:999px; background:#0b5d2a; color:#e7ffe7; font-weight:700;
         box-shadow:0 10px 30px rgba(0,0,0,.35); transition:bottom .35s ease; z-index:30;
       }
-      .sale-pop.show { bottom:18px; }
+      .sale-pop.show{ bottom:18px; }
 
-      #oeBar {
+      /* OE countdown — bigger & pulsating */
+      #oeBar{
         position:fixed; left:0; right:0; bottom:0; z-index:25;
-        background:var(--panel); border-top:1px solid var(--line);
-        padding:6px 10px; font-size:12px; color:var(--muted); text-align:center;
+        background:linear-gradient(90deg, rgba(11,15,21,.95), rgba(11,15,21,.95));
+        border-top:1px solid var(--line);
+        padding:12px 18px;
+        font-size:16px; color:var(--muted); text-align:center;
       }
-      #oeTimer { color:var(--good); font-weight:700; }
+      #oeTimer{
+        color:var(--good); font-weight:800; font-size:22px; letter-spacing:.5px;
+        text-shadow:0 0 8px rgba(0,227,155,.65);
+        animation:oePulse 1.6s ease-in-out infinite;
+      }
+      @keyframes oePulse{
+        0%   { text-shadow:0 0 6px rgba(0,227,155,.6), 0 0 0 rgba(0,227,155,0); }
+        50%  { text-shadow:0 0 18px rgba(0,227,155,.9), 0 0 24px rgba(0,227,155,.25); }
+        100% { text-shadow:0 0 6px rgba(0,227,155,.6), 0 0 0 rgba(0,227,155,0); }
+      }
 
-      .footer-spacer { height:32px; }
+      /* Spacer so OE bar & music dock don't cover the table */
+      .footer-spacer{ height:64px; } /* was 32px */
 
-      /* Apple Music embed */
-      #musicFrame {
-        width:300px; height:150px;
-        position:fixed; bottom:46px; right:20px; z-index:9999;
-        border-radius:12px; border:none;
-        opacity:0.95; background:#000;
+      /* Centered Apple Music dock */
+      #musicDock{
+        position:fixed;
+        left:50%;
+        bottom:64px;                 /* comfortably above OE bar */
+        transform:translateX(-50%);
+        z-index:24;
+        border-radius:14px;
+        overflow:hidden;
+        box-shadow:0 10px 30px rgba(0,0,0,.35);
+        backdrop-filter:saturate(120%) blur(4px);
+      }
+      #musicDock iframe{
+        width:340px; max-width:90vw; height:152px; border:0; background:transparent;
+      }
+      @media (max-width: 700px){
+        #musicDock{ bottom:84px; }
       }
     </style>
   </head>
@@ -97,17 +132,20 @@
 
     <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
 
-    <!-- Apple Music embed -->
-    <iframe
-      id="musicFrame"
-      allow="autoplay *; encrypted-media *; fullscreen *"
-      sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
-      src="https://embed.music.apple.com/us/playlist/the-few/pl.u-4JomXN9TZB29Am?app=music">
-    </iframe>
+    <!-- Centered Apple Music embed -->
+    <div id="musicDock" aria-label="Apple Music Player">
+      <iframe
+        allow="autoplay *; encrypted-media *;"
+        sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
+        src="https://embed.music.apple.com/us/playlist/the-few/pl.u-4JomXN9TZB29Am">
+      </iframe>
+    </div>
 
+    <!-- OE countdown -->
     <div id="oeBar">OE Countdown: <span id="oeTimer">…</span></div>
 
-    <script src="dashboard.js?v=7" defer></script>
+    <!-- bump cache-buster so Leads/Sold/Conv% show on Roster -->
+    <script src="dashboard.js?v=8" defer></script>
     <script defer>
       (function(){
         const target = new Date('2025-11-01T00:00:00-04:00');
