@@ -10,8 +10,9 @@
         --bg:#10151c; --panel:#0b0f15; --line:#253041; --muted:#9fb0c8;
         --text:#cfd7e3; --glow:#fff5d6; --accent:#ffd36a; --good:#00e39b;
       }
-      html,body{
-        height:100%; margin:0; background:var(--bg); color:var(--text);
+      html,body{height:100%}
+      body{
+        margin:0; background:var(--bg); color:var(--text);
         font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
       }
 
@@ -32,9 +33,15 @@
 
       .section-label{ text-align:center; margin:14px 0 8px; color:var(--accent); font-weight:700; }
 
-      /* KPI cards */
-      .summary{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; padding:8px 10px 0; }
-      .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px; text-align:center; }
+      /* Summary cards */
+      .summary{
+        display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+        gap:10px; padding:8px 10px 0;
+      }
+      .card{
+        background:var(--panel); border:1px solid var(--line);
+        border-radius:12px; padding:10px; text-align:center;
+      }
       .card .k{ font-size:12px; color:var(--muted); }
       .card .v{ font-size:20px; font-weight:800; margin-top:4px; color:var(--glow); }
 
@@ -62,52 +69,55 @@
       }
       .sale-pop.show{ bottom:18px; }
 
-      /* OE countdown — bigger & pulsating */
+      /* OE Countdown — larger, wider, pulsating */
       #oeBar{
         position:fixed; left:0; right:0; bottom:0; z-index:25;
-        background:linear-gradient(90deg, rgba(11,15,21,.95), rgba(11,15,21,.95));
-        border-top:1px solid var(--line);
-        padding:12px 18px;
-        font-size:16px; color:var(--muted); text-align:center;
+        background:var(--panel); border-top:1px solid var(--line);
+        padding:10px 16px;
+        text-align:center;
       }
-      #oeTimer{
-        color:var(--good); font-weight:800; font-size:22px; letter-spacing:.5px;
-        text-shadow:0 0 8px rgba(0,227,155,.65);
-        animation:oePulse 1.6s ease-in-out infinite;
+      #oeBarInner{
+        display:inline-block; min-width:520px; max-width:90vw;
+        background:rgba(0,0,0,.35); border:1px solid #223046; border-radius:999px;
+        padding:10px 18px;
+        box-shadow:0 0 0 0 rgba(0,227,155,.45);
+        animation:pulse 2s ease-in-out infinite;
       }
-      @keyframes oePulse{
-        0%   { text-shadow:0 0 6px rgba(0,227,155,.6), 0 0 0 rgba(0,227,155,0); }
-        50%  { text-shadow:0 0 18px rgba(0,227,155,.9), 0 0 24px rgba(0,227,155,.25); }
-        100% { text-shadow:0 0 6px rgba(0,227,155,.6), 0 0 0 rgba(0,227,155,0); }
+      #oeLabel{ color:#9fb0c8; margin-right:10px; font-weight:600; letter-spacing:.02em; }
+      #oeTimer{ color:var(--good); font-weight:800; font-size:18px; }
+      @keyframes pulse{
+        0%   { box-shadow:0 0 0 0 rgba(0,227,155,.55); }
+        70%  { box-shadow:0 0 0 16px rgba(0,227,155,0); }
+        100% { box-shadow:0 0 0 0 rgba(0,227,155,0); }
       }
 
-      /* Spacer so OE bar & music dock don't cover the table */
-      .footer-spacer{ height:64px; } /* was 32px */
+      .footer-spacer{ height:44px; } /* a little taller for the bigger bar */
 
-      /* Centered Apple Music dock */
+      /* Apple Music dock — auto-minimize toggle */
       #musicDock{
-        position:fixed;
-        left:50%;
-        bottom:64px;                 /* comfortably above OE bar */
-        transform:translateX(-50%);
-        z-index:24;
-        border-radius:14px;
-        overflow:hidden;
-        box-shadow:0 10px 30px rgba(0,0,0,.35);
-        backdrop-filter:saturate(120%) blur(4px);
+        position:fixed; right:15px; bottom:80px; z-index:24;
+        border-radius:12px; overflow:hidden; box-shadow:0 5px 18px rgba(0,0,0,.35);
+        transition:all .3s ease;
+      }
+      #musicDock.minimized iframe{ display:none; }
+      #musicDock.minimized::after{
+        content:"🎵";
+        display:block; background:#0b0f15; color:#ffd36a;
+        font-size:20px; padding:10px 14px; border-radius:50%;
+        cursor:pointer; box-shadow:0 0 10px rgba(0,0,0,.4);
       }
       #musicDock iframe{
-        width:340px; max-width:90vw; height:152px; border:0; background:transparent;
-      }
-      @media (max-width: 700px){
-        #musicDock{ bottom:84px; }
+        width:260px; height:120px; border:0;
+        background:transparent;
       }
     </style>
   </head>
 
   <body>
+    <!-- Rule ticker -->
     <div id="ticker" class="ticker">RULE OF THE DAY — …</div>
 
+    <!-- Banner -->
     <header class="banner">
       <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
       <div id="principle" class="subtitle">Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.</div>
@@ -115,6 +125,7 @@
 
     <div id="viewLabel" class="section-label">Today — Roster</div>
 
+    <!-- Summary -->
     <div id="summary" class="summary">
       <div class="card"><div class="k">Today — Team Calls</div><div id="sumCalls" class="v">0</div></div>
       <div class="card"><div class="k">Today — Team Talk (min)</div><div id="sumTalk" class="v">0</div></div>
@@ -123,6 +134,7 @@
       <div class="card"><div class="k">Unassigned Sales</div><div id="sumUnassigned" class="v">$0</div></div>
     </div>
 
+    <!-- Board -->
     <table id="board">
       <thead id="thead"></thead>
       <tbody id="tbody"><tr><td style="padding:18px;color:#5c6c82;">Loading…</td></tr></tbody>
@@ -130,27 +142,36 @@
 
     <div class="footer-spacer"></div>
 
+    <!-- Sale toast -->
     <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
 
-    <!-- Centered Apple Music embed -->
-    <div id="musicDock" aria-label="Apple Music Player">
+    <!-- Apple Music dock (auto-minimized) -->
+    <div id="musicDock" class="minimized">
       <iframe
-        allow="autoplay *; encrypted-media *;"
+        allow="autoplay *; encrypted-media *; fullscreen *"
         sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
-        src="https://embed.music.apple.com/us/playlist/the-few/pl.u-4JomXN9TZB29Am">
+        src="https://embed.music.apple.com/us/playlist/the-few/pl.u-4JomXN9TZB29Am?app=music">
       </iframe>
     </div>
 
-    <!-- OE countdown -->
-    <div id="oeBar">OE Countdown: <span id="oeTimer">…</span></div>
+    <!-- OE Countdown -->
+    <div id="oeBar">
+      <div id="oeBarInner">
+        <span id="oeLabel">OE Countdown</span>
+        <span id="oeTimer">…</span>
+      </div>
+    </div>
 
-    <!-- bump cache-buster so Leads/Sold/Conv% show on Roster -->
+    <!-- App JS -->
     <script src="dashboard.js?v=8" defer></script>
-    <script defer>
+
+    <!-- OE countdown + music dock toggle -->
+    <script>
+      // OE countdown
       (function(){
-        const target = new Date('2025-11-01T00:00:00-04:00');
+        const target = new Date('2025-11-01T00:00:00-04:00'); // adjust if needed
         const el = document.getElementById('oeTimer');
-        function pad(n){return String(n).padStart(2,'0')}
+        const pad = n => String(n).padStart(2,'0');
         function tick(){
           const now = new Date();
           let s = Math.max(0, Math.floor((target - now)/1000));
@@ -161,6 +182,24 @@
           requestAnimationFrame(()=>setTimeout(tick, 250));
         }
         tick();
+      })();
+
+      // Auto-minimize toggle for the Apple Music dock:
+      // - Starts minimized (shows 🎵 button)
+      // - Click the button to expand
+      // - Click anywhere outside to minimize again
+      (function(){
+        const dock = document.getElementById('musicDock');
+        if (!dock) return;
+        document.addEventListener('click', (e)=>{
+          if (dock.contains(e.target)){
+            // If minimized and user clicked the 🎵 button -> expand
+            if (dock.classList.contains('minimized')) dock.classList.remove('minimized');
+          } else {
+            // Clicked outside -> minimize
+            dock.classList.add('minimized');
+          }
+        });
       })();
     </script>
   </body>
