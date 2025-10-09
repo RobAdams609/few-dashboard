@@ -1,4 +1,4 @@
-// ============ FEW Dashboard — FULL REPLACEMENT ============
+// ============ FEW Dashboard — FULL REPLACEMENT (with Conversions) ============
 // Rotation: AV (week) → YTD AV → Vendor Chart → Roster
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
@@ -15,6 +15,7 @@ let   viewIdx   = 0;
 const $  = s => document.querySelector(s);
 const fmtInt   = n => Number(n||0).toLocaleString("en-US");
 const fmtMoney = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
+const fmtPct   = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
 const initials = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
@@ -38,9 +39,9 @@ const hmm = m => {
 // ---------------- State ----------------
 const STATE = {
   roster: [],                  // [{name,email,photo,phones[]}]
-  callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin}
+  callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
   salesWeekByKey: new Map(),   // key -> {salesAmt,av12x}
-  team: { calls:0, talk:0, av:0 },
+  team: { calls:0, talk:0, av:0, leads:0, sold:0 },
   overrides: { calls:null, av:null },
   ytd: [],                     // [{name,email,av}]
   seenSaleHashes: new Set()
@@ -138,20 +139,28 @@ async function refreshCalls(){
   const byKey = new Map();
   const hasOverride = !!STATE.overrides.calls && typeof STATE.overrides.calls === "object";
   if (hasOverride){
+    let sumC=0, sumT=0, sumLeads=0, sumSold=0;
     for (const a of STATE.roster){
       const o = STATE.overrides.calls[a.email];
       if (!o) continue;
-      byKey.set(agentKey(a), {
+      const row = {
         calls    : Number(o.calls||0),
         talkMin  : Number(o.talkMin||0),
-        loggedMin: Number(o.loggedMin||0)
-      });
+        loggedMin: Number(o.loggedMin||0),
+        leads    : Number(o.leads||0),
+        sold     : Number(o.sold||0)
+      };
+      byKey.set(agentKey(a), row);
+      sumC     += row.calls;
+      sumT     += row.talkMin;
+      sumLeads += row.leads;
+      sumSold  += row.sold;
     }
     // Team tiles mirror override when present
-    let sumC=0, sumT=0;
-    for (const v of byKey.values()){ sumC+=v.calls; sumT+=v.talkMin; }
     STATE.team.calls = sumC;
     STATE.team.talk  = sumT;
+    STATE.team.leads = sumLeads;
+    STATE.team.sold  = sumSold;
   } else {
     STATE.team.calls = teamCalls;
     STATE.team.talk  = teamTalk;
@@ -246,17 +255,22 @@ function setRows(rows){
 
 function renderRoster(){
   setLabel("This Week — Roster");
-  setHead(["Agent","Calls","Talk Time (min)","Logged (h:mm)","Submitted AV"]);
+  // Added Leads, Sold, Conv %
+  setHead(["Agent","Calls","Talk Time (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
 
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
-    const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0 };
+    const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
     const s = STATE.salesWeekByKey.get(k) || { salesAmt:0, av12x:0 };
+    const conv = c.leads > 0 ? (c.sold / c.leads) : null;
     return [
       avatarCell(a),
       fmtInt(c.calls),
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
+      fmtInt(c.leads),
+      fmtInt(c.sold),
+      fmtPct(conv),
       fmtMoney(s.av12x)
     ];
   });
