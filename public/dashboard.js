@@ -1,11 +1,12 @@
+<script>
 // ============ FEW Dashboard — FULL REPLACEMENT (Live Calls + AOTW + Agent Detail) ============
 const DEBUG = new URLSearchParams(location.search).has("debug");
 const log   = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 
 // ---- Config ----
 const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;                      
-const ROTATE_MS = 30_000;                      
+const DATA_MS   = 30_000;                      // refresh cadence
+const ROTATE_MS = 30_000;                      // rotate views
 const VIEWS     = ["av", "ytd", "vendor", "roster", "aotw"];
 let   viewIdx   = 0;
 
@@ -25,8 +26,8 @@ async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!
 
 function weekRangeET(){
   const now = toET(new Date());
-  const day = now.getDay();           
-  const sinceFri = (day + 2) % 7;     
+  const day = now.getDay();                 // 0..6
+  const sinceFri = (day + 2) % 7;           // Fri=0
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
   const end   = new Date(start); end.setDate(end.getDate()+7);
   return [start, end];
@@ -39,12 +40,12 @@ const hmm = m => {
 
 // ---------------- State ----------------
 const STATE = {
-  roster: [],                  
-  callsWeekByKey: new Map(),   
-  salesWeekByKey: new Map(),   
+  roster: [],                  // [{name,email,photo,phones[]}]
+  callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
+  salesWeekByKey: new Map(),   // key -> {salesAmt,av12x,sales}
   team: { calls:0, talk:0, av:0, leads:0, sold:0 },
   overrides: { calls:null, av:null },
-  ytd: [],                     
+  ytd: [],                     // [{name,email,av}]
   seenSaleHashes: new Set()
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
@@ -254,6 +255,12 @@ function bestOfWeek(){
   return entries[0] || null;
 }
 
+function getAgentByNameCaseInsensitive(name){
+  const needle = String(name||"").trim().toLowerCase();
+  if (!needle) return null;
+  return STATE.roster.find(r => String(r.name||"").trim().toLowerCase() === needle) || null;
+}
+
 // ---------------- Renderers ----------------
 function renderKPIs(){
   const { calls, talk, av } = STATE.team;
@@ -362,3 +369,150 @@ function renderAOTW(){
 function avatarBlock(a){
   const src = a.photo ? `/headshots/${a.photo}` : "";
   return src
+    ? `<img class="hero-avatar" src="${src}" alt="${escapeHtml(a.name)}" onerror="this.remove();">`
+    : `<div class="hero-fallback">${initials(a.name)}</div>`;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+function showHero(show, html=""){
+  const hero = $("#hero");
+  hero.style.display = show ? "block" : "none";
+  hero.innerHTML = show ? html : "";
+}
+
+// ---- Agent detail (weekly)
+function openAgentDetail(name){
+  const agent = getAgentByNameCaseInsensitive(name);
+  if (!agent){ alert("Agent not found."); return; }
+  const k = agentKey(agent);
+  const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
+
+  showHero(true, `
+    <div class="profile">
+      <div class="profile-photo">${avatarBlock(agent)}</div>
+      <div class="profile-body">
+        <div class="profile-name">${escapeHtml(agent.name)}</div>
+        <div class="profile-metrics">
+          <div><span class="k">Deals</span><span class="v">${fmtInt(s.sales||0)}</span></div>
+          <div><span class="k">Total Sales</span><span class="v">${fmtMoney(s.salesAmt||0)}</span></div>
+          <div><span class="k">Submitted AV</span><span class="v gold">${fmtMoney(s.av12x||0)}</span></div>
+        </div>
+        <button class="aotw-btn" onclick="history.back()">← Back</button>
+      </div>
+    </div>
+  `);
+  setLabel("Agent Profile — This Week");
+  setHead([]);
+  setRows([]);
+}
+
+// ---------------- Sale toast ----------------
+function showSalePop({ name, product, amount }){
+  const el = $("#salePop"); if (!el) return;
+  el.textContent = `🔥 ${name || "Team"} sold ${product || "Product"} — ${fmtMoney(amount)}`;
+  el.classList.add("show");
+  setTimeout(()=> el.classList.remove("show"), 7000);
+}
+
+// ---------------- Boot ----------------
+async function boot(){
+  ensureUI();
+  await loadStatic();
+  await Promise.all([refreshCalls(), refreshSales()]);
+  renderCurrent();
+
+  setInterval(async ()=>{
+    await Promise.all([refreshCalls(), refreshSales()]);
+    renderCurrent();
+  }, DATA_MS);
+
+  setInterval(()=>{
+    viewIdx = (viewIdx + 1) % VIEWS.length;
+    renderCurrent();
+  }, ROTATE_MS);
+}
+
+function renderCurrent(){
+  // URL overrides (no rotation if present)
+  if (VIEW_OVERRIDE === "aotw") return renderAOTW();
+  if (VIEW_OVERRIDE === "agent" && AGENT_QS_NAME) return openAgentDetail(AGENT_QS_NAME);
+
+  renderKPIs();
+  const v = VIEWS[viewIdx];
+  if (v === "av")     return renderWeekAV();
+  if (v === "ytd")    return renderYTD();
+  if (v === "vendor") return renderVendorBoard();
+  if (v === "aotw")   return renderAOTW();
+  return renderRoster();
+}
+
+window.addEventListener("DOMContentLoaded", boot);
+
+// ------------ styles (incl. black & gold hero) ------------
+const CSS = `
+.few-root{padding:12px}
+.title{margin:6px 0 2px;font-size:28px;text-align:center;color:#ffeaa7;text-shadow:0 0 12px #222}
+.sub{margin:0 0 12px;text-align:center;color:#9fb}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 10px}
+.kpi{background:#111a22;border:1px solid #24313f;border-radius:10px;padding:10px}
+.kpi .label{font-size:12px;color:#9fb}
+.kpi .value{font-size:22px;color:#ffeaa7}
+.label{margin:10px 0 6px;color:#9fb}
+.grid{width:100%;border-collapse:separate;border-spacing:0 6px}
+.grid th,.grid td{padding:10px;background:#0e1720;border-bottom:1px solid #1f2a36}
+.grid th{color:#9fb;text-align:left}
+.grid td.num{text-align:right;color:#eaeef5}
+.agent{display:flex;gap:8px;align-items:center}
+.avatar{width:28px;height:28px;border-radius:50%;object-fit:cover}
+.avatar-fallback{width:28px;height:28px;border-radius:50%;display:inline-grid;place-items:center;background:#223246;color:#bee}
+.ticker{font-size:12px;color:#9fb;margin-bottom:4px}
+.sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
+.sale-pop.show{opacity:1}
+
+/* Leader glow */
+.leader .agent{position:relative}
+.leader .agent span{ animation: leaderGlow 1.8s ease-in-out infinite alternate; text-shadow: 0 0 6px #ffd166, 0 0 12px #ffd166; }
+@keyframes leaderGlow{ from{ text-shadow:0 0 4px #ffe08a, 0 0 10px #ffd166; } to{ text-shadow:0 0 10px #ffe08a, 0 0 20px #ffd166; } }
+
+/* HERO (black & gold) */
+.hero{ margin-top:10px; }
+.aotw-badge{
+  display:inline-block; padding:6px 12px; border:1px solid #6b5b2b;
+  color:#e9d99a; background:linear-gradient(180deg,#1a1406,#0e0a03);
+  border-radius:999px; letter-spacing:.06em; font-weight:800; font-size:12px;
+  box-shadow:0 0 0 1px #2b230a inset, 0 6px 18px rgba(0,0,0,.35);
+}
+.aotw-card, .profile{
+  display:grid; grid-template-columns:160px 1fr; gap:16px;
+  background:radial-gradient(120% 140% at 60% 0%,#1b1709 0%,#0b0a06 55%,#090806 100%);
+  border:1px solid #3b2f10; border-radius:16px; padding:16px;
+  box-shadow:0 12px 30px rgba(0,0,0,.35), inset 0 0 0 1px #2a210a;
+}
+.hero-avatar, .hero-fallback{
+  width:160px; height:160px; border-radius:12px; object-fit:cover;
+  background:#1f2a3a; display:grid; place-items:center; font-size:38px; color:#d9e2ef;
+  border:1px solid #342a10; box-shadow:inset 0 0 0 1px #4b3a0f;
+}
+.hero-fallback{ font-weight:800; }
+.aotw-name, .profile-name{
+  font-size:34px; font-weight:900; color:#ffeaa7; letter-spacing:.02em; margin-bottom:8px;
+  text-shadow:0 0 18px rgba(255,210,90,.25);
+}
+.aotw-metrics, .profile-metrics{
+  display:grid; grid-template-columns:repeat(3, minmax(120px,1fr)); gap:12px; margin:10px 0 6px;
+}
+.m, .profile-metrics > div{
+  background:rgba(0,0,0,.35); border:1px solid #2d230e; border-radius:12px; padding:10px;
+}
+.k{ color:#a5976a; font-size:12px; }
+.v{ color:#e6d7a3; font-weight:900; font-size:22px; }
+.v.highlight, .gold{ color:#ffd66b; text-shadow:0 0 10px rgba(255,214,107,.25); }
+.aotw-btn{
+  margin-top:8px; padding:10px 14px; border-radius:10px; border:1px solid #4a3a12;
+  background:linear-gradient(180deg,#2c210a,#1a1407); color:#fce59c; font-weight:800; cursor:pointer;
+}
+.aotw-btn:hover{ filter:brightness(1.08); }
+`;
+(() => { const s = document.createElement("style"); s.textContent = CSS; document.head.appendChild(s); })();
+</script>
