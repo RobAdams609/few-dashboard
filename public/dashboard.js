@@ -241,7 +241,7 @@ async function refreshSales(){
 
 // ---------------- Derived ----------------
 function bestOfWeek(){
-  // choose by AV first, then by sales count as tiebreaker
+  // choose by AV first, then by sales count as tiebreaker, then by total sales amount
   const entries = STATE.roster.map(a=>{
     const k = agentKey(a);
     const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
@@ -249,7 +249,8 @@ function bestOfWeek(){
   });
   entries.sort((x,y)=>{
     if (y.av12x !== x.av12x) return y.av12x - x.av12x;
-    return (y.sales||0) - (x.sales||0);
+    if ((y.sales||0) !== (x.sales||0)) return (y.sales||0) - (x.sales||0);
+    return (y.salesAmt||0) - (x.salesAmt||0);
   });
   return entries[0] || null;
 }
@@ -257,7 +258,7 @@ function bestOfWeek(){
 function getAgentByNameCaseInsensitive(name){
   const needle = String(name||"").trim().toLowerCase();
   if (!needle) return null;
-  return STATE.roster.find(r => r.name.trim().toLowerCase() === needle) || null;
+  return STATE.roster.find(r => String(r.name||"").trim().toLowerCase() === needle) || null;
 }
 
 // ---------------- Renderers ----------------
@@ -388,7 +389,7 @@ function renderAOTW(){
   const { a, av12x, sales, salesAmt } = top;
   showHero(true, `
     <div class="aotw">
-      <div class="aotw-badge">AGENT OF THE WEEK</div>
+      <div class="aotw-badge">IN THE LEAD FOR AGENT OF THE WEEK</div>
       <div class="aotw-card">
         <div class="aotw-photo">${avatarBlock(a)}</div>
         <div class="aotw-info">
