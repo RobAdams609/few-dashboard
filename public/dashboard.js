@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE REPLACEMENT (AV-focused) ============ */
+/* ============ FEW Dashboard — COMPLETE REPLACEMENT ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -6,37 +6,24 @@ const DEBUG = new URLSearchParams(location.search).has("debug");
 const log   = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 
 const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;            // refresh data
-const ROTATE_MS = 30_000;            // switch table view
-const VIEWS     = ["roster","av","aotw"];
+const DATA_MS   = 30_000;                      // refresh data
+const ROTATE_MS = 30_000;                      // switch table view
+const VIEWS     = ["roster","av","aotw"];      // simple & reliable rotation
 let   viewIdx   = 0;
 
 const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
 
 /* ---------- Utils ---------- */
-const $ = s => document.querySelector(s);
-
+const $  = s => document.querySelector(s);
 const fmtInt   = n => Number(n||0).toLocaleString("en-US");
 const fmtMoney = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
 const fmtPct   = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
 const initials = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 const escapeHtml = s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
-
+const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
-
-const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
-
-// Sales week: Friday 00:00 ET → Friday 00:00 ET next week
-function weekRangeET(){
-  const now = toET(new Date());
-  const day = now.getDay();                // 0=Sun ... 5=Fri
-  const sinceFri = (day + 2) % 7;          // days since Friday
-  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
-  const end   = new Date(start); end.setDate(end.getDate()+7);
-  return [start, end];
-}
 
 function hmm(mins){
   const mm = Math.max(0, Math.round(Number(mins||0)));
@@ -44,57 +31,72 @@ function hmm(mins){
   return `${h}:${String(m2).padStart(2,"0")}`;
 }
 
+/* Weekly window = **Friday 12:00am ET** → next Friday 12:00am ET */
+function weekRangeET(){
+  const now = toET(new Date());
+  const day = now.getDay();                // Sun=0 … Sat=6
+  const sinceFri = (day + 2) % 7;          // distance back to Friday
+  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
+  const end   = new Date(start); end.setDate(end.getDate()+7);
+  return [start, end];                      // [inclusive, exclusive)
+}
+
 /* ---------- State ---------- */
 const STATE = {
   roster: [],                  // [{name,email,photo,phones}]
   callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
-  salesWeekByKey: new Map(),   // key -> {sales, salesAmt, av12x}
+  salesWeekByKey: new Map(),   // key -> {sales,salesAmt,av12x}
   overrides: { calls:null, av:null },
   team: { calls:0, talk:0, av:0, leads:0, sold:0 },
   seenSaleHashes: new Set()
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------- UI helpers ---------- */
+/* ---------- Simple UI helpers ---------- */
 function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
   const idx  = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
-  const tik = $("#ticker");    if (tik) tik.textContent = `RULE OF THE DAY — ${text}`;
-  const sub = $("#principle"); if (sub) sub.textContent = text;
-}
-
-function tweakSummaryLayoutOnce(){
-  // Re-label card #3 as Total Submitted AV and point its value to team.av.
-  // Hide card #4 (old AV) and #5 (Unassigned).
-  const cards = document.querySelectorAll("#summary .card");
-  if (cards.length >= 3){
-    const labelEl = cards[2].querySelector(".k");
-    if (labelEl && !labelEl.dataset.fewRelabeled){
-      labelEl.textContent = "This Week — Total Submitted AV (12×)";
-      labelEl.dataset.fewRelabeled = "1";
-    }
-    // Route the value to #sumSales (we’ll write team.av into that)
-    const oldAV = cards[3]; if (oldAV) oldAV.style.display = "none";
-    const unassigned = cards[4]; if (unassigned) unassigned.style.display = "none";
-  }
+  $("#ticker")     && ($("#ticker").textContent    = `RULE OF THE DAY — ${text}`);
+  $("#principle")  && ($("#principle").textContent = text);
 }
 
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
-function setHead(cols){ const thead = $("#thead"); if (thead) thead.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`; }
+
+function setHead(cols){
+  const thead = $("#thead");
+  if (thead) thead.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`;
+}
+
 function setRows(rows){
-  const tbody = $("#tbody"); if (!tbody) return;
+  const tbody = $("#tbody");
+  if (!tbody) return;
   tbody.innerHTML = rows.length
     ? rows.map(r => `<tr>${r.map((c,i)=>`<td class="${i>0?"num":""}">${c}</td>`).join("")}</tr>`).join("")
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
+/* Re-label & hide summary cards (no HTML edits needed) */
+function massageSummaryLayout(){
+  // 1) Rename the “Team Sales” card to “Total Submitted AV (12×)” and repurpose its value
+  const sumSales = $("#sumSales");
+  if (sumSales){
+    const label = sumSales.previousElementSibling;
+    if (label) label.textContent = "This Week — Total Submitted AV (12×)";
+  }
+  // 2) Hide the separate “Team AV (12×)” card (redundant)
+  const sumAV = $("#sumAV");
+  if (sumAV) sumAV.closest(".card")?.setAttribute("style","display:none");
+  // 3) Hide “Unassigned Sales” card (never show)
+  const sumUn = $("#sumUnassigned");
+  if (sumUn) sumUn.closest(".card")?.setAttribute("style","display:none");
+}
+
 function updateSummary(){
-  tweakSummaryLayoutOnce();
   $("#sumCalls") && ($("#sumCalls").textContent = fmtInt(STATE.team.calls));
   $("#sumTalk")  && ($("#sumTalk").textContent  = fmtInt(Math.round(STATE.team.talk)));
-  // We repurpose #sumSales to show AV total (because we relabeled that card)
+  // We now show **Total Submitted AV (12×)** in the third card (#sumSales)
   $("#sumSales") && ($("#sumSales").textContent = fmtMoney(STATE.team.av));
 }
 
@@ -118,9 +120,10 @@ function avatarBlock(a){
 }
 
 function showSalePop({name, amount}){
-  // small toast (kept; big “celebration” overlay will be added later if you want)
-  const el = $("#salePop"); if (!el) return;
-  el.textContent = `${name} submitted ${fmtMoney(amount*12)} AV 🎉`;
+  const el = $("#salePop");
+  if (!el) return;
+  const av12 = Number(amount||0) * 12;
+  el.textContent = `${name} submitted ${fmtMoney(av12)} AV 🎉`;
   el.classList.add("show");
   setTimeout(()=> el.classList.remove("show"), 3500);
 }
@@ -145,7 +148,7 @@ async function loadStatic(){
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
-// Live calls/talk/leads/sold — server already gives week; we keep overrides support
+/* Live calls / talk / leads / sold */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
@@ -176,11 +179,12 @@ async function refreshCalls(){
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Apply overrides if present
+  // Overrides if present
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
-      const a = byEmail.get(String(email).toLowerCase()); if (!a) continue;
+      const a = byEmail.get(String(email).toLowerCase());
+      if (!a) continue;
       const k   = agentKey(a);
       const cur = byKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
 
@@ -206,76 +210,80 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Sales / AV (12×) — recomputed client-side for the current ET week ---------- */
+/* Sales → AV (12×) for **this week only**. Works even if the function doesn’t give av12x. */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
-    const all = Array.isArray(payload?.allSales) ? payload.allSales : [];
-    const [startET, endET] = weekRangeET();
 
-    // Build per-agent sums from raw sales — filter to THIS WEEK in ET, compute 12× AV
-    const sums = new Map(); // nameKey -> {sales, salesAmt, av12x}
-    for (const s of all){
-      // Expect fields: dateSold, agent, amount, soldProductId/name, etc.
-      const when = toET(s.dateSold || s.date || s.createdAt || Date.now());
-      if (when < startET || when >= endET) continue;
+    // Build from raw sales if available to guarantee correct week window.
+    const [WSTART, WEND] = weekRangeET();
+    const acc = new Map(); // nameKey -> {sales, amount, av12x}
 
-      const nameKey = String(s.agent || s.name || "").trim().toLowerCase();
-      if (!nameKey) continue;
+    const add = (name, amount) => {
+      const key = String(name||"").trim().toLowerCase();
+      if (!key) return;
+      const cur = acc.get(key) || { sales:0, amount:0, av12x:0 };
+      cur.sales  += 1;
+      cur.amount += Number(amount||0);
+      acc.set(key, cur);
+    };
 
-      const saleAmt = Number(s.amount || 0);
-      const av12x   = saleAmt * 12;
-
-      const cur = sums.get(nameKey) || { sales:0, salesAmt:0, av12x:0 };
-      cur.sales    += 1;
-      cur.salesAmt += saleAmt;
-      cur.av12x    += av12x;
-      sums.set(nameKey, cur);
-    }
-
-    // Map to roster keys
-    const out = new Map();
-    for (const a of STATE.roster){
-      const key = agentKey(a);
-      const nameKey = String(a.name||"").trim().toLowerCase();
-      const v = sums.get(nameKey) || { sales:0, salesAmt:0, av12x:0 };
-      out.set(key, v);
-    }
-
-    // Overrides for AV (email-based)
-    if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
-      let sum = 0;
-      for (const a of STATE.roster){
-        const ov = Number(STATE.overrides.av[a.email] || 0);
-        if (ov >= 0){
-          const k   = agentKey(a);
-          const cur = out.get(k) || { sales:0, salesAmt:0, av12x:0 };
-          cur.av12x = ov;
-          out.set(k, cur);
-          sum += ov;
-        }
+    const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
+    if (raw.length){
+      for (const s of raw){
+        const when = s.dateSold ? toET(s.dateSold) : null;
+        if (!when || when < WSTART || when >= WEND) continue;   // keep only this week
+        add(s.agent, Number(s.amount||0));
       }
-      STATE.team.av = sum;
-    } else {
-      let total = 0;
-      out.forEach(v => total += v.av12x||0);
-      STATE.team.av = total;
+    }else{
+      // Fall back to perAgent structure from the function
+      const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
+      for (const a of per){
+        const name = a.name;
+        const sales = Number(a.sales||0);
+        const amount = Number(a.amount||0);
+        const cur = acc.get(String(name||"").trim().toLowerCase()) || { sales:0, amount:0, av12x:0 };
+        cur.sales  = sales;
+        cur.amount = amount;
+        acc.set(String(name||"").trim().toLowerCase(), cur);
+      }
+    }
+
+    // Build per-agent map against roster and compute AV (12×). Apply overrides if present.
+    const out = new Map();
+    let teamAV = 0;
+
+    for (const a of STATE.roster){
+      const nameKey = String(a.name||"").trim().toLowerCase();
+      const base    = acc.get(nameKey) || { sales:0, amount:0, av12x:0 };
+
+      // prefer override value if provided, else compute 12× amount
+      let av12 = (STATE.overrides.av && a.email in STATE.overrides.av)
+        ? Number(STATE.overrides.av[a.email]||0)
+        : (base.av12x ? Number(base.av12x) : Number(base.amount||0) * 12);
+
+      av12 = Math.max(0, av12);
+
+      out.set(agentKey(a), {
+        sales   : Number(base.sales||0),
+        salesAmt: Number(base.amount||0),
+        av12x   : av12
+      });
+
+      teamAV += av12;
     }
 
     STATE.salesWeekByKey = out;
+    STATE.team.av = teamAV;
 
-    // Celebration toast for the latest sale this week (by date)
-    if (all.length){
-      const recentThisWeek = all
-        .map(s=>({ s, t: toET(s.dateSold || s.date || s.createdAt || Date.now()) }))
-        .filter(x => x.t>=startET && x.t<endET)
-        .sort((a,b)=> a.t - b.t);
-      const last = recentThisWeek[recentThisWeek.length-1]?.s;
+    // Pop the latest sale once (if raw present)
+    if (raw.length){
+      const last = raw[raw.length-1];
       if (last){
-        const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||last.date||last.createdAt||""}`;
+        const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
         if (!STATE.seenSaleHashes.has(h)){
           STATE.seenSaleHashes.add(h);
-          showSalePop({ name: last.agent || "Team", amount: Number(last.amount||0) });
+          showSalePop({ name:last.agent || "Team", amount:last.amount || 0 });
         }
       }
     }
@@ -346,7 +354,7 @@ function renderAOTW(){
       ${avatarBlock(a)}
       <div>
         <div style="font-size:22px;font-weight:800;margin-bottom:4px">${escapeHtml(a.name)}</div>
-        <div style="margin:4px 0 10px;color:#9fb0c8;letter-spacing:.02em">LEADING FOR AGENT OF THE WEEK</div>
+        <div style="color:#9fb0c8;margin-bottom:6px;">LEADING FOR AGENT OF THE WEEK</div>
         <div style="display:flex;gap:18px;color:#9fb0c8">
           <div><b style="color:#cfd7e3">${fmtInt(sales)}</b> deals</div>
           <div><b style="color:#ffd36a">${fmtMoney(av12x)}</b> submitted AV</div>
@@ -354,9 +362,8 @@ function renderAOTW(){
       </div>
     </div>
   `;
-  // reuse table body as a hero slot
-  setHead([]); setRows([]);
-  const tbody = $("#tbody"); if (tbody) tbody.innerHTML = `<tr><td style="padding:18px;">${html}</td></tr>`;
+  setLabel("Agent of the Week");
+  setHead([]); setRows([[html]]);
 }
 
 /* ---------- Router ---------- */
@@ -372,6 +379,7 @@ function renderCurrentView(){
 /* ---------- Boot ---------- */
 async function boot(){
   try{
+    massageSummaryLayout();                   // fix summary card labels/visibility
     await loadStatic();
     await Promise.all([refreshCalls(), refreshSales()]);
     renderCurrentView();
@@ -384,7 +392,7 @@ async function boot(){
       }catch(e){ log("refresh tick error", e?.message||e); }
     }, DATA_MS);
 
-    // rotation (unless ?view=…)
+    // rotation
     if (!VIEW_OVERRIDE){
       setInterval(()=>{
         viewIdx = (viewIdx + 1) % VIEWS.length;
