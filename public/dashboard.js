@@ -1,4 +1,4 @@
-// ============ FEW Dashboard — FULL REPLACEMENT (with Conversions) ============
+// ============ FEW Dashboard — FULL REPLACEMENT (with Conversions + Team Sales) ============
 // Rotation: AV (week) → YTD AV → Vendor Chart → Roster
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
@@ -40,7 +40,7 @@ const hmm = m => {
 const STATE = {
   roster: [],                  // [{name,email,photo,phones[]}]
   callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
-  salesWeekByKey: new Map(),   // key -> {salesAmt,av12x}
+  salesWeekByKey: new Map(),   // key -> {salesAmt,av12x,sales}
   team: { calls:0, talk:0, av:0, leads:0, sold:0 },
   overrides: { calls:null, av:null },
   ytd: [],                     // [{name,email,av}]
@@ -169,69 +169,67 @@ async function refreshCalls(){
   STATE.callsWeekByKey = byKey;
 }
 
+// ---------- NEW: pull TEAM sales (per agent) from Netlify function ----------
 async function refreshSales(){
   try{
-    const payload = await getJSON("/api/sales_diag?days=30&limit=2000");
-    const rows = (payload.records || payload.data || []).filter(Boolean);
-    const [start,end] = weekRangeET();
+    // Pull team-by-agent sales from serverless function
+    const payload = await getJSON("/.netlify/functions/team_sold");
 
-    // roll up by owner
-    const rawBy = new Map();
-    let teamAV = 0;
-    for (const r of rows){
-      const when = toET((r.dateSold||"").replace(" ","T")+"Z");
-      if (!(when >= start && when < end)) continue;
-      const amt = Number(r.amount||0);
-      teamAV += amt * 12;
+    // Build: agent name -> { salesAmt, av12x, sales }
+    const mapByName = new Map();
+    (payload.perAgent || []).forEach(a => {
+      mapByName.set(String(a.name || "").trim().toLowerCase(), {
+        salesAmt: Number(a.amount || 0),
+        av12x   : Number(a.av12x || 0),
+        sales   : Number(a.sales || 0),
+      });
+    });
 
-      const key = String(r.ownerEmail || r.ownerName || "").trim().toLowerCase();
-      if (!key) continue;
-      const cur = rawBy.get(key) || { salesAmt:0, av12x:0 };
-      cur.salesAmt += amt;
-      cur.av12x    += amt*12;
-      rawBy.set(key, cur);
-    }
-
-    // Project to roster keys
+    // Project to roster keys (match by name)
     const out = new Map();
     for (const a of STATE.roster){
-      const emailKey = a.email;
-      const nameKey  = String(a.name||"").trim().toLowerCase();
-      const v = rawBy.get(emailKey) || rawBy.get(nameKey) || { salesAmt:0, av12x:0 };
+      const nameKey = String(a.name || "").trim().toLowerCase();
+      const v = mapByName.get(nameKey) || { salesAmt:0, av12x:0, sales:0 };
       out.set(agentKey(a), v);
     }
 
-    // Apply weekly AV override (email -> amount)
+    // Weekly AV override (email -> amount) still wins if present
     if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
       let sum = 0;
       for (const a of STATE.roster){
-        const val = Number(STATE.overrides.av[a.email] || 0);
-        if (val >= 0){
-          const k = agentKey(a);
-          const cur = out.get(k) || { salesAmt:0, av12x:0 };
-          cur.av12x = val;      // override weekly AV
+        const ov = Number(STATE.overrides.av[a.email] || 0);
+        if (ov >= 0){
+          const k   = agentKey(a);
+          const cur = out.get(k) || { salesAmt:0, av12x:0, sales:0 };
+          cur.av12x = ov;
           out.set(k, cur);
-          sum += val;
+          sum += ov;
         }
       }
-      teamAV = sum; // KPI mirrors override when present
+      STATE.team.av = sum;
+    } else {
+      STATE.team.av = Number(payload.team?.totalAV12x || 0);
     }
 
     STATE.salesWeekByKey = out;
-    STATE.team.av        = teamAV;
 
-    // sale pop (best-effort)
-    const last = rows[rows.length-1];
+    // sale pop (best-effort) from most recent item
+    const all = Array.isArray(payload.allSales) ? payload.allSales : [];
+    const last = all.length ? all[all.length - 1] : null;
     if (last){
       const h = `${last.leadId}|${last.soldProductId}|${last.dateSold}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        showSalePop({ name: last.ownerName || last.ownerEmail || "Team",
-                      product: last.soldProductName || "Product",
-                      amount: last.amount || 0 });
+        showSalePop({
+          name: last.agent || "Team",
+          product: last.soldProductName || "Product",
+          amount: last.amount || 0
+        });
       }
     }
-  }catch(e){ log("sales error", e?.message||e); }
+  }catch(e){
+    log("team_sold error", e?.message || e);
+  }
 }
 
 // ---------------- Renderers ----------------
@@ -261,7 +259,7 @@ function renderRoster(){
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
-    const s = STATE.salesWeekByKey.get(k) || { salesAmt:0, av12x:0 };
+    const s = STATE.salesWeekByKey.get(k) || { salesAmt:0, av12x:0, sales:0 };
     const conv = c.leads > 0 ? (c.sold / c.leads) : null;
     return [
       avatarCell(a),
