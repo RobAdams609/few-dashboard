@@ -1,15 +1,20 @@
-// ============ FEW Dashboard — FULL REPLACEMENT (Conversions + Team Sales + BIG SALE POPUP + Black/Gold) ============
-// Rotation: AV (week) → YTD AV → Vendor Chart → Roster
+// ============ FEW Dashboard — FULL REPLACEMENT (AOTW + Agent Detail) ============
+// Rotation: AV (week) → YTD AV → Vendor Chart → Roster → AOTW
 
 const DEBUG = new URLSearchParams(location.search).has("debug");
 const log   = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 
 // ---- Config ----
 const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;                      // refresh cadence
-const ROTATE_MS = 30_000;                      // rotate views
-const VIEWS     = ["av", "ytd", "vendor", "roster"]; // rotation sequence
+const DATA_MS   = 30_000;                       // refresh cadence
+const ROTATE_MS = 30_000;                       // rotate views
+const VIEWS     = ["av", "ytd", "vendor", "roster", "aotw"]; // rotation sequence
 let   viewIdx   = 0;
+
+// Optional view override via URL
+const QS = new URLSearchParams(location.search);
+const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
+const AGENT_QS_NAME = (QS.get("name") || "").trim();
 
 // ---- Utils ----
 const $  = s => document.querySelector(s);
@@ -19,11 +24,7 @@ const fmtPct   = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + 
 const initials = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
-async function getJSON(u){
-  const r = await fetch(bust(u), { cache: "no-store" });
-  if (!r.ok) throw new Error(`${u} ${r.status}`);
-  return r.json();
-}
+async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
 const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 
 function weekRangeET(){               // Fri → Thu sales week
@@ -62,7 +63,7 @@ function ensureUI(){
       <h1 class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</h1>
       <h4 id="principle" class="sub"></h4>
 
-      <div class="kpis">
+      <div id="kpis" class="kpis">
         <div class="kpi"><div class="label">This Week — Team Calls</div><div id="kpi-calls" class="value">0</div></div>
         <div class="kpi"><div class="label">This Week — Team Talk (min)</div><div id="kpi-talk" class="value">0</div></div>
         <div class="kpi"><div class="label">This Week — Team AV</div><div id="kpi-av" class="value">$0</div></div>
@@ -74,9 +75,10 @@ function ensureUI(){
         <tbody id="tbody"></tbody>
       </table>
 
-      <div id="salePop" class="sale-pop" aria-live="polite"></div>
-      <div id="megaSale" class="mega-sale" aria-hidden="true"></div>
-      <div id="flashCover" class="flash-cover" aria-hidden="true"></div>
+      <div id="salePop" class="sale-pop"></div>
+
+      <!-- AOTW / Agent profile mount -->
+      <div id="hero" class="hero" style="display:none"></div>
     `;
     document.body.prepend(root);
   }
@@ -178,7 +180,6 @@ async function refreshCalls(){
 // ---------- Pull TEAM sales (per agent) from Netlify function ----------
 async function refreshSales(){
   try{
-    // Pull team-by-agent sales from serverless function
     const payload = await getJSON("/.netlify/functions/team_sold");
 
     // Build: agent name -> { salesAmt, av12x, sales }
@@ -219,7 +220,7 @@ async function refreshSales(){
 
     STATE.salesWeekByKey = out;
 
-    // --- BIG sale pop + flash from most recent item ---
+    // sale pop (best-effort) from most recent item
     const all = Array.isArray(payload.allSales) ? payload.allSales : [];
     const last = all.length ? all[all.length - 1] : null;
     if (last){
@@ -236,6 +237,27 @@ async function refreshSales(){
   }catch(e){
     log("team_sold error", e?.message || e);
   }
+}
+
+// ---------------- Derived ----------------
+function bestOfWeek(){
+  // choose by AV first, then by sales count as tiebreaker
+  const entries = STATE.roster.map(a=>{
+    const k = agentKey(a);
+    const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
+    return { a, ...s };
+  });
+  entries.sort((x,y)=>{
+    if (y.av12x !== x.av12x) return y.av12x - x.av12x;
+    return (y.sales||0) - (x.sales||0);
+  });
+  return entries[0] || null;
+}
+
+function getAgentByNameCaseInsensitive(name){
+  const needle = String(name||"").trim().toLowerCase();
+  if (!needle) return null;
+  return STATE.roster.find(r => r.name.trim().toLowerCase() === needle) || null;
 }
 
 // ---------------- Renderers ----------------
@@ -257,7 +279,9 @@ function setRows(rows){
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
+// ---- Standard boards
 function renderRoster(){
+  showHero(false);
   setLabel("This Week — Roster");
   setHead(["Agent","Calls","Talk Time (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
 
@@ -281,6 +305,7 @@ function renderRoster(){
 }
 
 function renderWeekAV(){
+  showHero(false);
   setLabel("This Week — Leaderboard (Submitted AV)");
   setHead(["Agent","Submitted AV"]);
 
@@ -300,16 +325,26 @@ function renderWeekAV(){
   let html = "";
   ranked.forEach(({a,val}, i)=>{
     const leader = (i === 0 && val > 0) ? ' class="leader"' : "";
-    const poop   = val === 0 ? ' <span class="poop" title="No AV this week">💩</span>' : "";
-    html += `<tr${leader}><td>${avatarCell(a)}</td><td class="num">${fmtMoney(val)}${poop}</td></tr>`;
+    html += `<tr${leader} data-agent="${a.name}">
+      <td>${avatarCell(a)}</td>
+      <td class="num">${fmtMoney(val)}</td>
+    </tr>`;
   });
   tbody.innerHTML = html;
+
+  // Click to open agent detail
+  $("#tbody").querySelectorAll("tr[data-agent]").forEach(tr=>{
+    tr.addEventListener("click", ()=>{
+      const n = tr.getAttribute("data-agent");
+      openAgentDetail(n);
+    });
+  });
 }
 
 function renderYTD(){
+  showHero(false);
   setLabel("YTD — Leaderboard (AV)");
   setHead(["Agent","YTD AV"]);
-  // Crosswalk to roster for headshots if possible
   const byName  = new Map(STATE.roster.map(r=>[String(r.name||"").trim().toLowerCase(), r]));
   const byEmail = new Map(STATE.roster.map(r=>[String(r.email||"").trim().toLowerCase(), r]));
   const rows = STATE.ytd
@@ -326,8 +361,8 @@ function renderYTD(){
   setRows(rows);
 }
 
-// ===== Image Board: % of Sales by Lead Vendor =====
 function renderVendorBoard(){
+  showHero(false);
   setLabel("% of Sales by Lead Vendor");
   const thead = document.getElementById("thead");
   if (thead) thead.innerHTML = "";
@@ -338,44 +373,95 @@ function renderVendorBoard(){
         <img
           src="/boards/sales_by_vendor.png"
           alt="% of Sales by Lead Vendor"
-          style="display:block;margin:0 auto;max-width:100%;height:auto;border-radius:12px;box-shadow:0 0 0 1px #2b2b2b"
+          style="display:block;margin:0 auto;max-width:100%;height:auto;border-radius:12px;box-shadow:0 0 0 1px #24313f"
         />
       </td>
     </tr>
   `;
 }
 
-// ---------------- Sale toast (BIG popup + full-screen flash) ----------------
-function showSalePop({ name, product, amount }){
-  // Small toast (bottom)
-  const toast = $("#salePop");
-  if (toast){
-    toast.textContent = `🔥 ${name || "Team"} sold ${product || "Product"} — ${fmtMoney(amount)}`;
-    toast.classList.add("show");
-    setTimeout(()=> toast.classList.remove("show"), 6000);
-  }
+// ---- AOTW (Agent of the Week)
+function renderAOTW(){
+  const top = bestOfWeek();
+  if (!top){ setLabel("Agent of the Week"); setHead([]); setRows([]); showHero(false); return; }
 
-  // Mega center banner
-  const mega = $("#megaSale");
-  if (mega){
-    mega.innerHTML = `
-      <div class="mega-inner">
-        <div class="mega-line">🔥 SALE!</div>
-        <div class="mega-amt">${fmtMoney(amount)}</div>
-        <div class="mega-agent">${name || "Team"}</div>
-        <div class="mega-prod">${product || "Product"}</div>
+  const { a, av12x, sales, salesAmt } = top;
+  showHero(true, `
+    <div class="aotw">
+      <div class="aotw-badge">AGENT OF THE WEEK</div>
+      <div class="aotw-card">
+        <div class="aotw-photo">${avatarBlock(a)}</div>
+        <div class="aotw-info">
+          <div class="aotw-name">${escapeHtml(a.name)}</div>
+          <div class="aotw-metrics">
+            <div class="m"><div class="k">Deals</div><div class="v">${fmtInt(sales||0)}</div></div>
+            <div class="m"><div class="k">Total Sales</div><div class="v">${fmtMoney(salesAmt||0)}</div></div>
+            <div class="m"><div class="k">Submitted AV</div><div class="v highlight">${fmtMoney(av12x||0)}</div></div>
+          </div>
+          <button class="aotw-btn" aria-label="Open agent profile" data-agent="${escapeHtml(a.name)}">View Profile →</button>
+        </div>
       </div>
-    `;
-    mega.classList.add("on");
-    setTimeout(()=> mega.classList.remove("on"), 2500);
-  }
+    </div>
+  `);
 
-  // Full-screen flash
-  const cover = $("#flashCover");
-  if (cover){
-    cover.classList.add("flash");
-    setTimeout(()=> cover.classList.remove("flash"), 1200);
+  // Hide table/header in hero view
+  setLabel("Agent of the Week");
+  setHead([]);
+  setRows([]);
+
+  const btn = $("#hero .aotw-btn");
+  if (btn){
+    btn.addEventListener("click",()=> openAgentDetail(a.name));
   }
+}
+
+function avatarBlock(a){
+  const src = a.photo ? `/headshots/${a.photo}` : "";
+  return src
+    ? `<img class="hero-avatar" src="${src}" alt="${escapeHtml(a.name)}" onerror="this.remove();">`
+    : `<div class="hero-fallback">${initials(a.name)}</div>`;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+function showHero(show, html=""){
+  const hero = $("#hero");
+  hero.style.display = show ? "block" : "none";
+  hero.innerHTML = show ? html : "";
+}
+
+// ---- Agent detail (weekly)
+function openAgentDetail(name){
+  const agent = getAgentByNameCaseInsensitive(name);
+  if (!agent){ alert("Agent not found."); return; }
+  const k = agentKey(agent);
+  const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
+
+  showHero(true, `
+    <div class="profile">
+      <div class="profile-photo">${avatarBlock(agent)}</div>
+      <div class="profile-body">
+        <div class="profile-name">${escapeHtml(agent.name)}</div>
+        <div class="profile-metrics">
+          <div><span class="k">Deals</span><span class="v">${fmtInt(s.sales||0)}</span></div>
+          <div><span class="k">Total Sales</span><span class="v">${fmtMoney(s.salesAmt||0)}</span></div>
+          <div><span class="k">Submitted AV</span><span class="v gold">${fmtMoney(s.av12x||0)}</span></div>
+        </div>
+        <button class="aotw-btn" onclick="history.back()">← Back</button>
+      </div>
+    </div>
+  `);
+  setLabel("Agent Profile — This Week");
+  setHead([]);
+  setRows([]);
+}
+
+// ---------------- Sale toast ----------------
+function showSalePop({ name, product, amount }){
+  const el = $("#salePop"); if (!el) return;
+  el.textContent = `🔥 ${name || "Team"} sold ${product || "Product"} — ${fmtMoney(amount)}`;
+  el.classList.add("show");
+  setTimeout(()=> el.classList.remove("show"), 7000);
 }
 
 // ---------------- Boot ----------------
@@ -395,89 +481,86 @@ async function boot(){
     renderCurrent();
   }, ROTATE_MS);
 }
+
 function renderCurrent(){
+  // URL overrides (no rotation if present)
+  if (VIEW_OVERRIDE === "aotw") return renderAOTW();
+  if (VIEW_OVERRIDE === "agent" && AGENT_QS_NAME) return openAgentDetail(AGENT_QS_NAME);
+
   renderKPIs();
   const v = VIEWS[viewIdx];
   if (v === "av")     return renderWeekAV();
   if (v === "ytd")    return renderYTD();
   if (v === "vendor") return renderVendorBoard();
+  if (v === "aotw")   return renderAOTW();
   return renderRoster();
 }
 
 window.addEventListener("DOMContentLoaded", boot);
 
-// ------------ Black & Gold styles ------------
+// ------------ styles (incl. black & gold hero) ------------
 const CSS = `
 .few-root{padding:12px}
-.title{margin:6px 0 2px;font-size:28px;text-align:center;color:#ffd36a;text-shadow:0 0 14px rgba(255,211,106,.35)}
-.sub{margin:0 0 12px;text-align:center;color:#f3e7c0}
+.title{margin:6px 0 2px;font-size:28px;text-align:center;color:#ffeaa7;text-shadow:0 0 12px #222}
+.sub{margin:0 0 12px;text-align:center;color:#9fb}
 .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 10px}
-.kpi{background:#0b0b0b;border:1px solid #2b2b2b;border-radius:10px;padding:10px}
-.kpi .label{font-size:12px;color:#c6b888}
-.kpi .value{font-size:22px;color:#ffd36a}
-.label{margin:10px 0 6px;color:#c6b888}
+.kpi{background:#111a22;border:1px solid #24313f;border-radius:10px;padding:10px}
+.kpi .label{font-size:12px;color:#9fb}
+.kpi .value{font-size:22px;color:#ffeaa7}
+.label{margin:10px 0 6px;color:#9fb}
 .grid{width:100%;border-collapse:separate;border-spacing:0 6px}
-.grid th,.grid td{padding:10px;background:#0e0e0e;border-bottom:1px solid #1c1c1c}
-.grid th{color:#c6b888;text-align:left}
-.grid td.num{text-align:right;color:#f5f2e7}
+.grid th,.grid td{padding:10px;background:#0e1720;border-bottom:1px solid #1f2a36}
+.grid th{color:#9fb;text-align:left}
+.grid td.num{text-align:right;color:#eaeef5}
 .agent{display:flex;gap:8px;align-items:center}
-.avatar{width:28px;height:28px;border-radius:50%;object-fit:cover;border:1px solid #2b2b2b}
-.avatar-fallback{width:28px;height:28px;border-radius:50%;display:inline-grid;place-items:center;background:#1a1a1a;color:#e3d19a;border:1px solid #2b2b2b}
-.ticker{font-size:12px;color:#c6b888;margin-bottom:4px;background:#0a0a0a;border-bottom:1px solid #2b2b2b}
-.sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#111;color:#ffe8a6;padding:12px 16px;border:1px solid #2b2b2b;border-radius:12px;opacity:0;pointer-events:none;transition:.25s;box-shadow:0 8px 30px rgba(0,0,0,.45)}
+.avatar{width:28px;height:28px;border-radius:50%;object-fit:cover}
+.avatar-fallback{width:28px;height:28px;border-radius:50%;display:inline-grid;place-items:center;background:#223246;color:#bee}
+.ticker{font-size:12px;color:#9fb;margin-bottom:4px}
+.sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
 .sale-pop.show{opacity:1}
 
-/* Leader glow/sparkle on AV leaderboard */
+/* Leader glow */
 .leader .agent{position:relative}
-.leader .agent span{
-  animation: leaderGlow 1.8s ease-in-out infinite alternate;
-  text-shadow: 0 0 6px #ffd36a, 0 0 12px #ffd36a;
-}
-.leader .agent::after{
-  content:'✨';
-  position:absolute;
-  right:-18px;
-  top:50%;
-  transform:translateY(-50%);
-  filter:drop-shadow(0 0 6px #ffd36a);
-  animation: sparkle 1.2s ease-in-out infinite;
-  opacity:.95;
-}
+.leader .agent span{ animation: leaderGlow 1.8s ease-in-out infinite alternate; text-shadow: 0 0 6px #ffd166, 0 0 12px #ffd166; }
+@keyframes leaderGlow{ from{ text-shadow:0 0 4px #ffe08a, 0 0 10px #ffd166; } to{ text-shadow:0 0 10px #ffe08a, 0 0 20px #ffd166; } }
 
-/* BIG center sale banner */
-.mega-sale{
-  position:fixed; inset:0; display:grid; place-items:center;
-  pointer-events:none; opacity:0; transition:opacity .2s ease;
+/* HERO (black & gold) */
+.hero{ margin-top:10px; }
+.aotw-badge{
+  display:inline-block; padding:6px 12px; border:1px solid #6b5b2b;
+  color:#e9d99a; background:linear-gradient(180deg,#1a1406,#0e0a03);
+  border-radius:999px; letter-spacing:.06em; font-weight:800; font-size:12px;
+  box-shadow:0 0 0 1px #2b230a inset, 0 6px 18px rgba(0,0,0,.35);
 }
-.mega-sale.on{ opacity:1; }
-.mega-inner{
-  text-align:center; background:rgba(0,0,0,.82);
-  border:1px solid #2b2b2b; border-radius:16px; padding:26px 28px;
-  box-shadow:0 25px 80px rgba(0,0,0,.6);
+.aotw-card, .profile{
+  display:grid; grid-template-columns:160px 1fr; gap:16px;
+  background:radial-gradient(120% 140% at 60% 0%,#1b1709 0%,#0b0a06 55%,#090806 100%);
+  border:1px solid #3b2f10; border-radius:16px; padding:16px;
+  box-shadow:0 12px 30px rgba(0,0,0,.35), inset 0 0 0 1px #2a210a;
 }
-.mega-line{ font-size:28px; color:#ffd36a; letter-spacing:.08em; margin-bottom:6px }
-.mega-amt{ font-size:64px; font-weight:900; color:#ffdf8c; text-shadow:0 0 18px rgba(255,211,106,.4) }
-.mega-agent{ font-size:22px; color:#f3e7c0; margin-top:6px }
-.mega-prod{ font-size:16px; color:#c6b888; margin-top:4px }
-
-/* Full-screen flash */
-.flash-cover{
-  position:fixed; inset:0; background:#ffd36a; opacity:0; pointer-events:none;
-  mix-blend-mode:screen; transition:opacity .25s ease;
+.hero-avatar, .hero-fallback{
+  width:160px; height:160px; border-radius:12px; object-fit:cover;
+  background:#1f2a3a; display:grid; place-items:center; font-size:38px; color:#d9e2ef;
+  border:1px solid #342a10; box-shadow:inset 0 0 0 1px #4b3a0f;
 }
-.flash-cover.flash{ opacity:.45; animation:flashFade .9s ease forwards; }
-@keyframes flashFade{ from{opacity:.45} 70%{opacity:.1} to{opacity:0} }
-
-/* 💩 for zero AV */
-.poop{font-size:18px;margin-left:6px;filter:drop-shadow(0 0 3px #000)}
-@keyframes leaderGlow{
-  from{ text-shadow:0 0 4px #ffe08a, 0 0 10px #ffd166; }
-  to  { text-shadow:0 0 10px #ffe08a, 0 0 20px #ffd166; }
+.hero-fallback{ font-weight:800; }
+.aotw-name, .profile-name{
+  font-size:34px; font-weight:900; color:#ffeaa7; letter-spacing:.02em; margin-bottom:8px;
+  text-shadow:0 0 18px rgba(255,210,90,.25);
 }
-@keyframes sparkle{
-  0%  { transform:translateY(-50%) scale(1) rotate(0deg);   opacity:.7; }
-  50% { transform:translateY(-50%) scale(1.2) rotate(20deg); opacity:1;  }
-  100%{ transform:translateY(-50%) scale(1) rotate(0deg);   opacity:.7; }
+.aotw-metrics, .profile-metrics{
+  display:grid; grid-template-columns:repeat(3, minmax(120px,1fr)); gap:12px; margin:10px 0 6px;
 }
+.m, .profile-metrics > div{
+  background:rgba(0,0,0,.35); border:1px solid #2d230e; border-radius:12px; padding:10px;
+}
+.k{ color:#a5976a; font-size:12px; }
+.v{ color:#e6d7a3; font-weight:900; font-size:22px; }
+.v.highlight, .gold{ color:#ffd66b; text-shadow:0 0 10px rgba(255,214,107,.25); }
+.aotw-btn{
+  margin-top:8px; padding:10px 14px; border-radius:10px; border:1px solid #4a3a12;
+  background:linear-gradient(180deg,#2c210a,#1a1407); color:#fce59c; font-weight:800; cursor:pointer;
+}
+.aotw-btn:hover{ filter:brightness(1.08); }
 `;
 (() => { const s = document.createElement("style"); s.textContent = CSS; document.head.appendChild(s); })();
