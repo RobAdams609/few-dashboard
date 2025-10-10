@@ -61,12 +61,12 @@
     "email": "fraitzlineg.healthadvisor@gmail.com",
     "photo": "fraitzline.jpg"
   },
-  {
-    "name": "Nathan Johnson",
-    "email": "nathanjohnson.healthadvisor@gmail.com",
-    "photo": null,
-    "phones": ["9048496304","7627583371","7433006125","2542745197","2762925599"]
-  },
+ {
+  "name": "Nathan Johnson",
+  "email": "nathanjohnson.healthadvisor@gmail.com",
+  "photo": "nathan.jpg",
+  "phones": ["9048496304","7627583371","7433006125","2542745197","2762925599"]
+},
   {
     "name": "Bianca Nunez",
     "email": "bianca.nunez@few.local",
