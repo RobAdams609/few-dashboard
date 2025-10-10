@@ -4,14 +4,16 @@ export const handler = async (event) => {
   const RINGY_URL = "https://app.ringy.com/api/public/external/get-lead-sold-products";
 
   // === Agents with real Ringy API keys ===
-  const AGENTS = [
-    { name: "Robert Adams",     key: "RGY2ifvl3xa4k6306xw5fpza2ithhmwc" },
-    { name: "Ajani Senior",     key: "RGYlb2wvt0qssa5h5ylcnnqocq07yazk" },
-    { name: "Fabricio Navarrete", key: "RGYsjvbsawketfhk4eysqqbyw0o7uaq3" },
-    { name: "Nathan Johnson",   key: "RGYk6m0twda2bsk5sowr6jlt5kyjl5f6" },
-    { name: "Sebastian Beltran",key: "RGY90l97aoh41zv4run7u8foeklcldpt" },
-    { name: "Marie Saint Cyr",  key: "RGYx2j7rg5xumzvsexs479bbkmlcv5o0" },
-  ];
+const AGENTS = [
+  { name: "Robert Adams",        key: "RGY2ifvl3xa4k6306xw5fpza2ithhmwc" },
+  { name: "Ajani Senior",        key: "RGYlb2wvt0qssa5h5ylcnnqocq07yazk" },
+  { name: "Fabricio Navarrete",  key: "RGYsjvbsawketfhk4eysqqbyw0o7uaq3" },
+  { name: "Nathan Johnson",      key: "RGYk6m0twda2bsk5sowr6jlt5kyjl5f6" },
+  { name: "Sebastian Beltran",   key: "RGY90l97aoh41zv4run7u8foeklcldpt" },
+  { name: "Marie Saint Cyr",     key: "RGYx2j7rg5xumzvsexs479bbkmlcv5o0" },
+  { name: "Philip Baxter",       key: "RGYajwevlinoiuwxkvbv15gtynz04weh" },
+  { name: "Eli Thermilus",       key: "RGYkhe6figc1eosyyddbxr43wk6juhxv" }, // ✅ added
+];
 
   const pad = n => String(n).padStart(2, "0");
   const utcStr = d => `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`;
