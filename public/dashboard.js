@@ -71,7 +71,8 @@ function setRows(rows){
 function updateSummary(){
   $("#sumCalls")       && ($("#sumCalls").textContent       = fmtInt(STATE.team.calls));
   $("#sumTalk")        && ($("#sumTalk").textContent        = fmtInt(Math.round(STATE.team.talk)));
-  $("#sumSales")       && ($("#sumSales").textContent       = fmtMoney(STATE.team.sold ? STATE.team.sold : 0)); // if you track $
+  // If you later track $ sales team-wide, update this. For now leave as count placeholder.
+  $("#sumSales")       && ($("#sumSales").textContent       = fmtMoney(STATE.team.sold ? STATE.team.sold : 0));
   $("#sumAV")          && ($("#sumAV").textContent          = fmtMoney(STATE.team.av));
   $("#sumUnassigned")  && ($("#sumUnassigned").textContent  = fmtMoney(STATE.team.unassigned || 0));
 }
@@ -103,21 +104,13 @@ function showSalePop({name, product, amount}){
   setTimeout(()=> el.classList.remove("show"), 3500);
 }
 
-/* AOTW hero slot (reuse the page; no separate container was provided) */
+/* AOTW hero slot: render into table area */
 function showHero(htmlOrFalse){
-  // We’ll render hero content into the table area: clear thead/tbody and show a single-row block.
-  if (htmlOrFalse === false){
-    // nothing to do; next renderer will paint the table
-    return;
-  }
+  if (htmlOrFalse === false) return;
   setLabel("Agent of the Week");
-  setHead([]);
-  setRows([]);
+  setHead([]); setRows([]);
   const tbody = $("#tbody");
-  if (tbody) tbody.innerHTML =
-    `<tr><td style="padding:18px;">
-      ${htmlOrFalse}
-    </td></tr>`;
+  if (tbody) tbody.innerHTML = `<tr><td style="padding:18px;">${htmlOrFalse}</td></tr>`;
 }
 
 /* ---------- Loaders ---------- */
@@ -322,16 +315,18 @@ function renderAOTW(){
   const top = bestOfWeek();
   if (!top){ setLabel("Agent of the Week"); setHead([]); setRows([]); return; }
 
-  const { a, av12x, sales, salesAmt } = top;
+  const { a, av12x, sales } = top;
   const html = `
     <div style="display:flex;gap:18px;align-items:center;">
       ${avatarBlock(a)}
       <div>
-        <div style="font-size:22px;font-weight:800;margin-bottom:4px">${escapeHtml(a.name)}</div>
+        <div style="display:inline-block;background:#223046;border:1px solid #2e3d55;color:#ffd36a;font-weight:800;letter-spacing:.03em;text-transform:uppercase;font-size:11px;padding:4px 8px;border-radius:999px;margin-bottom:8px">
+          LEADING FOR AGENT OF THE WEEK
+        </div>
+        <div style="font-size:22px;font-weight:800;margin-bottom:6px">${escapeHtml(a.name)}</div>
         <div style="display:flex;gap:18px;color:#9fb0c8">
           <div><b style="color:#cfd7e3">${fmtInt(sales)}</b> deals</div>
-          <div><b style="color:#cfd7e3">${fmtMoney(salesAmt)}</b> total sales</div>
-          <div><b style="color:#ffd36a">${fmtMoney(av12x)}</b> submitted AV</div>
+          <div><b style="color:#ffd36a">${fmtMoney(av12x)}</b> Weekly AV Submitted</div>
         </div>
       </div>
     </div>
