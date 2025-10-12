@@ -3,7 +3,6 @@
 // talk minutes, logged minutes, and leads. Sold is left 0 here; we take "sold"
 // from the team_sold function on the frontend for conversion accuracy.
 
-import fetch from "node-fetch";
 
 const ET_TZ = "America/New_York";
 
