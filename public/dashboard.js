@@ -79,55 +79,66 @@ function setRows(rows){
 }
 
 /* keep only 3 KPI cards on every board */
+/* ---------- KPI layout & values (FORCE 3 CARDS) ---------- */
+
+/**
+ * Keep exactly three KPI cards on all views:
+ *   1) This Week — Team Calls           -> #sumCalls
+ *   2) This Week — Total Submitted AV   -> #sumSales (repurposed)
+ *   3) This Week — Deals Submitted      -> #sumTalk  (repurposed)
+ * Hide everything else.
+ */
 function massageSummaryLayout(){
-  // Survivors:
-  // - "This Week — Team Calls"        (#sumCalls)
-  // - "This Week — Total Submitted AV" (#sumSales)
-  // - "This Week — Deals Submitted"    (#sumTalk, repurposed)
-  const callsVal = $("#sumCalls");
-  const talkVal  = $("#sumTalk");
-  const salesVal = $("#sumSales");
+  const callsVal  = document.querySelector("#sumCalls");  // keep
+  const avVal     = document.querySelector("#sumSales");  // keep (as Total Submitted AV)
+  const dealsVal  = document.querySelector("#sumTalk");   // keep (as Deals Submitted)
 
-  if (callsVal){ const lbl=callsVal.previousElementSibling; if (lbl) lbl.textContent = "This Week — Team Calls"; }
-  if (salesVal){ const lbl=salesVal.previousElementSibling; if (lbl) lbl.textContent = "This Week — Total Submitted AV"; }
-  if (talkVal){  const lbl=talkVal.previousElementSibling;  if (lbl) lbl.textContent = "This Week — Deals Submitted"; }
-
-  const unwanted = [/Team AV/i, /AV \(12×\)/i, /AV \(12x\)/i, /Unassigned/i, /Team Sales/i];
-  document.querySelectorAll(".card").forEach(card=>{
-    const label = card?.querySelector?.(".label")?.textContent || "";
-    if (unwanted.some(rx=>rx.test(label))){
-      if (!/Deals Submitted/i.test(label) && !/Total Submitted AV/i.test(label) && !/Team Calls/i.test(label)){
-        card.style.display = "none";
-      }
-    }
-  });
-  const rowCards = Array.from(document.querySelectorAll(".card")).filter(c=>c.style.display!=="none");
-  rowCards.slice(3).forEach(c=> c.style.display="none");
-}
-
-function updateSummary(){
-  $("#sumCalls") && ($("#sumCalls").textContent = fmtInt(STATE.team.calls));
-  $("#sumTalk")  && ($("#sumTalk").textContent  = fmtInt(STATE.team.deals));  // middle = Deals
-  $("#sumSales") && ($("#sumSales").textContent = fmtMoney(STATE.team.av));   // right  = AV
-}
-
-function avatarCell(a){
-  const src = a.photo ? `/headshots/${a.photo}` : "";
-  const img = src
-    ? `<img class="avatar" src="${src}"
-         onerror="this.remove();this.insertAdjacentHTML('beforebegin','<div class=&quot;avatar-fallback&quot;>${initials(a.name)}</div>')">`
-    : `<div class="avatar-fallback">${initials(a.name)}</div>`;
-  return `<div class="agent">${img}<span>${escapeHtml(a.name)}</span></div>`;
-}
-
-function avatarBlock(a){
-  const src = a.photo ? `/headshots/${a.photo}` : "";
-  if (src){
-    return `<img class="avatar" style="width:84px;height:84px;border-radius:50%;object-fit:cover"
-                 src="${src}"
-                 onerror="this.remove();this.insertAdjacentHTML('beforebegin','<div class=&quot;avatar-fallback&quot; style=&quot;width:84px;height:84px;font-size:28px;&quot;>${initials(a.name)}</div>')">`;
+  // Relabel the three we keep
+  if (callsVal){
+    const l = callsVal.previousElementSibling;
+    if (l) l.textContent = "This Week — Team Calls";
   }
-  return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
+  if (avVal){
+    const l = avVal.previousElementSibling;
+    if (l) l.textContent = "This Week — Total Submitted AV";
+  }
+  if (dealsVal){
+    const l = dealsVal.previousElementSibling;
+    if (l) l.textContent = "This Week — Deals Submitted";
+  }
+
+  // Hide any other KPI cards that exist in the HTML
+  document.querySelectorAll(".card").forEach(card=>{
+    const keep = card.contains(callsVal) || card.contains(avVal) || card.contains(dealsVal);
+    if (!keep) card.style.display = "none";
+  });
+}
+/**
+ * Fill KPI numbers.
+ * Calls -> STATE.team.calls
+ * Total Submitted AV -> STATE.team.av (already 12×)
+ * Deals Submitted -> prefer sales count from salesWeekByKey; fallback to STATE.team.sold
+ */
+function updateSummary(){
+  // Calls
+  const calls = Number(STATE?.team?.calls || 0);
+  const callsEl = document.querySelector("#sumCalls");
+  if (callsEl) callsEl.textContent = calls.toLocaleString("en-US");
+
+  // Total Submitted AV (money)
+  const av = Number(STATE?.team?.av || 0);
+  const avEl = document.querySelector("#sumSales");
+  if (avEl) avEl.textContent = "$" + Math.round(av).toLocaleString("en-US");
+
+  // Deals Submitted (count from sales map for this week)
+  let deals = 0;
+  if (STATE?.salesWeekByKey && STATE.salesWeekByKey.size){
+    for (const v of STATE.salesWeekByKey.values()) deals += Number(v?.sales || 0);
+  } else {
+    deals = Number(STATE?.team?.sold || 0);
+  }
+  const dealsEl = document.querySelector("#sumTalk"); // using this as “Deals”
+  if (dealsEl) dealsEl.textContent = deals.toLocaleString("en-US");
 }
 
 function showSalePop({name, amount}){
