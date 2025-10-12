@@ -1,153 +1,222 @@
-// /netlify/functions/calls_by_agent.js
-// Aggregates Ringy call logs for THIS WEEK (Fri 12:00am ET -> next Fri 12:00am ET)
-// and returns per-agent totals the dashboard expects.
+// netlify/functions/calls_by_agent.js
+// Aggregates WEEK (Fri 12:00am ET → next Fri 12:00am ET) per-agent calls,
+// talk minutes, logged minutes, and leads. Sold is left 0 here; we take "sold"
+// from the team_sold function on the frontend for conversion accuracy.
 
-const RINGY_URL = "https://app.ringy.com/api/public/external/get-recordings";
-// Keep your real API key in an env var (Netlify UI → Site settings → Environment)
-// Name: RINGY_API_KEY
-const API_KEY   = process.env.RINGY_API_KEY || "REPLACE_ME";
+import fetch from "node-fetch";
 
-// --- Helpers ---
 const ET_TZ = "America/New_York";
-const toET = (d) => new Date(new Date(d).toLocaleString("en-US", { timeZone: ET_TZ }));
+
+// --- CONFIG ---
+// Set these in Netlify > Site settings > Environment variables
+// RINGY_BASE    e.g. "https://api.ringy.com" (adjust to your real base URL)
+// RINGY_TOKEN   e.g. "Bearer xxxxx" or just the token depending on your API
+// RINGY_CALLS_PATH e.g. "/v2/calls" (adjust to your real endpoint)
+// RINGY_PAGE_SIZE  e.g. "200" (optional)
+const {
+  RINGY_BASE,
+  RINGY_TOKEN,
+  RINGY_CALLS_PATH = "/v2/calls",
+  RINGY_PAGE_SIZE = "200",
+} = process.env;
+
+const authHeader = () =>
+  RINGY_TOKEN?.toLowerCase().startsWith("bearer ")
+    ? RINGY_TOKEN
+    : `Bearer ${RINGY_TOKEN}`;
+
+function toET(d) {
+  // Normalize any date-like value to an ET Date instance
+  return new Date(new Date(d).toLocaleString("en-US", { timeZone: ET_TZ }));
+}
+
 function weekRangeET() {
   const now = toET(new Date());
-  const day = now.getDay();             // Sun=0 … Sat=6
-  const sinceFri = (day + 2) % 7;       // days back to Friday
-  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
-  const end = new Date(start); end.setDate(end.getDate()+7);
-  return [start, end];                   // [inclusive, exclusive)
-}
-function fmtDT(dt) {
-  // Ringy is happy with "YYYY-MM-DD HH:mm:ss"
-  const pad = (n) => String(n).padStart(2,"0");
-  const y = dt.getFullYear();
-  const m = pad(dt.getMonth()+1);
-  const d = pad(dt.getDate());
-  const h = pad(dt.getHours());
-  const i = pad(dt.getMinutes());
-  const s = pad(dt.getSeconds());
-  return `${y}-${m}-${d} ${h}:${i}:${s}`;
+  const day = now.getDay(); // Sun=0..Sat=6
+  // Distance back to Friday 00:00 (Fri is 5)
+  const sinceFri = (day + 2) % 7;
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - sinceFri);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  return [start, end]; // [inclusive, exclusive)
 }
 
-function safeNum(x){ return Number.isFinite(Number(x)) ? Number(x) : 0; }
+function mmss(totalSeconds) {
+  const secs = Math.max(0, Math.round(Number(totalSeconds || 0)));
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return { hours: h, minutes: m };
+}
 
-// Core aggregation from Ringy "recordings" payload
-function aggregate(records) {
-  // Expect each record to include: owner_name or agent_name / email, duration (sec), talkTime (sec), lead? sold?
-  // Ringy payloads vary. We defensively read common shapes and default to zero.
-  const byAgent = new Map();
-  let teamCalls = 0, teamTalkMin = 0, teamLoggedMin = 0;
+function safeNum(n) {
+  n = Number(n || 0);
+  return Number.isFinite(n) ? n : 0;
+}
 
-  for (const r of records) {
-    const name = String(r.owner_name || r.agent_name || r.user_name || r.agent || "").trim();
-    const email = String(r.owner_email || r.agent_email || r.email || "").trim().toLowerCase();
-    const key = (email || name).toLowerCase();
-    if (!key) continue;
+// ---- Adjust this mapper to your provider’s response shape ----
+// It should return: { agentName, agentEmail, startedAt: Date, durationSec: number, disposition?: string }
+function mapCall(rec) {
+  // EXAMPLES (customize for your API fields):
+  // const agentName  = rec.user?.name || rec.agent?.name || rec.ownerName || "";
+  // const agentEmail = (rec.user?.email || rec.agent?.email || rec.ownerEmail || "").toLowerCase();
+  // const startedAt  = rec.started_at || rec.startedAt || rec.start_time;
+  // const durationSec = rec.duration || rec.talk_seconds || 0;
+  // const disposition = rec.disposition || rec.outcome || "";
 
-    const talkSec   = safeNum(r.talkTime || r.talk_seconds || r.talk_sec || r.duration || 0);
-    const loggedSec = safeNum(r.logged_seconds || r.total_seconds || r.duration || 0);
-    const isLead    = Boolean(r.is_lead || r.lead || false);
-    const isSold    = Boolean(r.is_sold || r.sold || false);
+  // Placeholder generic mapping:
+  const agentName = (rec.agentName || rec.userName || rec.ownerName || "").trim();
+  const agentEmail = String(rec.agentEmail || rec.userEmail || rec.ownerEmail || "")
+    .trim()
+    .toLowerCase();
+  const startedAt = rec.startedAt || rec.start_time || rec.time || rec.date;
+  const durationSec = safeNum(rec.duration || rec.talk_seconds || rec.talkSec || 0);
+  const disposition = rec.disposition || rec.outcome || rec.result || "";
+  return { agentName, agentEmail, startedAt, durationSec, disposition };
+}
 
-    const row = byAgent.get(key) || {
-      name, email, calls: 0, talkMin: 0, loggedMin: 0, leads: 0, sold: 0
-    };
-    row.calls     += 1;
-    row.talkMin   += talkSec/60;
-    row.loggedMin += loggedSec/60;
-    row.leads     += isLead ? 1 : 0;
-    row.sold      += isSold ? 1 : 0;
+// For some teams, "lead" = positive outcome; customize as needed
+function isLead(disposition) {
+  if (!disposition) return false;
+  const s = String(disposition).toLowerCase();
+  return (
+    s.includes("lead") ||
+    s.includes("appt") ||
+    s.includes("appointment") ||
+    s.includes("interested")
+  );
+}
 
-    byAgent.set(key, row);
+async function fetchRingyPage({ page = 1, pageSize, startISO, endISO }) {
+  const url = new URL(RINGY_CALLS_PATH, RINGY_BASE);
+  // Adjust param names to your API (these are examples)
+  url.searchParams.set("per_page", pageSize);
+  url.searchParams.set("page", page);
+  url.searchParams.set("start", startISO); // or "from"
+  url.searchParams.set("end", endISO); // or "to"
 
-    teamCalls    += 1;
-    teamTalkMin  += talkSec/60;
-    teamLoggedMin+= loggedSec/60;
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: authHeader(),
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    timeout: 60_000,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error(`Ringy ${res.status} ${res.statusText} – ${text.slice(0, 200)}`);
+    err.status = res.status;
+    throw err;
   }
-
-  // Format output the dashboard expects
-  const perAgent = [...byAgent.values()].map(a => ({
-    name: a.name,
-    email: a.email,
-    calls: Math.round(a.calls),
-    talkMin: Math.round(a.talkMin),
-    loggedMin: Math.round(a.loggedMin),
-    leads: Math.round(a.leads),
-    sold: Math.round(a.sold),
-  }));
-
-  perAgent.sort((x,y)=> (y.calls - x.calls) || (y.talkMin - x.talkMin));
-
-  return {
-    perAgent,
-    team: {
-      calls: Math.round(teamCalls),
-      talkMin: Math.round(teamTalkMin),
-      loggedMin: Math.round(teamLoggedMin),
-    }
-  };
+  return res.json();
 }
 
-exports.handler = async (event) => {
+async function listAllCalls({ startISO, endISO }) {
+  const pageSize = Number(RINGY_PAGE_SIZE) || 200;
+  let page = 1;
+  const out = [];
+
+  for (;;) {
+    const data = await fetchRingyPage({ page, pageSize, startISO, endISO });
+
+    // Adjust to your API’s paging shape
+    const records = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    out.push(...records);
+
+    const total = Number(data?.meta?.total || data?.total || 0);
+    const have = page * pageSize;
+    if (!total || have >= total || records.length < pageSize) break;
+    page += 1;
+  }
+  return out;
+}
+
+export const handler = async () => {
   try {
-    const [START, END] = weekRangeET(); // Friday window in ET
-    const startDate = fmtDT(START);
-    const endDate   = fmtDT(END);
-
-    // Single wide query → group locally. Avoids per-agent 404s.
-    const body = {
-      apiKey: API_KEY,
-      startDate,  // "YYYY-MM-DD HH:mm:ss" in ET
-      endDate
-      // add other Ringy filters here if you use them (queues, users, etc.)
-    };
-
-    const resp = await fetch(RINGY_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      // Bubble up enough context so you can see it in Netlify logs
-      const txt = await resp.text().catch(()=>"<no body>");
+    if (!RINGY_BASE || !RINGY_TOKEN) {
       return {
-        statusCode: 200,
-        body: JSON.stringify({
-          startDate, endDate,
-          agents: [],
-          team: { calls:0, talkMin:0, loggedMin:0 },
-          warning: `Ringy response ${resp.status}: ${txt.slice(0,200)}`
-        })
+        statusCode: 500,
+        body: JSON.stringify({ error: "Missing RINGY_BASE or RINGY_TOKEN env var" }),
       };
     }
 
-    const data = await resp.json().catch(()=> ({}));
-    // Ringy often returns an array in `recordings` or the root itself is an array.
-    const records =
-      Array.isArray(data?.recordings) ? data.recordings :
-      Array.isArray(data)             ? data :
-      Array.isArray(data?.data)       ? data.data : [];
+    const [WSTART, WEND] = weekRangeET();
+    const startISO = WSTART.toISOString();
+    const endISO = WEND.toISOString();
 
-    const agg = aggregate(records);
+    const raw = await listAllCalls({ startISO, endISO });
+
+    // Aggregate per agent
+    const byAgentKey = new Map();
+    for (const rec of raw) {
+      const m = mapCall(rec);
+      const when = m.startedAt ? toET(m.startedAt) : null;
+      if (!when || when < WSTART || when >= WEND) continue;
+
+      // key: prefer email; fallback to name
+      const key = (m.agentEmail || m.agentName || "").trim().toLowerCase();
+      if (!key) continue;
+
+      const cur =
+        byAgentKey.get(key) || { name: m.agentName || "", email: m.agentEmail || "", calls: 0, talkSec: 0, loggedSec: 0, leads: 0, sold: 0 };
+      cur.name = cur.name || m.agentName || "";
+      cur.email = cur.email || m.agentEmail || "";
+
+      cur.calls += 1;
+      cur.talkSec += safeNum(m.durationSec);          // raw talk time
+      cur.loggedSec += safeNum(m.durationSec);        // if you track separate "logged" minutes, adjust here
+      if (isLead(m.disposition)) cur.leads += 1;
+
+      byAgentKey.set(key, cur);
+    }
+
+    const perAgent = [...byAgentKey.values()].map(a => {
+      // to minutes
+      const talkMin = Math.round(a.talkSec / 60);
+      const loggedMin = Math.round(a.loggedSec / 60);
+      return {
+        name: a.name,
+        email: (a.email || "").toLowerCase(),
+        calls: a.calls,
+        talkMin,
+        loggedMin,
+        leads: a.leads,
+        sold: 0, // sold comes from /team_sold in the frontend
+      };
+    });
+
+    const team = perAgent.reduce(
+      (s, r) => {
+        s.calls += r.calls;
+        s.talkMin += r.talkMin;
+        s.loggedMin += r.loggedMin;
+        s.leads += r.leads;
+        return s;
+      },
+      { calls: 0, talkMin: 0, loggedMin: 0, leads: 0 }
+    );
 
     return {
       statusCode: 200,
       body: JSON.stringify({
-        startDate, endDate,
-        perAgent: agg.perAgent,
-        team: agg.team
-      })
+        startDate: WSTART.toISOString(),
+        endDate: WEND.toISOString(),
+        perAgent,
+        team,
+      }),
     };
   } catch (err) {
+    // Never fail the board—return empty but descriptive payload.
     return {
       statusCode: 200,
       body: JSON.stringify({
+        error: String(err?.message || err),
         perAgent: [],
-        team: { calls:0, talkMin:0, loggedMin:0 },
-        error: String(err && err.message || err)
-      })
+        team: { calls: 0, talkMin: 0, loggedMin: 0, leads: 0 },
+      }),
     };
   }
 };
