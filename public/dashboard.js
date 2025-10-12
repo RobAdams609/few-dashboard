@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE FILE (v2 with AV override) ============ */
+/* ============ FEW Dashboard — COMPLETE FILE (v2) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -22,7 +22,7 @@ const fmtInt    = n => Number(n||0).toLocaleString("en-US");
 const fmtMoney  = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
 const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
 const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
-const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&gt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
@@ -102,18 +102,21 @@ function showSalePop({name, amount}){
 
 /* ---------- Force exactly 3 KPI cards ---------- */
 function massageSummaryLayout(){
-  const callsVal = $("#sumCalls"); // Team Calls
-  const avVal    = $("#sumSales"); // Total Submitted AV
-  const dealsVal = $("#sumTalk");  // Deals Submitted
+  const callsVal = $("#sumCalls"); // will show Team Calls
+  const avVal    = $("#sumSales"); // repurposed to Total Submitted AV
+  const dealsVal = $("#sumTalk");  // repurposed to Deals Submitted
 
   if (callsVal){ const l = callsVal.previousElementSibling; if (l) l.textContent = "This Week — Team Calls"; }
   if (avVal){    const l = avVal.previousElementSibling;    if (l) l.textContent = "This Week — Total Submitted AV"; }
   if (dealsVal){ const l = dealsVal.previousElementSibling; if (l) l.textContent = "This Week — Deals Submitted"; }
 
+  // Hide any other KPI cards present in the HTML
   $$(".card").forEach(card=>{
     const keep = card.contains(callsVal) || card.contains(avVal) || card.contains(dealsVal);
     if (!keep) card.style.display = "none";
   });
+
+  // Ensure no more than 3 visible
   $$(".card").filter(c=>c.style.display!=="none").slice(3).forEach(c=> c.style.display="none");
 }
 
@@ -150,7 +153,7 @@ async function loadStatic(){
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
-/* ---------- Calls / Talk / Leads / Sold (function result + optional manual overrides) ---------- */
+/* ---------- Ringy: Calls / Talk / Leads / Sold ---------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
@@ -183,7 +186,7 @@ async function refreshCalls(){
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Manual overrides
+  // Manual overrides (optional)
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
@@ -214,17 +217,20 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Weekly Sales → AV(12×) & Deals (WITH overrides) ---------- */
+/* ---------- Ringy: Weekly Sales → AV(12×) & Deals (with overrides) ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
+    // Build week window in ET to filter any raw rows if present
     const [WSTART, WEND] = weekRangeET();
-    const perByName = new Map();   // nameKey -> { sales, amount, av12x }
+
+    // Aggregate from API
+    const perByName = new Map();   // key: lower(name) -> { sales, amount, av12x }
     let totalDeals = 0;
     let totalAV    = 0;
 
-    // Prefer row-level sales (for toast + precise window)
+    // Prefer detailed rows if present; otherwise use perAgent summary
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
     if (raw.length){
       for (const s of raw){
@@ -233,6 +239,7 @@ async function refreshSales(){
 
         const name   = String(s.agent||"").trim();
         if (!name) continue;
+
         const key    = name.toLowerCase();
         const amount = Number(s.amount||0);
 
@@ -246,62 +253,68 @@ async function refreshSales(){
         totalAV    += amount * 12;
       }
     } else {
-      // Fallback summary
       const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of pa){
-        const key    = String(a.name||"").trim().toLowerCase();
+        const name   = String(a.name||"").trim();
+        if (!name) continue;
+        const key    = name.toLowerCase();
         const sales  = Number(a.sales||0);
-        const amount = Number(a.amount||0);
-        perByName.set(key, { sales, amount, av12x: amount*12 });
+        const amount = Number(a.amount||0);    // monthly
+        const cur    = perByName.get(key) || { sales:0, amount:0, av12x:0 };
+        cur.sales  += sales;
+        cur.amount += amount;
+        cur.av12x   = cur.amount * 12;
+        perByName.set(key, cur);
+
         totalDeals += sales;
-        totalAV    += amount*12;
+        totalAV    += amount * 12;
       }
     }
 
-    // ---- APPLY /public/av_week_override.json if present ----
-    // {
-    //   "perAgent": { "michelle landis": { "av12x": 3208, "sales": 1 } },
-    //   "team": { "totalAV12x": 3208, "totalSales": 1 }
-    // }
-    if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
-      const o = STATE.overrides.av;
+    /* ---------- Apply manual overrides (public/av_week_override.json) ---------- */
+    let overrides = null;
+    try { overrides = await getJSON("/av_week_override.json"); } catch { overrides = null; }
 
-      // per-agent overrides
-      if (o.perAgent && typeof o.perAgent === "object"){
-        for (const [name, v] of Object.entries(o.perAgent)){
-          const key = String(name||"").trim().toLowerCase();
-          if (!key) continue;
-          const av12x = Number(v?.av12x || 0);
-          const sales = Number(v?.sales || 0);
+    const perAgentOverrides = overrides && overrides.perAgent && typeof overrides.perAgent === "object"
+      ? overrides.perAgent
+      : null;
 
-          // remove any previous tally for that agent first
-          const prev = perByName.get(key);
-          if (prev){
-            totalAV    -= Number(prev.av12x || 0);
-            totalDeals -= Number(prev.sales || 0);
-          }
+    if (perAgentOverrides){
+      // Add each agent’s override (values are already AV12x, not monthly)
+      for (const [nameKeyRaw, v] of Object.entries(perAgentOverrides)){
+        const nameKey = String(nameKeyRaw||"").trim().toLowerCase();
+        if (!nameKey) continue;
 
-          perByName.set(key, { sales, amount: av12x/12, av12x });
-          totalAV    += av12x;
-          totalDeals += sales;
-        }
+        const addAv12  = Number(v?.av12x || 0);   // already AV12x
+        const addDeals = Number(v?.sales || 0);
+
+        if (addAv12 <= 0 && addDeals <= 0) continue;
+
+        const cur = perByName.get(nameKey) || { sales:0, amount:0, av12x:0 };
+        cur.sales += addDeals;
+        cur.av12x += addAv12;
+        // keep amount in monthly dollars as av12/12 for consistency (not shown)
+        cur.amount = cur.av12x / 12;
+        perByName.set(nameKey, cur);
+
+        totalDeals += addDeals;
+        totalAV    += addAv12;
       }
-
-      // optional team totals
-      if (o.team && (o.team.totalAV12x != null || o.team.totalSales != null)){
-        const tAV = Number(o.team.totalAV12x ?? totalAV);
-        const tDL = Number(o.team.totalSales ?? totalDeals);
-        totalAV    = tAV;
-        totalDeals = tDL;
+    } else if (overrides && overrides.team){
+      // If no perAgent overrides were provided but a team block was, add it once
+      const teamAddAV    = Number(overrides.team.totalAV12x || 0);
+      const teamAddDeals = Number(overrides.team.totalSales || 0);
+      if (teamAddAV > 0 || teamAddDeals > 0){
+        totalAV    += teamAddAV;
+        totalDeals += teamAddDeals;
       }
     }
-    // ---- END overrides ----
 
-    // Map into roster keys so rows align with agent list
+    /* ---------- Map into roster keys so rows align with the agent list ---------- */
     const out = new Map();
     for (const a of STATE.roster){
-      const nk = String(a.name||"").toLowerCase();
-      const k  = agentKey(a);
+      const k  = agentKey(a);                         // roster key (email or name)
+      const nk = String(a.name||"").toLowerCase();    // lookup by display name
       const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
       out.set(k, s);
     }
@@ -310,9 +323,9 @@ async function refreshSales(){
     STATE.team.av    = Math.max(0, Math.round(totalAV));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // toast newest sale if present
-    const last = raw.length ? raw[raw.length-1] : null;
-    if (last){
+    // (Optional) toast for the newest sale from API rows
+    if (raw.length){
+      const last = raw[raw.length-1];
       const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
