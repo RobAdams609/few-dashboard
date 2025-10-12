@@ -1,57 +1,68 @@
-/* ===================== FEW Dashboard — FULL FILE ===================== */
+/* ============ FEW Dashboard — COMPLETE FILE (v2) ============ */
 "use strict";
 
-/* ---------------- Config ---------------- */
-const DEBUG      = new URLSearchParams(location.search).has("debug");
-const log        = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
+/* ---------- Config ---------- */
+const DEBUG    = new URLSearchParams(location.search).has("debug");
+const log      = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
+const ET_TZ    = "America/New_York";
+const DATA_MS  = 30_000;                      // refresh data
+const ROTATE_MS= 30_000;                      // switch table view
+const VIEWS    = ["roster","av","aotw","ytd"]; // rotation order
+let   viewIdx  = 0;
 
-const ET_TZ      = "America/New_York";
-const DATA_MS    = 30_000;                      // refresh data
-const ROTATE_MS  = 30_000;                      // view rotation
-const VIEWS      = ["roster","av","aotw","ytd"]; // rotation order
-let   viewIdx    = 0;
-
-const QS         = new URLSearchParams(location.search);
+const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
 
-/* ---------------- Utils ---------------- */
+/* ---------- Dom helpers ---------- */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 
-const fmtInt   = n => Number(n||0).toLocaleString("en-US");
-const fmtMoney = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
-const fmtPct   = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
-const initials = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
-const escapeHtml = s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
-const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
+/* ---------- Format helpers ---------- */
+const fmtInt    = n => Number(n||0).toLocaleString("en-US");
+const fmtMoney  = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
+const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
+const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
+const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
 function hmm(mins){ const mm=Math.max(0,Math.round(Number(mins||0))); const h=Math.floor(mm/60), m2=mm%60; return `${h}:${String(m2).padStart(2,"0")}`; }
 
-/* Weekly window = Friday 12:00am ET → next Friday 12:00am ET */
+/* Weekly window = **Friday 12:00am ET** → next Friday 12:00am ET */
 function weekRangeET(){
-  const now=toET(new Date());
-  const day=now.getDay();                  // Sun=0 … Sat=6
-  const sinceFri=(day+2)%7;                // distance back to Friday
-  const start=new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate()-sinceFri);
-  const end=new Date(start); end.setDate(end.getDate()+7);
-  return [start,end];                      // [inclusive, exclusive)
+  const now = toET(new Date());
+  const day = now.getDay();                // Sun=0 … Sat=6
+  const sinceFri = (day + 2) % 7;          // distance back to Friday
+  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
+  const end   = new Date(start); end.setDate(end.getDate()+7);
+  return [start, end];                      // [inclusive, exclusive)
 }
 
-/* ---------------- State ---------------- */
+/* ---------- State ---------- */
 const STATE = {
-  roster: [],                   // [{name,email,photo,phones}]
-  callsWeekByKey: new Map(),    // key -> {calls,talkMin,loggedMin,leads,sold}
-  salesWeekByKey: new Map(),    // key -> {sales,salesAmt,av12x}
+  roster: [],                  // [{name,email,photo,phones}]
+  callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
+  salesWeekByKey: new Map(),   // key -> {sales,salesAmt,av12x}
   overrides: { calls:null, av:null },
-  ytd: { rows:[], total:0 },
-  team: { calls:0, talk:0, av:0, sold:0 },
+  team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
+  ytd: { list:[], total:0 },
+  seenSaleHashes: new Set()
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------------- UI helpers ---------------- */
+/* ---------- Headline rule (ticker) ---------- */
+function setRuleText(rulesObj){
+  const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
+  if (!list.length) return;
+  const idx  = (new Date().getUTCDate()) % list.length;
+  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
+  $("#ticker")     && ($("#ticker").textContent    = `RULE OF THE DAY — ${text}`);
+  $("#principle")  && ($("#principle").textContent = text);
+}
+
+/* ---------- Simple table helpers ---------- */
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
-function setHead(cols){ const thead = $("#thead"); if (thead) thead.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`; }
+function setHead(cols){ const thead=$("#thead"); if(thead) thead.innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`; }
 function setRows(rows){
   const tbody = $("#tbody");
   if (!tbody) return;
@@ -59,6 +70,8 @@ function setRows(rows){
     ? rows.map(r => `<tr>${r.map((c,i)=>`<td class="${i>0?"num":""}">${c}</td>`).join("")}</tr>`).join("")
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
+
+/* ---------- Avatar helpers ---------- */
 function avatarCell(a){
   const src = a.photo ? `/headshots/${a.photo}` : "";
   const img = src
@@ -77,80 +90,61 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------------- 3 KPI cards (force + fill) ---------------- */
-/* Keep exactly three KPI cards:
-   1) This Week — Team Calls           -> #sumCalls
-   2) This Week — Total Submitted AV   -> #sumSales (repurposed)
-   3) This Week — Deals Submitted      -> #sumTalk  (repurposed)
-   Hide everything else (esp. “Team AV (12×)”).  */
+/* ---------- Sale pop (optional styling already in your CSS) ---------- */
+function showSalePop({name, amount}){
+  const el = $("#salePop");
+  if (!el) return;
+  const av12 = Number(amount||0) * 12;
+  el.textContent = `${name} submitted ${fmtMoney(av12)} AV 🎉`;
+  el.classList.add("show");
+  setTimeout(()=> el.classList.remove("show"), 3500);
+}
+
+/* ---------- Keep only 3 KPI cards (same across all views) ---------- */
 function massageSummaryLayout(){
-  const callsEl = $("#sumCalls");
-  const avEl    = $("#sumSales");
-  const dealsEl = $("#sumTalk");
+  // We keep these three DOM nodes: #sumCalls (Team Calls), #sumSales (Total Submitted AV), #sumTalk (Deals)
+  const callsVal = $("#sumCalls");
+  const avVal    = $("#sumSales");
+  const dealsVal = $("#sumTalk");
 
-  if (callsEl){ const l=callsEl.previousElementSibling; if (l) l.textContent="This Week — Team Calls"; }
-  if (avEl){    const l=avEl.previousElementSibling;    if (l) l.textContent="This Week — Total Submitted AV"; }
-  if (dealsEl){ const l=dealsEl.previousElementSibling; if (l) l.textContent="This Week — Deals Submitted"; }
+  if (callsVal){ const l = callsVal.previousElementSibling; if (l) l.textContent = "This Week — Team Calls"; }
+  if (avVal){    const l = avVal.previousElementSibling;    if (l) l.textContent = "This Week — Total Submitted AV"; }
+  if (dealsVal){ const l = dealsVal.previousElementSibling; if (l) l.textContent = "This Week — Deals Submitted"; }
 
-  const allow = [
-    /This Week\s*—\s*Team Calls/i,
-    /This Week\s*—\s*Total Submitted AV/i,
-    /This Week\s*—\s*Deals Submitted/i,
-  ];
-
+  // Hide any other KPI cards present in the HTML
   $$(".card").forEach(card=>{
-    const label = (card.querySelector(".label")?.textContent || "").trim();
-    const isAllowed = allow.some(r=>r.test(label));
-    const isTeamAV  = /Team AV\s*\(12x?\)/i.test(label);
-    if (!isAllowed || isTeamAV) card.style.display="none"; else card.style.display="";
+    const keep = card.contains(callsVal) || card.contains(avVal) || card.contains(dealsVal);
+    if (!keep) card.style.display = "none";
   });
 
-  // Ensure max 3 visible KPI cards
-  const vis = $$(".card").filter(c=>c.style.display!=="none");
-  vis.slice(3).forEach(c=>c.style.display="none");
+  // If there are 4+ cards in the markup, hide extras so exactly 3 remain visible.
+  const visible = $$(".card").filter(c=>c.style.display!=="none");
+  visible.slice(3).forEach(c=> c.style.display="none");
 }
-/* Fill KPI numbers from STATE */
+
+/* ---------- Update KPI values ---------- */
 function updateSummary(){
-  // Calls
-  const calls = Number(STATE?.team?.calls || 0);
-  const callsEl = $("#sumCalls");
-  if (callsEl) callsEl.textContent = fmtInt(calls);
+  // #sumCalls  = "This Week — Team Calls"
+  // #sumSales  = "This Week — Total Submitted AV"
+  // #sumTalk   = "This Week — Deals Submitted"
+  $("#sumCalls") && ($("#sumCalls").textContent = fmtInt(STATE.team.calls));
+  $("#sumSales") && ($("#sumSales").textContent = fmtMoney(STATE.team.av));
 
-  // Total Submitted AV
-  const av = Number(STATE?.team?.av || 0);
-  const avEl = $("#sumSales");
-  if (avEl) avEl.textContent = fmtMoney(av);
-
-  // Deals Submitted
-  let deals = 0;
-  if (STATE.salesWeekByKey.size){
-    for (const v of STATE.salesWeekByKey.values()) deals += Number(v?.sales || 0);
-  }else{
-    deals = Number(STATE?.team?.sold || 0);
-  }
   const dealsEl = $("#sumTalk");
-  if (dealsEl) dealsEl.textContent = fmtInt(deals);
+  if (dealsEl) {
+    const lbl = dealsEl.previousElementSibling;
+    if (lbl) lbl.textContent = "This Week — Deals Submitted";
+    dealsEl.textContent = fmtInt(STATE.team.deals || 0);
+  }
 }
-/* Keep enforcing on DOM redraws */
-(function startKPIEnforcer(){
-  try{ massageSummaryLayout(); }catch{}
-  const mo = new MutationObserver(()=>{ try{ massageSummaryLayout(); }catch{} });
-  mo.observe(document.documentElement, { childList:true, subtree:true });
-  setInterval(()=>{ try{ massageSummaryLayout(); }catch{} }, 3000);
-})();
 
-/* ---------------- Loaders ---------------- */
+/* ---------- Load static assets & overrides ---------- */
 async function loadStatic(){
   const [rosterRaw, rules] = await Promise.all([
     getJSON("/headshots/roster.json").catch(()=>[]),
     getJSON("/rules.json").catch(()=>[])
   ]);
-  if (Array.isArray(rules?.rules)){
-    const idx  = (new Date().getUTCDate()) % rules.rules.length;
-    const text = String(rules.rules[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
-    $("#ticker")     && ($("#ticker").textContent    = `RULE OF THE DAY — ${text}`);
-    $("#principle")  && ($("#principle").textContent = text);
-  }
+  setRuleText(rules);
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -164,8 +158,9 @@ async function loadStatic(){
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
+/* ---------- Live calls / talk / leads / sold (Ringy) ---------- */
 async function refreshCalls(){
-  let teamCalls=0, teamTalk=0, teamLeads=0, teamSold=0;
+  let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
   try{
     const payload = await getJSON("/.netlify/functions/calls_by_agent");
@@ -178,6 +173,7 @@ async function refreshCalls(){
       const n = String(r.name ||"").trim().toLowerCase();
       const k = emailToKey.get(e) || nameToKey.get(n);
       if (!k) continue;
+
       const row = {
         calls    : Number(r.calls||0),
         talkMin  : Number(r.talkMin||0),
@@ -185,7 +181,7 @@ async function refreshCalls(){
         leads    : Number(r.leads||0),
         sold     : Number(r.sold||0),
       };
-      byKey.set(k,row);
+      byKey.set(k, row);
       teamCalls += row.calls;
       teamTalk  += row.talkMin;
       teamLeads += row.leads;
@@ -193,7 +189,7 @@ async function refreshCalls(){
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Manual overrides if present (by email)
+  // Manual overrides (optional)
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
@@ -211,7 +207,7 @@ async function refreshCalls(){
         leads    : Number(o.leads||0),
         sold     : Number(o.sold||0),
       };
-      byKey.set(k,row);
+      byKey.set(k, row);
 
       teamCalls += row.calls; teamTalk += row.talkMin; teamLeads += row.leads; teamSold += row.sold;
     }
@@ -220,99 +216,119 @@ async function refreshCalls(){
   STATE.callsWeekByKey = byKey;
   STATE.team.calls = Math.max(0, Math.round(teamCalls));
   STATE.team.talk  = Math.max(0, Math.round(teamTalk));
+  STATE.team.leads = Math.max(0, Math.round(teamLeads));
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
+/* ---------- Sales: compute AV (12×) & deals for this week from team_sold ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
-    // Build this week from raw (preferred)
+    // Use allSales for accuracy
     const [WSTART, WEND] = weekRangeET();
-    const acc = new Map(); // nameKey -> { sales, amount }
-    const add = (name, amount) => {
-      const key = String(name||"").trim().toLowerCase();
-      if (!key) return;
-      const cur = acc.get(key) || { sales:0, amount:0 };
-      cur.sales  += 1;
-      cur.amount += Number(amount||0);
-      acc.set(key, cur);
-    };
+    const per = new Map();     // name -> { sales, amount, av12x }
+    let totalDeals = 0;
+    let totalAV    = 0;
 
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
     if (raw.length){
       for (const s of raw){
         const when = s.dateSold ? toET(s.dateSold) : null;
         if (!when || when < WSTART || when >= WEND) continue;
-        add(s.agent, Number(s.amount||0));
+        const name   = String(s.agent||"").trim();
+        if (!name) continue;
+        const key    = name.toLowerCase();
+        const amount = Number(s.amount||0);
+
+        const cur = per.get(key) || { sales:0, amount:0, av12x:0 };
+        cur.sales  += 1;
+        cur.amount += amount;
+        cur.av12x   = cur.amount * 12;
+        per.set(key, cur);
+
+        totalDeals += 1;
+        totalAV    += amount * 12;
       }
-    }else{
-      const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
-      for (const a of per){
-        const key = String(a.name||"").trim().toLowerCase();
-        acc.set(key, { sales:Number(a.sales||0), amount:Number(a.amount||0) });
+    } else {
+      // Fallback to perAgent shape if allSales not present
+      const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
+      for (const a of pa){
+        const key    = String(a.name||"").trim().toLowerCase();
+        const sales  = Number(a.sales||0);
+        const amount = Number(a.amount||0);
+        per.set(key, { sales, amount, av12x: amount*12 });
+        totalDeals += sales;
+        totalAV    += amount*12;
       }
     }
 
+    // Map into roster keys so rows align with agent list
     const out = new Map();
-    let teamAV = 0;
-
     for (const a of STATE.roster){
-      const nameKey = String(a.name||"").trim().toLowerCase();
-      const base    = acc.get(nameKey) || { sales:0, amount:0 };
-
-      let av12 = (STATE.overrides.av && a.email in STATE.overrides.av)
-        ? Number(STATE.overrides.av[a.email]||0)
-        : Number(base.amount||0) * 12;
-
-      av12 = Math.max(0, av12);
-
-      out.set(agentKey(a), {
-        sales   : Number(base.sales||0),
-        salesAmt: Number(base.amount||0),
-        av12x   : av12
-      });
-
-      teamAV += av12;
+      const k  = agentKey(a);
+      const nk = String(a.name||"").toLowerCase();
+      const s  = per.get(nk) || { sales:0, amount:0, av12x:0 };
+      out.set(k, s);
     }
 
     STATE.salesWeekByKey = out;
-    STATE.team.av = teamAV;
-  }catch(e){ log("team_sold error", e?.message||e); }
+    STATE.team.av    = Math.max(0, Math.round(totalAV));
+    STATE.team.deals = Math.max(0, Math.round(totalDeals));
+
+    // (Optional) pop toast on newest sale if your function returns sorted sales
+    const last = raw.length ? raw[raw.length-1] : null;
+    if (last){
+      const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
+      if (!STATE.seenSaleHashes.has(h)){
+        STATE.seenSaleHashes.add(h);
+        showSalePop({ name:last.agent || "Team", amount:last.amount || 0 });
+      }
+    }
+  }catch(e){
+    log("team_sold error", e?.message||e);
+    STATE.salesWeekByKey = new Map();
+    STATE.team.av    = 0;
+    STATE.team.deals = 0;
+  }
 }
 
+/* ---------- YTD Manual board ---------- */
 async function loadYTD(){
-  try{
-    const rows = await getJSON("/ytd_av.json");
-    const list = Array.isArray(rows) ? rows : [];
-    STATE.ytd.rows = list.map(r=>({
-      name: r.name,
-      email: String(r.email||"").toLowerCase(),
-      av: Number(r.av||0)
-    }));
-  }catch{ STATE.ytd.rows = []; }
-  try{
-    const tot = await getJSON("/ytd_total.json");
-    STATE.ytd.total = Number(tot?.ytd_av_total || 0);
-  }catch{ STATE.ytd.total = 0; }
+  try {
+    const list = await getJSON("/ytd_av.json");           // [{name,email,av}]
+    const totalObj = await getJSON("/ytd_total.json").catch(()=>({ytd_av_total:0}));
+    const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
+    const rows = Array.isArray(list) ? list : [];
+    const withAvatars = rows.map(r=>{
+      const a = rosterByName.get(String(r.name||"").toLowerCase());
+      return { name:r.name, email:r.email, av:Number(r.av||0), photo:a?.photo||"" };
+    });
+    withAvatars.sort((x,y)=> (y.av)-(x.av));
+    STATE.ytd.list  = withAvatars;
+    STATE.ytd.total = Number(totalObj?.ytd_av_total||0);
+  } catch(e){
+    log("ytd load error", e?.message||e);
+    STATE.ytd = { list:[], total:0 };
+  }
 }
 
-/* ---------------- Derived ---------------- */
+/* ---------- Derived ---------- */
 function bestOfWeek(){
   const entries = STATE.roster.map(a=>{
     const k = agentKey(a);
-    const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
-    return { a, ...s };
+    const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
+    return { a, av12x:Number(s.av12x||0), sales:Number(s.sales||0), salesAmt:Number(s.amount||0) };
   });
   entries.sort((x,y)=>{
     if (y.av12x !== x.av12x) return y.av12x - x.av12x;
-    if ((y.sales||0) !== (x.sales||0)) return (y.sales||0) - (x.sales||0);
-    return (y.salesAmt||0) - (x.salesAmt||0);
+    if (y.sales !== x.sales) return y.sales - x.sales;
+    return y.salesAmt - x.salesAmt;
   });
   return entries[0] || null;
 }
 
-/* ---------------- Renderers ---------------- */
+/* ---------- Renderers ---------- */
 function renderRoster(){
   setLabel("This Week — Roster");
   setHead(["Agent","Calls","Talk (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
@@ -338,7 +354,6 @@ function renderRoster(){
 function renderWeekAV(){
   setLabel("This Week — Leaderboard (Submitted AV)");
   setHead(["Agent","Submitted AV"]);
-
   const ranked = STATE.roster
     .map(a=>{
       const k = agentKey(a);
@@ -346,15 +361,12 @@ function renderWeekAV(){
       return { a, val: Number(s.av12x||0) };
     })
     .sort((x,y)=> (y.val)-(x.val));
-
-  const rows = ranked.map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
-  setRows(rows);
+  setRows(ranked.map(({a,val})=> [avatarCell(a), fmtMoney(val)]));
 }
 
 function renderAOTW(){
   const top = bestOfWeek();
-  setLabel("Agent of the Week");
-  if (!top){ setHead([]); setRows([]); return; }
+  if (!top){ setLabel("Agent of the Week"); setHead([]); setRows([]); return; }
   const { a, av12x, sales } = top;
   const html = `
     <div style="display:flex;gap:18px;align-items:center;">
@@ -369,36 +381,35 @@ function renderAOTW(){
       </div>
     </div>
   `;
+  setLabel("Agent of the Week");
   setHead([]); setRows([[html]]);
 }
 
 function renderYTD(){
   setLabel("YTD — Leaders");
   setHead(["Agent","YTD AV (12×)"]);
-  const rosterIndex = new Map(STATE.roster.map(a=>[a.name.toLowerCase(),a]));
-  const rows = (STATE.ytd.rows||[])
-    .map(r=>{
-      const a = rosterIndex.get(String(r.name||"").toLowerCase()) || { name:r.name, photo:"" };
-      return [avatarCell(a), fmtMoney(r.av||0)];
-    });
+  const rows = (STATE.ytd.list||[]).map(r=>{
+    const a = { name:r.name, photo:r.photo };
+    return [avatarCell(a), fmtMoney(r.av)];
+  });
   setRows(rows);
 }
 
-/* ---------------- Router ---------------- */
+/* ---------- Router ---------- */
 function renderCurrentView(){
   updateSummary();
   const v = VIEW_OVERRIDE || VIEWS[viewIdx % VIEWS.length];
-  if      (v === "roster") renderRoster();
+  if (v === "roster")      renderRoster();
   else if (v === "av")     renderWeekAV();
   else if (v === "aotw")   renderAOTW();
   else if (v === "ytd")    renderYTD();
   else                     renderRoster();
 }
 
-/* ---------------- Boot ---------------- */
+/* ---------- Boot ---------- */
 async function boot(){
   try{
-    massageSummaryLayout();                   // ensure KPI labels/visibility immediately
+    massageSummaryLayout();                   // fix summary card labels/visibility
     await loadStatic();
     await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
     renderCurrentView();
@@ -411,7 +422,7 @@ async function boot(){
       }catch(e){ log("refresh tick error", e?.message||e); }
     }, DATA_MS);
 
-    // rotation (unless overridden)
+    // rotation (unless manually pinned with ?view=…)
     if (!VIEW_OVERRIDE){
       setInterval(()=>{
         viewIdx = (viewIdx + 1) % VIEWS.length;
@@ -424,6 +435,4 @@ async function boot(){
     if (tbody) tbody.innerHTML = `<tr><td style="padding:18px;color:#d66">Error loading dashboard: ${escapeHtml(e.message||e)}</td></tr>`;
   }
 }
-
 document.addEventListener("DOMContentLoaded", boot);
-/* ===================== END ===================== */
