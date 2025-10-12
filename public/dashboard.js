@@ -87,24 +87,76 @@ function setRows(rows){
  *   3) This Week — Deals Submitted      -> #sumTalk  (repurposed)
  * Hide everything else.
  */
+/* ---------- KPI layout & values (FORCE 3 CARDS) ---------- */
+
+/**
+ * Keep exactly three KPI cards on all views:
+ *   1) This Week — Team Calls           -> #sumCalls
+ *   2) This Week — Total Submitted AV   -> #sumSales (repurposed)
+ *   3) This Week — Deals Submitted      -> #sumTalk  (repurposed)
+ * Hide everything else.
+ */
 function massageSummaryLayout(){
-  const callsVal  = document.querySelector("#sumCalls");  // keep
-  const avVal     = document.querySelector("#sumSales");  // keep (as Total Submitted AV)
-  const dealsVal  = document.querySelector("#sumTalk");   // keep (as Deals Submitted)
+  const callsEl = document.querySelector("#sumCalls"); // keep
+  const avEl    = document.querySelector("#sumSales"); // keep (as Total Submitted AV)
+  const dealsEl = document.querySelector("#sumTalk");  // keep (as Deals Submitted)
 
   // Relabel the three we keep
-  if (callsVal){
-    const l = callsVal.previousElementSibling;
+  if (callsEl){
+    const l = callsEl.previousElementSibling;
     if (l) l.textContent = "This Week — Team Calls";
   }
-  if (avVal){
-    const l = avVal.previousElementSibling;
+  if (avEl){
+    const l = avEl.previousElementSibling;
     if (l) l.textContent = "This Week — Total Submitted AV";
   }
-  if (dealsVal){
-    const l = dealsVal.previousElementSibling;
+  if (dealsEl){
+    const l = dealsEl.previousElementSibling;
     if (l) l.textContent = "This Week — Deals Submitted";
   }
+
+  // Hide any other KPI cards that are in the HTML
+  const allow = [
+    /This Week\s*—\s*Team Calls/i,
+    /This Week\s*—\s*Total Submitted AV/i,
+    /This Week\s*—\s*Deals Submitted/i,
+  ];
+
+  document.querySelectorAll(".card").forEach(card=>{
+    const label = (card.querySelector(".label")?.textContent || "").trim();
+    const isAllowed = allow.some(r=>r.test(label));
+    // Keep only the 3 canonical cards
+    if (!isAllowed) card.style.display = "none";
+    else card.style.display = "";
+  });
+
+/**
+ * Fill KPI numbers for the current week.
+ * Calls -> STATE.team.calls
+ * Total Submitted AV -> STATE.team.av (already 12×)
+ * Deals Submitted -> sum of per-agent `sales` in STATE.salesWeekByKey
+ */
+function updateSummary(){
+  // Calls
+  const calls = Number(STATE?.team?.calls || 0);
+  const callsEl = document.querySelector("#sumCalls");
+  if (callsEl) callsEl.textContent = calls.toLocaleString("en-US");
+
+  // Total Submitted AV (money)
+  const av = Number(STATE?.team?.av || 0);
+  const avEl = document.querySelector("#sumSales");
+  if (avEl) avEl.textContent = "$" + Math.round(av).toLocaleString("en-US");
+
+  // Deals Submitted (number of sales this week)
+  let deals = 0;
+  if (STATE?.salesWeekByKey && STATE.salesWeekByKey.size){
+    for (const v of STATE.salesWeekByKey.values()) deals += Number(v?.sales || 0);
+  } else {
+    deals = Number(STATE?.team?.sold || 0);
+  }
+  const dealsEl = document.querySelector("#sumTalk"); // repurposed as “Deals Submitted”
+  if (dealsEl) dealsEl.textContent = deals.toLocaleString("en-US");
+}
 
   // Hide any other KPI cards that exist in the HTML
   document.querySelectorAll(".card").forEach(card=>{
