@@ -28,7 +28,7 @@ function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
 function hmm(mins){ const mm=Math.max(0,Math.round(Number(mins||0))); const h=Math.floor(mm/60), m2=mm%60; return `${h}:${String(m2).padStart(2,"0")}`; }
 
-/* Weekly window = **Friday 12:00am ET** → next Friday 12:00am ET */
+/* Weekly window = Friday 12:00am ET → next Friday 12:00am ET */
 function weekRangeET(){
   const now = toET(new Date());
   const day = now.getDay();                // Sun=0 … Sat=6
@@ -90,7 +90,7 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Sale pop (optional styling already in your CSS) ---------- */
+/* ---------- Sale pop (optional) ---------- */
 function showSalePop({name, amount}){
   const el = $("#salePop");
   if (!el) return;
@@ -100,12 +100,11 @@ function showSalePop({name, amount}){
   setTimeout(()=> el.classList.remove("show"), 3500);
 }
 
-/* ---------- Keep only 3 KPI cards (same across all views) ---------- */
+/* ---------- Force exactly 3 KPI cards ---------- */
 function massageSummaryLayout(){
-  // We keep these three DOM nodes: #sumCalls (Team Calls), #sumSales (Total Submitted AV), #sumTalk (Deals)
-  const callsVal = $("#sumCalls");
-  const avVal    = $("#sumSales");
-  const dealsVal = $("#sumTalk");
+  const callsVal = $("#sumCalls"); // will show Team Calls
+  const avVal    = $("#sumSales"); // repurposed to Total Submitted AV
+  const dealsVal = $("#sumTalk");  // repurposed to Deals Submitted
 
   if (callsVal){ const l = callsVal.previousElementSibling; if (l) l.textContent = "This Week — Team Calls"; }
   if (avVal){    const l = avVal.previousElementSibling;    if (l) l.textContent = "This Week — Total Submitted AV"; }
@@ -117,16 +116,12 @@ function massageSummaryLayout(){
     if (!keep) card.style.display = "none";
   });
 
-  // If there are 4+ cards in the markup, hide extras so exactly 3 remain visible.
-  const visible = $$(".card").filter(c=>c.style.display!=="none");
-  visible.slice(3).forEach(c=> c.style.display="none");
+  // Ensure no more than 3 visible
+  $$(".card").filter(c=>c.style.display!=="none").slice(3).forEach(c=> c.style.display="none");
 }
 
-/* ---------- Update KPI values ---------- */
+/* ---------- KPI values ---------- */
 function updateSummary(){
-  // #sumCalls  = "This Week — Team Calls"
-  // #sumSales  = "This Week — Total Submitted AV"
-  // #sumTalk   = "This Week — Deals Submitted"
   $("#sumCalls") && ($("#sumCalls").textContent = fmtInt(STATE.team.calls));
   $("#sumSales") && ($("#sumSales").textContent = fmtMoney(STATE.team.av));
 
@@ -158,13 +153,15 @@ async function loadStatic(){
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
-/* ---------- Live calls / talk / leads / sold (Ringy) ---------- */
+/* ---------- Ringy: Calls / Talk / Leads / Sold ---------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
+
   try{
     const payload = await getJSON("/.netlify/functions/calls_by_agent");
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
+
     const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
     const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
 
@@ -220,14 +217,13 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Sales: compute AV (12×) & deals for this week from team_sold ---------- */
+/* ---------- Ringy: Weekly Sales → AV(12×) & Deals ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
-    // Use allSales for accuracy
     const [WSTART, WEND] = weekRangeET();
-    const per = new Map();     // name -> { sales, amount, av12x }
+    const perByName = new Map();     // nameKey -> { sales, amount, av12x }
     let totalDeals = 0;
     let totalAV    = 0;
 
@@ -236,28 +232,28 @@ async function refreshSales(){
       for (const s of raw){
         const when = s.dateSold ? toET(s.dateSold) : null;
         if (!when || when < WSTART || when >= WEND) continue;
+
         const name   = String(s.agent||"").trim();
         if (!name) continue;
         const key    = name.toLowerCase();
         const amount = Number(s.amount||0);
 
-        const cur = per.get(key) || { sales:0, amount:0, av12x:0 };
+        const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
         cur.sales  += 1;
         cur.amount += amount;
         cur.av12x   = cur.amount * 12;
-        per.set(key, cur);
+        perByName.set(key, cur);
 
         totalDeals += 1;
         totalAV    += amount * 12;
       }
     } else {
-      // Fallback to perAgent shape if allSales not present
       const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of pa){
         const key    = String(a.name||"").trim().toLowerCase();
         const sales  = Number(a.sales||0);
         const amount = Number(a.amount||0);
-        per.set(key, { sales, amount, av12x: amount*12 });
+        perByName.set(key, { sales, amount, av12x: amount*12 });
         totalDeals += sales;
         totalAV    += amount*12;
       }
@@ -268,7 +264,7 @@ async function refreshSales(){
     for (const a of STATE.roster){
       const k  = agentKey(a);
       const nk = String(a.name||"").toLowerCase();
-      const s  = per.get(nk) || { sales:0, amount:0, av12x:0 };
+      const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
       out.set(k, s);
     }
 
@@ -276,7 +272,7 @@ async function refreshSales(){
     STATE.team.av    = Math.max(0, Math.round(totalAV));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // (Optional) pop toast on newest sale if your function returns sorted sales
+    // toast on newest sale if present
     const last = raw.length ? raw[raw.length-1] : null;
     if (last){
       const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
