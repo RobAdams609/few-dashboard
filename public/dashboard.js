@@ -259,6 +259,30 @@ async function refreshSales(){
       }
     }
 
+    /* ---------- APPLY MANUAL OVERRIDES ---------- */
+    if (STATE.overrides?.av && typeof STATE.overrides.av === "object") {
+      for (const [name, o] of Object.entries(STATE.overrides.av)) {
+        const key = String(name).trim().toLowerCase();
+        const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
+
+        // remove current contribution
+        totalDeals -= cur.sales;
+        totalAV    -= cur.av12x;
+
+        // apply override values
+        const ovSales  = Number(o.sales ?? cur.sales ?? 0);
+        const ovAv12x  = Number(o.av12x ?? cur.av12x ?? 0);
+        const ovAmount = ovAv12x / 12;
+
+        perByName.set(key, { sales: ovSales, amount: ovAmount, av12x: ovAv12x });
+
+        // add back
+        totalDeals += ovSales;
+        totalAV    += ovAv12x;
+      }
+    }
+    /* ------------------------------------------- */
+
     // Map into roster keys so rows align with agent list
     const out = new Map();
     for (const a of STATE.roster){
