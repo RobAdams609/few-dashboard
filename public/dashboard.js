@@ -47,10 +47,9 @@ const STATE = {
   callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
   salesWeekByKey: new Map(),   // key -> {sales,salesAmt,av12x}
   overrides: { calls:null, av:null },
-  team: { calls:0, talk:0, av:0, deals:0 },
+  team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   seenSaleHashes: new Set(),
-  ytd: [],                     // [{name,email,av}]
-  ytdTotal: 0
+  ytd: []                      // [{name,email,av}]
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
@@ -59,27 +58,9 @@ function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
   const idx  = (new Date().getUTCDate()) % list.length;
-  const text = String(list[idx]||"").replace(/^\d+\)\s*/,"").replace(/Bonus\)\s*/,"Bonus: ");
+  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
   $("#ticker")     && ($("#ticker").textContent    = `RULE OF THE DAY — ${text}`);
   $("#principle")  && ($("#principle").textContent = text);
-}
-
-/* Re-label & trim summary cards to the 3 you want (no HTML edits needed) */
-function massageSummaryLayout(){
-  // Find the three KPI value spans by id
-  const callsVal = $("#sumCalls");
-  const talkVal  = $("#sumTalk");
-  const salesVal = $("#sumSales");
-  // Relabel
-  if (callsVal){ const lbl=callsVal.previousElementSibling; if (lbl) lbl.textContent="This Week — Team Calls"; }
-  // We'll repurpose the *middle* card (was Talk) to Deals Submitted
-  if (talkVal){ const lbl=talkVal.previousElementSibling; if (lbl) lbl.textContent="This Week — Deals Submitted"; }
-  // Rightmost KPI becomes Total Submitted AV
-  if (salesVal){ const lbl=salesVal.previousElementSibling; if (lbl) lbl.textContent="This Week — Total Submitted AV"; }
-
-  // Hide any extra KPI cards if present (Team AV / Unassigned etc.)
-  $("#sumAV")?.closest(".card")?.setAttribute("style","display:none");
-  $("#sumUnassigned")?.closest(".card")?.setAttribute("style","display:none");
 }
 
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
@@ -97,11 +78,37 @@ function setRows(rows){
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
+/* keep only 3 KPI cards on every board */
+function massageSummaryLayout(){
+  // Survivors:
+  // - "This Week — Team Calls"        (#sumCalls)
+  // - "This Week — Total Submitted AV" (#sumSales)
+  // - "This Week — Deals Submitted"    (#sumTalk, repurposed)
+  const callsVal = $("#sumCalls");
+  const talkVal  = $("#sumTalk");
+  const salesVal = $("#sumSales");
+
+  if (callsVal){ const lbl=callsVal.previousElementSibling; if (lbl) lbl.textContent = "This Week — Team Calls"; }
+  if (salesVal){ const lbl=salesVal.previousElementSibling; if (lbl) lbl.textContent = "This Week — Total Submitted AV"; }
+  if (talkVal){  const lbl=talkVal.previousElementSibling;  if (lbl) lbl.textContent = "This Week — Deals Submitted"; }
+
+  const unwanted = [/Team AV/i, /AV \(12×\)/i, /AV \(12x\)/i, /Unassigned/i, /Team Sales/i];
+  document.querySelectorAll(".card").forEach(card=>{
+    const label = card?.querySelector?.(".label")?.textContent || "";
+    if (unwanted.some(rx=>rx.test(label))){
+      if (!/Deals Submitted/i.test(label) && !/Total Submitted AV/i.test(label) && !/Team Calls/i.test(label)){
+        card.style.display = "none";
+      }
+    }
+  });
+  const rowCards = Array.from(document.querySelectorAll(".card")).filter(c=>c.style.display!=="none");
+  rowCards.slice(3).forEach(c=> c.style.display="none");
+}
+
 function updateSummary(){
-  // 3 KPIs: Calls, Deals, Total AV
   $("#sumCalls") && ($("#sumCalls").textContent = fmtInt(STATE.team.calls));
-  $("#sumTalk")  && ($("#sumTalk").textContent  = fmtInt(STATE.team.deals));      // repurposed to "Deals Submitted"
-  $("#sumSales") && ($("#sumSales").textContent = fmtMoney(STATE.team.av));       // Total Submitted AV (12×)
+  $("#sumTalk")  && ($("#sumTalk").textContent  = fmtInt(STATE.team.deals));  // middle = Deals
+  $("#sumSales") && ($("#sumSales").textContent = fmtMoney(STATE.team.av));   // right  = AV
 }
 
 function avatarCell(a){
@@ -134,11 +141,10 @@ function showSalePop({name, amount}){
 
 /* ---------- Loaders ---------- */
 async function loadStatic(){
-  const [rosterRaw, rules, ytd, ytdTotal] = await Promise.all([
+  const [rosterRaw, rules, ytd] = await Promise.all([
     getJSON("/headshots/roster.json").catch(()=>[]),
     getJSON("/rules.json").catch(()=>[]),
-    getJSON("/ytd_av.json").catch(()=>[]),
-    getJSON("/ytd_total.json").catch(()=>({ ytd_av_total:0 }))
+    getJSON("/ytd_av.json").catch(()=>[]) // manual override for YTD board
   ]);
   setRuleText(rules);
 
@@ -151,7 +157,6 @@ async function loadStatic(){
   }));
 
   STATE.ytd = Array.isArray(ytd) ? ytd : (Array.isArray(ytd?.rows) ? ytd.rows : []);
-  STATE.ytdTotal = Number(ytdTotal?.ytd_av_total || 0);
 
   try { STATE.overrides.calls = await getJSON("/calls_week_override.json"); } catch { STATE.overrides.calls = null; }
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
@@ -215,9 +220,11 @@ async function refreshCalls(){
   STATE.callsWeekByKey = byKey;
   STATE.team.calls = Math.max(0, Math.round(teamCalls));
   STATE.team.talk  = Math.max(0, Math.round(teamTalk));
+  STATE.team.leads = Math.max(0, Math.round(teamLeads));
+  STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* Sales → AV (12×) for **this week only**. */
+/* Sales → AV (12×) for **this week only**. Works even if the function doesn’t give av12x. */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
@@ -246,20 +253,26 @@ async function refreshSales(){
       // Fall back to perAgent structure from the function
       const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of per){
-        const key = String(a.name||"").trim().toLowerCase();
-        acc.set(key, { sales:Number(a.sales||0), amount:Number(a.amount||0) });
+        const name = a.name;
+        const sales = Number(a.sales||0);
+        const amount = Number(a.amount||0);
+        const cur = acc.get(String(name||"").trim().toLowerCase()) || { sales:0, amount:0 };
+        cur.sales  = sales;
+        cur.amount = amount;
+        acc.set(String(name||"").trim().toLowerCase(), cur);
       }
     }
 
     // Build per-agent map against roster and compute AV (12×). Apply overrides if present.
     const out = new Map();
-    let teamAV = 0, teamDeals = 0;
+    let teamAV = 0;
+    let teamDeals = 0;
 
     for (const a of STATE.roster){
       const nameKey = String(a.name||"").trim().toLowerCase();
       const base    = acc.get(nameKey) || { sales:0, amount:0 };
 
-      // prefer override value if provided, else compute 12× amount
+      // prefer override av if provided, else compute 12× amount
       let av12 = (STATE.overrides.av && a.email in STATE.overrides.av)
         ? Number(STATE.overrides.av[a.email]||0)
         : Number(base.amount||0) * 12;
@@ -277,8 +290,8 @@ async function refreshSales(){
     }
 
     STATE.salesWeekByKey = out;
-    STATE.team.av     = teamAV;
-    STATE.team.deals  = teamDeals;
+    STATE.team.av    = teamAV;
+    STATE.team.deals = teamDeals;
 
     // Pop the latest sale once (if raw present)
     if (raw.length){
@@ -324,7 +337,7 @@ function renderRoster(){
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
       fmtInt(c.leads),
-      fmtInt(c.sold ?? s.sales),
+      fmtInt(c.sold),
       fmtPct(conv),
       fmtMoney(s.av12x)
     ];
@@ -370,29 +383,32 @@ function renderAOTW(){
   setHead([]); setRows([[html]]);
 }
 
+/* Manual YTD Leaders (from ytd_av.json) */
 function renderYTD(){
   setLabel("YTD — Leaders");
   setHead(["Agent","YTD AV (12×)"]);
 
-  // join headshots from roster when possible
-  const byName = new Map(STATE.roster.map(a=>[String(a.name||"").trim().toLowerCase(), a]));
-  const rows = (STATE.ytd || [])
+  // Map YTD rows to roster for photos/initials by email or name
+  const byEmail = new Map(STATE.roster.map(a=>[String(a.email||"").trim().toLowerCase(), a]));
+  const byName  = new Map(STATE.roster.map(a=>[String(a.name ||"").trim().toLowerCase(),  a]));
+
+  const rows = (STATE.ytd||[])
     .map(row=>{
-      const name = row.name || row.agent || "";
-      const rosterA = byName.get(String(name).trim().toLowerCase());
-      const avatarHTML = rosterA ? avatarCell(rosterA)
-        : `<div class="agent"><div class="avatar-fallback">${initials(name)}</div><span>${escapeHtml(name)}</span></div>`;
-      return { avatarHTML, val: Number(row.av||row.value||0) };
+      const a = byEmail.get(String(row.email||"").toLowerCase()) || byName.get(String(row.name||"").toLowerCase()) || {name:row.name||"—", email:"", photo:""};
+      return { a, val: Number(row.av||0) };
     })
-    .sort((x,y)=> y.val - x.val)
-    .map(r => [r.avatarHTML, fmtMoney(r.val)]);
+    .sort((x,y)=> (y.val)-(x.val))
+    .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
 
   setRows(rows);
 }
 
 /* ---------- Router ---------- */
 function renderCurrentView(){
+  // Ensure KPI labels are right & extra cards hidden
+  massageSummaryLayout();
   updateSummary();
+
   const v = VIEW_OVERRIDE || VIEWS[viewIdx % VIEWS.length];
   if (v === "roster")      renderRoster();
   else if (v === "av")     renderWeekAV();
@@ -404,7 +420,7 @@ function renderCurrentView(){
 /* ---------- Boot ---------- */
 async function boot(){
   try{
-    massageSummaryLayout();                   // force 3 KPI cards & labels
+    massageSummaryLayout();                   // fix summary card labels/visibility now
     await loadStatic();
     await Promise.all([refreshCalls(), refreshSales()]);
     renderCurrentView();
@@ -424,6 +440,10 @@ async function boot(){
         renderCurrentView();
       }, ROTATE_MS);
     }
+
+    // run the KPI cleanup again after DOM settles (keeps it to 3)
+    setTimeout(massageSummaryLayout, 100);
+
   }catch(e){
     console.error("Dashboard boot error:", e);
     const tbody = $("#tbody");
