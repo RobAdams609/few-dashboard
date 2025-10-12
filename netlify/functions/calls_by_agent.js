@@ -1,26 +1,38 @@
 // netlify/functions/calls_by_agent.js
 // Weekly (Fri 12:00am ET → next Fri 12:00am ET) per-agent: calls, talk, logged, leads, sold.
-// Uses ONLY two env vars you already have:
-//   RINGY_CALL_DETAIL_URL   e.g. https://api.ringy.com/v2/calls
-//   RINGY_API_KEY_CALL_DETAIL
+// Works even if RINGY_CALL_DETAIL_URL is only the base host (it will try common paths).
 
 export default async function handler() {
   try {
     const { RINGY_CALL_DETAIL_URL, RINGY_API_KEY_CALL_DETAIL } = process.env;
-    if (!RINGY_CALL_DETAIL_URL || !RINGY_API_KEY_CALL_DETAIL) {
-      return json(500, { error: "Missing RINGY_CALL_DETAIL_URL or RINGY_API_KEY_CALL_DETAIL" });
+    if (!RINGY_API_KEY_CALL_DETAIL) {
+      return json(500, { error: "Missing RINGY_API_KEY_CALL_DETAIL" });
+    }
+    if (!RINGY_CALL_DETAIL_URL) {
+      return json(500, { error: "Missing RINGY_CALL_DETAIL_URL" });
     }
 
-    // ----- Weekly window in Eastern Time -----
+    // Build a list of candidate endpoints to try
+    const norm = RINGY_CALL_DETAIL_URL.replace(/\/+$/, "");
+    const CANDIDATE_PATHS = [
+      "",                 // env already includes full path
+      "/v2/calls",
+      "/v2/call-detail",
+      "/calls",
+      "/call-detail",
+    ];
+    const BASES = norm.match(/\/v\d+\//) ? [norm] : CANDIDATE_PATHS.map(p => norm + p);
+
+    // Weekly window (ET)
     const ET_TZ = "America/New_York";
     const nowET = toET(new Date(), ET_TZ);
-    const sinceFri = (nowET.getDay() + 2) % 7; // distance back to Friday
+    const sinceFri = (nowET.getDay() + 2) % 7;
     const start = new Date(nowET); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
     const end   = new Date(start); end.setDate(end.getDate() + 7);
     const startISO = toISO(start);
     const endISO   = toISO(end);
 
-    // ----- Build & try multiple param/header patterns until one works -----
+    // Try multiple param/header patterns
     const PARAMS = [
       { startKey: "startDate", endKey: "endDate" },
       { startKey: "fromDate",  endKey: "toDate"  },
@@ -35,56 +47,58 @@ export default async function handler() {
     const pageSize = 200;
     let rows = [];
     const errors = [];
+    let success = false;
 
-    let ok = false;
-    for (const p of PARAMS) {
-      for (const h of HEADERS) {
-        rows = [];
-        let page = 1;
+    for (const base of BASES) {
+      for (const p of PARAMS) {
+        for (const h of HEADERS) {
+          rows = [];
+          let page = 1;
+          while (true) {
+            const url = new URL(base);
+            url.searchParams.set(p.startKey, startISO);
+            url.searchParams.set(p.endKey,   endISO);
+            url.searchParams.set("page",     String(page));
+            url.searchParams.set("pageSize", String(pageSize));
 
-        while (true) {
-          const url = new URL(RINGY_CALL_DETAIL_URL);
-          url.searchParams.set(p.startKey, startISO);
-          url.searchParams.set(p.endKey,   endISO);
-          url.searchParams.set("page",     String(page));
-          url.searchParams.set("pageSize", String(pageSize));
+            const r = await fetch(url.toString(), { headers: h });
+            if (!r.ok) {
+              errors.push(`${url.pathname}?${p.startKey}/${p.endKey} ${r.status}`);
+              rows = [];
+              break; // try next combo
+            }
 
-          const r = await fetch(url.toString(), { headers: h });
-          if (!r.ok) {
-            errors.push(`${url.pathname}?${p.startKey}/${p.endKey} -> ${r.status}`);
-            rows = [];
-            break; // try next header/param combo
+            const data = await r.json().catch(() => ({}));
+            const list = Array.isArray(data?.items) ? data.items
+                      : Array.isArray(data?.data)  ? data.data
+                      : Array.isArray(data)        ? data
+                      : [];
+
+            rows.push(...list);
+
+            if (list.length < pageSize) { success = true; break; }
+            page += 1;
+            if (page > 50) { success = true; break; }
           }
-
-          // various Ringy shapes: {items:[]}, {data:[]}, or []
-          const data = await r.json().catch(() => ({}));
-          const list = Array.isArray(data?.items) ? data.items
-                    : Array.isArray(data?.data)  ? data.data
-                    : Array.isArray(data)        ? data
-                    : [];
-          rows.push(...list);
-
-          if (list.length < pageSize) { ok = true; break; }
-          page += 1;
-          if (page > 50) { ok = true; break; } // safety
+          if (success) break;
         }
-        if (ok) break;
+        if (success) break;
       }
-      if (ok) break;
+      if (success) break;
     }
 
-    if (!ok) {
+    if (!success) {
       return json(502, {
         error: "fetch failed",
-        message: `All parameter patterns returned errors (400/404).`,
-        hints: errors.slice(-6), // last few tries
+        message: "All parameter/endpoint patterns returned 400/404.",
+        hints: errors.slice(-8),
         perAgent: [],
         team: { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 }
       });
     }
 
-    // ----- Aggregate per agent -----
-    const per = new Map(); // key=email||name (lower)
+    // Aggregate
+    const per = new Map();
     const team = { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
 
     for (const x of rows) {
@@ -93,16 +107,9 @@ export default async function handler() {
       const key   = (email || name).trim().toLowerCase();
       if (!key) continue;
 
-      // many APIs are "one row = one call"
       const calls     = num(x.calls, 1);
-      const talkMin   = minutes(
-        x.talkTimeMin, x.talkMinutes, x.talk_time_min, x.talk_time,
-        x.talkSeconds
-      );
-      const loggedMin = minutes(
-        x.loggedMinutes, x.totalMinutes, x.durationMin, x.duration,
-        x.totalSeconds
-      );
+      const talkMin   = minutes(x.talkTimeMin, x.talkMinutes, x.talk_time_min, x.talk_time, x.talkSeconds);
+      const loggedMin = minutes(x.loggedMinutes, x.totalMinutes, x.durationMin, x.duration, x.totalSeconds);
       const leads     = num(x.leads, 0);
       const sold      = num(x.sold, 0);
 
@@ -154,10 +161,8 @@ function minutes(...vals){
     if (v == null) continue;
     if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, v > 600 ? Math.round(v/60) : v);
     if (typeof v === "string"){
-      const m = v.match(/^(\d+):(\d{2})$/);         // "h:mm"
-      if (m) return Number(m[1])*60 + Number(m[2]);
-      const n = Number(v);
-      if (Number.isFinite(n)) return n > 600 ? Math.round(n/60) : n; // seconds → minutes
+      const m = v.match(/^(\d+):(\d{2})$/); if (m) return Number(m[1])*60 + Number(m[2]);
+      const n = Number(v); if (Number.isFinite(n)) return n > 600 ? Math.round(n/60) : n;
     }
   }
   return 0;
