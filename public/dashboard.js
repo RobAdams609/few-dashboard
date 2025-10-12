@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE REPLACEMENT ============ */
+/* ============ FEW Dashboard — WEEKLY + YTD ROTATION ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -6,9 +6,9 @@ const DEBUG = new URLSearchParams(location.search).has("debug");
 const log   = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 
 const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;                      // refresh data
-const ROTATE_MS = 30_000;                      // switch table view
-const VIEWS     = ["roster","av","aotw","ytd"]; // <-- includes YTD rotation
+const DATA_MS   = 30_000;                       // refresh data
+const ROTATE_MS = 30_000;                       // switch table view
+const VIEWS     = ["roster","av","aotw","ytd"]; // 4-board rotation per request
 let   viewIdx   = 0;
 
 const QS = new URLSearchParams(location.search);
@@ -34,8 +34,8 @@ function hmm(mins){
 /* Weekly window = Friday 12:00am ET → next Friday 12:00am ET */
 function weekRangeET(){
   const now = toET(new Date());
-  const day = now.getDay();                // Sun=0 … Sat=6
-  const sinceFri = (day + 2) % 7;          // distance back to Friday
+  const day = now.getDay();                 // Sun=0…Sat=6
+  const sinceFri = (day + 2) % 7;           // distance back to Friday
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
   const end   = new Date(start); end.setDate(end.getDate()+7);
   return [start, end];                      // [inclusive, exclusive)
@@ -43,13 +43,13 @@ function weekRangeET(){
 
 /* ---------- State ---------- */
 const STATE = {
-  roster: [],                  // [{name,email,photo,phones}]
-  callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
-  salesWeekByKey: new Map(),   // key -> {sales,salesAmt,av12x}
+  roster: [],                   // [{name,email,photo,phones}]
+  callsWeekByKey: new Map(),    // key -> {calls,talkMin,loggedMin,leads,sold}
+  salesWeekByKey: new Map(),    // key -> {sales,salesAmt,av12x}
   overrides: { calls:null, av:null },
-  team: { calls:0, talk:0, av:0, deals:0 },
+  team: { calls:0, talk:0, av:0, sold:0 },  // sold = deals submitted this week
   seenSaleHashes: new Set(),
-  ytd: { rows:[], total:0 }    // manual YTD
+  ytd: { rows: [], total: 0 }               // manual override set
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
@@ -61,6 +61,25 @@ function setRuleText(rulesObj){
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
   $("#ticker")     && ($("#ticker").textContent    = `RULE OF THE DAY — ${text}`);
   $("#principle")  && ($("#principle").textContent = text);
+}
+
+/* Top KPI cards — relabel & show exactly 3: Calls, Deals, Total AV */
+function massageKPI(){
+  // 1) Hide “Talk” card (we still compute talk for the table but not a KPI)
+  const talkCard = $("#sumTalk")?.closest(".card");
+  if (talkCard) talkCard.style.display = "none";
+
+  // 2) Repurpose “Team Sales” card to “This Week — Total Submitted AV”
+  const salesLabel = $("#sumSales")?.previousElementSibling;
+  if (salesLabel) salesLabel.textContent = "This Week — Total Submitted AV";
+
+  // 3) Repurpose “Unassigned Sales” card to “This Week — Deals Submitted”
+  const unassignedLabel = $("#sumUnassigned")?.previousElementSibling;
+  if (unassignedLabel) unassignedLabel.textContent = "This Week — Deals Submitted";
+
+  // 4) Ensure Calls KPI reads “This Week — Team Calls”
+  const callsLabel = $("#sumCalls")?.previousElementSibling;
+  if (callsLabel) callsLabel.textContent = "This Week — Team Calls";
 }
 
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
@@ -78,31 +97,11 @@ function setRows(rows){
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
-/* Re-label summary cards (no HTML edits needed) */
-function massageSummaryLayout(){
-  // 1) Rename the “Team Sales” card to “This Week — Total Submitted AV (12×)”
-  const sumSales = $("#sumSales");
-  if (sumSales){
-    const label = sumSales.previousElementSibling;
-    if (label) label.textContent = "This Week — Total Submitted AV (12×)";
-  }
-  // 2) Repurpose “Unassigned Sales” card into “This Week — Deals”
-  const sumUn = $("#sumUnassigned");
-  if (sumUn){
-    const label = sumUn.previousElementSibling;
-    if (label) label.textContent = "This Week — Deals";
-    sumUn.closest(".card")?.removeAttribute("style");
-  }
-  // 3) Hide the separate “Team AV (12×)” card (redundant now)
-  const sumAV = $("#sumAV");
-  if (sumAV) sumAV.closest(".card")?.setAttribute("style","display:none");
-}
-
 function updateSummary(){
-  $("#sumCalls")        && ($("#sumCalls").textContent = fmtInt(STATE.team.calls));
-  $("#sumTalk")         && ($("#sumTalk").textContent  = fmtInt(Math.round(STATE.team.talk)));
-  $("#sumSales")        && ($("#sumSales").textContent = fmtMoney(STATE.team.av));
-  $("#sumUnassigned")   && ($("#sumUnassigned").textContent = fmtInt(STATE.team.deals)); // now “Deals”
+  $("#sumCalls")       && ($("#sumCalls").textContent       = fmtInt(STATE.team.calls));
+  // talk KPI hidden; we still compute
+  $("#sumSales")       && ($("#sumSales").textContent       = fmtMoney(STATE.team.av));   // Total AV
+  $("#sumUnassigned")  && ($("#sumUnassigned").textContent  = fmtInt(STATE.team.sold));  // Deals
 }
 
 function avatarCell(a){
@@ -149,28 +148,32 @@ async function loadStatic(){
     phones: Array.isArray(a.phones) ? a.phones : []
   }));
 
+  // Optional weekly overrides (let the dashboard work even if functions are empty)
   try { STATE.overrides.calls = await getJSON("/calls_week_override.json"); } catch { STATE.overrides.calls = null; }
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
-
-  // Manual YTD (used in rotation)
-  try{
-    const y = await getJSON("/ytd_av.json");
-    STATE.ytd.rows = Array.isArray(y) ? y : [];
-  }catch{ STATE.ytd.rows = []; }
-  try{
-    const t = await getJSON("/ytd_total.json");
-    STATE.ytd.total = Number(t?.ytd_av_total||0) || 0;
-  }catch{ STATE.ytd.total = 0; }
 }
 
-/* Live calls / talk / leads / sold */
+/* Manual YTD (override) */
+async function loadYTD(){
+  try{
+    const rows = await getJSON("/ytd_av.json");      // [{ name, email, av }]
+    const totalObj = await getJSON("/ytd_total.json").catch(()=>null); // { ytd_av_total: number }
+    STATE.ytd.rows = Array.isArray(rows) ? rows : (Array.isArray(rows?.agents) ? rows.agents : []);
+    const sum = STATE.ytd.rows.reduce((t,r)=> t + Number(r.av||0), 0);
+    STATE.ytd.total = Number(totalObj?.ytd_av_total ?? sum);
+  }catch(e){
+    log("loadYTD error", e?.message||e);
+    STATE.ytd = { rows: [], total: 0 };
+  }
+}
+
+/* Live calls / talk / leads / sold — WEEK ONLY */
 async function refreshCalls(){
-  let teamCalls = 0, teamTalk = 0;
+  let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
   try{
     const payload = await getJSON("/.netlify/functions/calls_by_agent");
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
-
     const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
     const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
 
@@ -190,10 +193,12 @@ async function refreshCalls(){
       byKey.set(k, row);
       teamCalls += row.calls;
       teamTalk  += row.talkMin;
+      teamLeads += row.leads;
+      teamSold  += row.sold;
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Apply manual overrides if present
+  // Weekly overrides (if provided)
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
@@ -201,7 +206,8 @@ async function refreshCalls(){
       if (!a) continue;
       const k   = agentKey(a);
       const cur = byKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
-      teamCalls -= cur.calls; teamTalk -= cur.talkMin;
+
+      teamCalls -= cur.calls; teamTalk -= cur.talkMin; teamLeads -= cur.leads; teamSold -= cur.sold;
 
       const row = {
         calls    : Number(o.calls||0),
@@ -211,27 +217,29 @@ async function refreshCalls(){
         sold     : Number(o.sold||0),
       };
       byKey.set(k, row);
-      teamCalls += row.calls; teamTalk += row.talkMin;
+
+      teamCalls += row.calls; teamTalk += row.talkMin; teamLeads += row.leads; teamSold += row.sold;
     }
   }
 
   STATE.callsWeekByKey = byKey;
   STATE.team.calls = Math.max(0, Math.round(teamCalls));
   STATE.team.talk  = Math.max(0, Math.round(teamTalk));
+  STATE.team.sold  = Math.max(0, Math.round(teamSold)); // deals KPI
 }
 
-/* Sales → AV (12×) for **this week only**. */
+/* Sales → AV (12×) — WEEK ONLY */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
     const [WSTART, WEND] = weekRangeET();
-    const acc = new Map(); // nameKey -> {sales, amount}
+    const acc = new Map(); // nameKey -> {sales, amount, av12x}
 
     const add = (name, amount) => {
       const key = String(name||"").trim().toLowerCase();
       if (!key) return;
-      const cur = acc.get(key) || { sales:0, amount:0 };
+      const cur = acc.get(key) || { sales:0, amount:0, av12x:0 };
       cur.sales  += 1;
       cur.amount += Number(amount||0);
       acc.set(key, cur);
@@ -247,22 +255,25 @@ async function refreshSales(){
     }else{
       const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of per){
-        const key = String(a.name||"").trim().toLowerCase();
-        acc.set(key, { sales:Number(a.sales||0), amount:Number(a.amount||0) });
+        const k = String(a.name||"").trim().toLowerCase();
+        const cur = acc.get(k) || { sales:0, amount:0, av12x:0 };
+        cur.sales  = Number(a.sales||0);
+        cur.amount = Number(a.amount||0);
+        acc.set(k, cur);
       }
     }
 
     const out = new Map();
-    let teamAV = 0, teamDeals = 0;
+    let teamAV = 0;
+    let teamDeals = 0;
 
     for (const a of STATE.roster){
       const nameKey = String(a.name||"").trim().toLowerCase();
-      const base    = acc.get(nameKey) || { sales:0, amount:0 };
+      const base    = acc.get(nameKey) || { sales:0, amount:0, av12x:0 };
 
-      // prefer AV override if provided, else compute 12× amount
       let av12 = (STATE.overrides.av && a.email in STATE.overrides.av)
         ? Number(STATE.overrides.av[a.email]||0)
-        : Number(base.amount||0) * 12;
+        : (base.av12x ? Number(base.av12x) : Number(base.amount||0) * 12);
 
       av12 = Math.max(0, av12);
 
@@ -277,10 +288,11 @@ async function refreshSales(){
     }
 
     STATE.salesWeekByKey = out;
-    STATE.team.av        = teamAV;
-    STATE.team.deals     = teamDeals;
+    STATE.team.av = teamAV;
+    // keep deals in sync even if calls function is empty
+    STATE.team.sold = Math.max(STATE.team.sold, teamDeals);
 
-    // Sale toast (if we have the raw stream)
+    // Sale pop once
     if (raw.length){
       const last = raw[raw.length-1];
       if (last){
@@ -324,7 +336,7 @@ function renderRoster(){
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
       fmtInt(c.leads),
-      fmtInt(c.sold),
+      fmtInt(c.sold || s.sales || 0),
       fmtPct(conv),
       fmtMoney(s.av12x)
     ];
@@ -370,22 +382,16 @@ function renderAOTW(){
   setHead([]); setRows([[html]]);
 }
 
-/* YTD manual leaderboard (rotates inside the same page) */
 function renderYTD(){
-  setLabel("YTD — Leaderboard (Manual Override)");
-  setHead(["Agent","YTD AV (12×)"]);
-
-  const byEmail = new Map(STATE.roster.map(a => [a.email, a]));
-  const rows = STATE.ytd.rows
+  setLabel("YTD — Leaders (Manual Override)");
+  setHead(["Agent","YTD AV"]);
+  const byName = new Map(STATE.roster.map(a=>[String(a.name||"").trim().toLowerCase(), a]));
+  const rows = (STATE.ytd.rows||[])
     .map(r=>{
-      const name = r.name || "";
-      const email = (r.email||"").toLowerCase();
-      const a = byEmail.get(email) || { name, email, photo:"" };
-      return { a, val: Number(r.av||0) };
-    })
-    .sort((x,y)=> y.val - x.val)
-    .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
-
+      const rosterA = byName.get(String(r.name||"").trim().toLowerCase());
+      const a = rosterA || { name:r.name, photo:"" };
+      return [avatarCell(a), fmtMoney(Number(r.av||0))];
+    });
   setRows(rows);
 }
 
@@ -393,7 +399,7 @@ function renderYTD(){
 function renderCurrentView(){
   updateSummary();
   const v = VIEW_OVERRIDE || VIEWS[viewIdx % VIEWS.length];
-  if      (v === "roster") renderRoster();
+  if (v === "roster")      renderRoster();
   else if (v === "av")     renderWeekAV();
   else if (v === "aotw")   renderAOTW();
   else if (v === "ytd")    renderYTD();
@@ -403,12 +409,13 @@ function renderCurrentView(){
 /* ---------- Boot ---------- */
 async function boot(){
   try{
-    massageSummaryLayout();
-    await loadStatic();
+    massageKPI();
+
+    await Promise.all([loadStatic(), loadYTD()]);
     await Promise.all([refreshCalls(), refreshSales()]);
     renderCurrentView();
 
-    // periodic refresh
+    // periodic refresh (weekly feeds)
     setInterval(async ()=>{
       try{
         await Promise.all([refreshCalls(), refreshSales()]);
