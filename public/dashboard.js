@@ -78,7 +78,6 @@ function setRows(rows){
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
-/* keep only 3 KPI cards on every board */
 /* ---------- KPI layout & values (FORCE 3 CARDS) ---------- */
 
 /**
