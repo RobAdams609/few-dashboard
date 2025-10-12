@@ -69,7 +69,7 @@
       }
       .sale-pop.show{ bottom:18px; }
 
-      /* OE Countdown — larger, wider, pulsating */
+      /* OE Countdown */
       #oeBar{
         position:fixed; left:0; right:0; bottom:0; z-index:25;
         background:var(--panel); border-top:1px solid var(--line);
@@ -90,9 +90,9 @@
         100% { box-shadow:0 0 0 0 rgba(0,227,155,0); }
       }
 
-      .footer-spacer{ height:44px; } /* taller so bar doesn’t overlap content */
+      .footer-spacer{ height:44px; }
 
-      /* Apple Music dock — minimized by default, toggleable, remembers state */
+      /* Apple Music dock */
       #musicDock{
         position:fixed; right:15px; bottom:80px; z-index:24;
         border-radius:12px; overflow:hidden; box-shadow:0 5px 18px rgba(0,0,0,.35);
@@ -121,15 +121,13 @@
       <div id="principle" class="subtitle">Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.</div>
     </header>
 
-    <div id="viewLabel" class="section-label">Today — Roster</div>
+    <div id="viewLabel" class="section-label">This Week — Roster</div>
 
-    <!-- Summary -->
+    <!-- Summary (EXACTLY THREE CARDS) -->
     <div id="summary" class="summary">
-      <div class="card"><div class="k">Today — Team Calls</div><div id="sumCalls" class="v">0</div></div>
-      <div class="card"><div class="k">Today — Team Talk (min)</div><div id="sumTalk" class="v">0</div></div>
-      <div class="card"><div class="k">This Week — Team Sales</div><div id="sumSales" class="v">$0</div></div>
-      <div class="card"><div class="k">This Week — Team AV (12×)</div><div id="sumAV" class="v">$0</div></div>
-      <div class="card"><div class="k">Unassigned Sales</div><div id="sumUnassigned" class="v">$0</div></div>
+      <div class="card"><div class="k">This Week — Team Calls</div><div id="sumCalls" class="v">0</div></div>
+      <div class="card"><div class="k">This Week — Total Submitted AV</div><div id="sumSales" class="v">$0</div></div>
+      <div class="card"><div class="k">This Week — Deals Submitted</div><div id="sumTalk" class="v">0</div></div>
     </div>
 
     <!-- Board -->
@@ -167,7 +165,7 @@
     <script>
       // OE countdown
       (function(){
-        const target = new Date('2025-11-01T00:00:00-04:00'); // adjust if needed
+        const target = new Date('2025-11-01T00:00:00-04:00');
         const el = document.getElementById('oeTimer');
         const pad = n => String(n).padStart(2,'0');
         function tick(){
@@ -187,12 +185,10 @@
         const dock = document.getElementById('musicDock');
         if (!dock) return;
 
-        // restore last state
         const saved = localStorage.getItem('few.music.minimized');
         if (saved === 'false') dock.classList.remove('minimized');
         else dock.classList.add('minimized');
 
-        // click inside dock area toggles when minimized (the 🎵 pill), otherwise minimize on outside click
         document.addEventListener('click', (e)=>{
           if (dock.contains(e.target)){
             if (dock.classList.contains('minimized')) {
@@ -205,7 +201,6 @@
           }
         });
 
-        // auto-minimize if left open for a while
         if (!dock.classList.contains('minimized')) {
           setTimeout(()=>{
             dock.classList.add('minimized');
