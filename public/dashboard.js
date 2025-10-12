@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE FILE (v2) ============ */
+/* ============ FEW Dashboard — COMPLETE FILE (v2 with vendors view) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -7,7 +7,7 @@ const log      = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 const ET_TZ    = "America/New_York";
 const DATA_MS  = 30_000;                      // refresh data
 const ROTATE_MS= 30_000;                      // switch table view
-const VIEWS    = ["roster","av","aotw","ytd"]; // rotation order
+const VIEWS    = ["roster","av","vendors","aotw","ytd"]; // rotation order (added "vendors")
 let   viewIdx  = 0;
 
 const QS = new URLSearchParams(location.search);
@@ -22,7 +22,7 @@ const fmtInt    = n => Number(n||0).toLocaleString("en-US");
 const fmtMoney  = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
 const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
 const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
-const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&gt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
@@ -222,15 +222,11 @@ async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
-    // Build week window in ET to filter any raw rows if present
     const [WSTART, WEND] = weekRangeET();
-
-    // Aggregate from API
-    const perByName = new Map();   // key: lower(name) -> { sales, amount, av12x }
+    const perByName = new Map();     // nameKey -> { sales, amount, av12x }
     let totalDeals = 0;
     let totalAV    = 0;
 
-    // Prefer detailed rows if present; otherwise use perAgent summary
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
     if (raw.length){
       for (const s of raw){
@@ -239,7 +235,6 @@ async function refreshSales(){
 
         const name   = String(s.agent||"").trim();
         if (!name) continue;
-
         const key    = name.toLowerCase();
         const amount = Number(s.amount||0);
 
@@ -255,66 +250,49 @@ async function refreshSales(){
     } else {
       const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of pa){
-        const name   = String(a.name||"").trim();
-        if (!name) continue;
-        const key    = name.toLowerCase();
+        const key    = String(a.name||"").trim().toLowerCase();
         const sales  = Number(a.sales||0);
-        const amount = Number(a.amount||0);    // monthly
-        const cur    = perByName.get(key) || { sales:0, amount:0, av12x:0 };
-        cur.sales  += sales;
-        cur.amount += amount;
-        cur.av12x   = cur.amount * 12;
-        perByName.set(key, cur);
-
+        const amount = Number(a.amount||0);
+        perByName.set(key, { sales, amount, av12x: amount*12 });
         totalDeals += sales;
-        totalAV    += amount * 12;
+        totalAV    += amount*12;
       }
     }
 
-    /* ---------- Apply manual overrides (public/av_week_override.json) ---------- */
-    let overrides = null;
-    try { overrides = await getJSON("/av_week_override.json"); } catch { overrides = null; }
+    // Manual weekly AV override
+    if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
+      const teamOv = STATE.overrides.av.team;
+      const perOv  = STATE.overrides.av.perAgent || {};
 
-    const perAgentOverrides = overrides && overrides.perAgent && typeof overrides.perAgent === "object"
-      ? overrides.perAgent
-      : null;
+      // Apply per-agent overrides
+      for (const [nameLower, entry] of Object.entries(perOv)){
+        const k = String(nameLower || "").toLowerCase();
+        const cur = perByName.get(k) || { sales:0, amount:0, av12x:0 };
+        // remove old contribution
+        totalDeals -= cur.sales;
+        totalAV    -= cur.av12x;
 
-    if (perAgentOverrides){
-      // Add each agent’s override (values are already AV12x, not monthly)
-      for (const [nameKeyRaw, v] of Object.entries(perAgentOverrides)){
-        const nameKey = String(nameKeyRaw||"").trim().toLowerCase();
-        if (!nameKey) continue;
+        const sales  = Number(entry.sales || 0);
+        const av12x  = Number(entry.av12x || 0);
+        const amount = av12x / 12;
 
-        const addAv12  = Number(v?.av12x || 0);   // already AV12x
-        const addDeals = Number(v?.sales || 0);
-
-        if (addAv12 <= 0 && addDeals <= 0) continue;
-
-        const cur = perByName.get(nameKey) || { sales:0, amount:0, av12x:0 };
-        cur.sales += addDeals;
-        cur.av12x += addAv12;
-        // keep amount in monthly dollars as av12/12 for consistency (not shown)
-        cur.amount = cur.av12x / 12;
-        perByName.set(nameKey, cur);
-
-        totalDeals += addDeals;
-        totalAV    += addAv12;
+        perByName.set(k, { sales, amount, av12x });
+        totalDeals += sales;
+        totalAV    += av12x;
       }
-    } else if (overrides && overrides.team){
-      // If no perAgent overrides were provided but a team block was, add it once
-      const teamAddAV    = Number(overrides.team.totalAV12x || 0);
-      const teamAddDeals = Number(overrides.team.totalSales || 0);
-      if (teamAddAV > 0 || teamAddDeals > 0){
-        totalAV    += teamAddAV;
-        totalDeals += teamAddDeals;
+
+      // Optional team override (exact)
+      if (teamOv && (Number.isFinite(teamOv.totalAV12x) || Number.isFinite(teamOv.totalSales))){
+        if (Number.isFinite(teamOv.totalAV12x)) totalAV   = Math.max(0, Math.round(Number(teamOv.totalAV12x)));
+        if (Number.isFinite(teamOv.totalSales)) totalDeals = Math.max(0, Math.round(Number(teamOv.totalSales)));
       }
     }
 
-    /* ---------- Map into roster keys so rows align with the agent list ---------- */
+    // Map into roster keys so rows align with agent list
     const out = new Map();
     for (const a of STATE.roster){
-      const k  = agentKey(a);                         // roster key (email or name)
-      const nk = String(a.name||"").toLowerCase();    // lookup by display name
+      const k  = agentKey(a);
+      const nk = String(a.name||"").toLowerCase();
       const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
       out.set(k, s);
     }
@@ -323,9 +301,9 @@ async function refreshSales(){
     STATE.team.av    = Math.max(0, Math.round(totalAV));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // (Optional) toast for the newest sale from API rows
-    if (raw.length){
-      const last = raw[raw.length-1];
+    // toast on newest sale if present
+    const last = raw.length ? raw[raw.length-1] : null;
+    if (last){
       const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
@@ -376,6 +354,11 @@ function bestOfWeek(){
 }
 
 /* ---------- Renderers ---------- */
+function setHeadlessContent(html){
+  const thead=$("#thead"); if (thead) thead.innerHTML = "";
+  const tbody=$("#tbody"); if (tbody) tbody.innerHTML = `<tr><td style="padding:0">${html}</td></tr>`;
+}
+
 function renderRoster(){
   setLabel("This Week — Roster");
   setHead(["Agent","Calls","Talk (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
@@ -409,6 +392,18 @@ function renderWeekAV(){
     })
     .sort((x,y)=> (y.val)-(x.val));
   setRows(ranked.map(({a,val})=> [avatarCell(a), fmtMoney(val)]));
+}
+
+function renderVendors(){
+  setLabel("Lead Vendor Breakdown — past 45 days");
+  // Show the static board image full-width
+  const img = `/boards/Sales_by_vendor.png`;
+  const html = `
+    <div style="display:flex;justify-content:center;align-items:center;padding:16px;">
+      <img src="${bust(img)}" alt="Lead Vendor Breakdown" style="max-width:100%;height:auto;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35)">
+    </div>
+  `;
+  setHeadlessContent(html);
 }
 
 function renderAOTW(){
@@ -448,6 +443,7 @@ function renderCurrentView(){
   const v = VIEW_OVERRIDE || VIEWS[viewIdx % VIEWS.length];
   if (v === "roster")      renderRoster();
   else if (v === "av")     renderWeekAV();
+  else if (v === "vendors")renderVendors();
   else if (v === "aotw")   renderAOTW();
   else if (v === "ytd")    renderYTD();
   else                     renderRoster();
@@ -456,7 +452,7 @@ function renderCurrentView(){
 /* ---------- Boot ---------- */
 async function boot(){
   try{
-    massageSummaryLayout();                   // fix summary card labels/visibility
+    massageSummaryLayout();
     await loadStatic();
     await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
     renderCurrentView();
