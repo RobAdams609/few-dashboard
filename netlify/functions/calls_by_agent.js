@@ -1,12 +1,17 @@
-// netlify/functions/calls_by_agent.js
-// Weekly (Fri 12:00am ET -> next Fri 12:00am ET) per-agent: calls, talkMin, loggedMin, leads, sold.
-// Uses env:
-//   RINGY_CALL_DETAIL_URL      = https://app.ringy.com/api/public/external/get-calls
-//   RINGY_API_KEY_CALL_DETAIL  = <your single Call Data API key>
-
-import { json } from "./_util.js"; // same helper used elsewhere
+// --- local helpers (avoid _util import mismatch) ---
+const JSON_HEADERS = { "content-type": "application/json" };
+const json = (status, obj) => new Response(JSON.stringify(obj), { status, headers: JSON_HEADERS });
 
 const ET_TZ = "America/New_York";
+function weekRangeET() {
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: ET_TZ }));
+  const day = now.getDay();                 // Sun=0 … Sat=6
+  const sinceFri = (day + 2) % 7;           // distance back to Friday
+  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
+  const end   = new Date(start); end.setDate(end.getDate() + 7);
+  return [start, end];                       // [inclusive, exclusive)
+}
+const toUtcString = d => new Date(d).toISOString().slice(0,19).replace("T"," "); // "YYYY-MM-DD HH:mm:ss"
 
 function weekRangeET() {
   const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: ET_TZ }));
