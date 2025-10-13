@@ -1,112 +1,172 @@
 // netlify/functions/calls_by_agent.js
-// Aggregates per-agent call count, talk time, and logged time from Ringy get-call-recordings
+// Source of truth for weekly calls/talk/logged per agent.
+// Pulls from Ringy "get-call-recordings" using your env:
+//   RINGY_RECORDINGS_URL  -> https://app.ringy.com/api/public/external/get-call-recordings
+//   RINGY_API_KEY_RECORDINGS -> your recordings API key
 
 export default async function handler(req, context) {
   try {
-    const {
-      RINGY_RECORDINGS_URL,
-      RINGY_API_KEY_RECORDINGS,
-    } = process.env;
-
+    const { RINGY_RECORDINGS_URL, RINGY_API_KEY_RECORDINGS } = process.env;
     if (!RINGY_RECORDINGS_URL || !RINGY_API_KEY_RECORDINGS) {
-      return json(500, { error: "Missing RINGY_RECORDINGS_URL or RINGY_API_KEY_RECORDINGS" });
+      return j(500, { error: "Missing RINGY_RECORDINGS_URL or RINGY_API_KEY_RECORDINGS" });
     }
 
-    // Weekly Friday → Friday window in Eastern Time
-    const ET_TZ = "America/New_York";
-    const now = new Date(new Date().toLocaleString("en-US", { timeZone: ET_TZ }));
-    const day = now.getDay();
-    const sinceFri = (day + 2) % 7;
-    const start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - sinceFri);
-    const end = new Date(start);
-    end.setDate(end.getDate() + 7);
+    // Weekly Friday 12:00am ET → next Friday 12:00am ET
+    const { startUTC, endUTC } = weeklyWindowETasUTCStrings();
 
-    const startISO = start.toISOString().slice(0, 19) + "Z";
-    const endISO = end.toISOString().slice(0, 19) + "Z";
-
-    let page = 1;
-    const pageSize = 200;
-    const rows = [];
-
-    while (true) {
-      const body = {
+    // ---- First try: POST with JSON body (most Ringy accounts expect this) ----
+    let rows = null, postErrText = "";
+    try {
+      const postBody = {
         apiKey: RINGY_API_KEY_RECORDINGS,
-        startDate: startISO,
-        endDate: endISO,
-        page,
-        pageSize,
+        startDate: startUTC,   // UTC, "YYYY-MM-DD HH:mm:ss"
+        endDate:   endUTC,     // UTC, "YYYY-MM-DD HH:mm:ss"
+        limit: 5000            // avoid pagination; Ringy supports "limit"
       };
-
       const r = await fetch(RINGY_RECORDINGS_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify(postBody)
       });
-
       if (!r.ok) {
-        const msg = await r.text();
-        return json(502, { error: "Upstream error", status: r.status, body: msg });
+        postErrText = await safeText(r);
+        throw new Error(`POST ${r.status}`);
       }
-
       const data = await r.json().catch(() => ({}));
-      const list = Array.isArray(data?.items)
-        ? data.items
-        : Array.isArray(data?.data)
-        ? data.data
-        : Array.isArray(data)
-        ? data
-        : [];
-
-      rows.push(...list);
-
-      if (list.length < pageSize) break;
-      page++;
-      if (page > 30) break; // safety limit
+      rows = normalizeList(data);
+    } catch (e) {
+      // will try GET next
     }
 
+    // ---- Fallback: GET with querystring (some environments are configured this way) ----
+    if (!rows) {
+      const u = new URL(RINGY_RECORDINGS_URL);
+      u.searchParams.set("apiKey", RINGY_API_KEY_RECORDINGS);
+      u.searchParams.set("startDate", startUTC);
+      u.searchParams.set("endDate",   endUTC);
+      u.searchParams.set("limit",     "5000");
+
+      const r2 = await fetch(u.toString(), { method: "GET", headers: { accept: "application/json" }});
+      if (!r2.ok) {
+        const getErr = await safeText(r2);
+        return j(502, {
+          error: "Upstream error",
+          status: r2.status,
+          body: getErr || postErrText || "Bad Request",
+          hints: [
+            "POST JSON body {apiKey,startDate,endDate,limit} (UTC 'YYYY-MM-DD HH:mm:ss')",
+            "GET ?apiKey&startDate&endDate&limit (same UTC format)"
+          ]
+        });
+      }
+      const data2 = await r2.json().catch(() => ({}));
+      rows = normalizeList(data2);
+    }
+
+    // Aggregate per agent
     const per = new Map();
     const team = { calls: 0, talkMin: 0, loggedMin: 0, leads: 0, sold: 0 };
 
     for (const x of rows) {
-      const name = x.user_name || x.agent || "";
-      const key = name.toLowerCase();
-      const durSec = Number(x.duration || 0);
-      const min = Math.round(durSec / 60);
+      const name = firstString(
+        x.user_name, x.userName, x.agentName, x.agent, x.ownerName, x.user
+      ) || "Unknown";
 
-      const cur = per.get(key) || {
-        name,
-        calls: 0,
-        talkMin: 0,
-        loggedMin: 0,
-        leads: 0,
-        sold: 0,
-      };
-      cur.calls++;
-      cur.talkMin += min;
-      cur.loggedMin += min;
+      // duration commonly in seconds; sometimes minutes
+      const minutes = pickMinutes(
+        x.durationSeconds, x.talkTimeSeconds, x.duration, x.talk_time_sec, x.talkMinutes
+      );
+
+      const key = name.trim().toLowerCase();
+      const cur = per.get(key) || { name, calls: 0, talkMin: 0, loggedMin: 0, leads: 0, sold: 0 };
+      cur.calls += 1;
+      cur.talkMin += minutes;
+      cur.loggedMin += minutes; // if Ringy provides separate "totalMinutes" you can map it here
       per.set(key, cur);
 
-      team.calls++;
-      team.talkMin += min;
-      team.loggedMin += min;
+      team.calls += 1;
+      team.talkMin += minutes;
+      team.loggedMin += minutes;
     }
 
-    return json(200, {
-      startDate: startISO,
-      endDate: endISO,
-      team,
-      perAgent: Array.from(per.values()).sort((a, b) => b.calls - a.calls),
+    return j(200, {
+      startDate: startUTC,
+      endDate: endUTC,
+      team: {
+        calls: Math.round(team.calls),
+        talkMin: Math.round(team.talkMin),
+        loggedMin: Math.round(team.loggedMin),
+        leads: 0,
+        sold: 0
+      },
+      perAgent: Array.from(per.values()).sort((a, b) => b.calls - a.calls)
     });
   } catch (err) {
-    return json(500, { error: "Failed", msg: String(err) });
+    return j(500, { error: "Failed", message: String(err && err.message || err) });
   }
 }
 
-function json(status, body) {
+/* ---------------- helpers ---------------- */
+
+function j(status, body) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json" }
   });
+}
+
+function normalizeList(data) {
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.data))  return data.data;
+  if (Array.isArray(data))        return data;
+  return [];
+}
+
+async function safeText(r) { try { return await r.text(); } catch { return ""; } }
+
+function firstString(...vals) {
+  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
+  return "";
+}
+
+function pickMinutes(...vals) {
+  // prefer seconds → minutes
+  for (const v of vals) {
+    if (v == null) continue;
+    const n = Number(v);
+    if (!Number.isFinite(n)) continue;
+    // if it's big, assume seconds; else already minutes
+    if (n > 600) return Math.round(n / 60);
+    return Math.max(0, Math.round(n));
+  }
+  return 0;
+}
+
+function weeklyWindowETasUTCStrings() {
+  const ET = "America/New_York";
+  const nowET = new Date(new Date().toLocaleString("en-US", { timeZone: ET }));
+  const day = nowET.getDay();                 // Sun=0 .. Sat=6
+  const sinceFri = (day + 2) % 7;
+  const start = new Date(nowET);
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - sinceFri);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+
+  // Convert to UTC strings "YYYY-MM-DD HH:mm:ss"
+  const startUTC = toUTCString(start);
+  const endUTC   = toUTCString(end);
+  return { startUTC, endUTC };
+}
+
+function toUTCString(d) {
+  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  // z is in UTC now; build "YYYY-MM-DD HH:mm:ss"
+  const YYYY = z.getUTCFullYear();
+  const MM   = String(z.getUTCMonth() + 1).padStart(2, "0");
+  const DD   = String(z.getUTCDate()).padStart(2, "0");
+  const hh   = String(z.getUTCHours()).padStart(2, "0");
+  const mm   = String(z.getUTCMinutes()).padStart(2, "0");
+  const ss   = "00";
+  return `${YYYY}-${MM}-${DD} ${hh}:${mm}:${ss}`;
 }
