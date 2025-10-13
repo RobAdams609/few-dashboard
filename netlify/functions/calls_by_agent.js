@@ -1,164 +1,88 @@
 // netlify/functions/calls_by_agent.js
-// Weekly (Fri 12:00am ET → next Fri 12:00am ET) per-agent: calls, talk, logged, leads, sold (if present).
+// Weekly (Fri 12:00am ET → next Fri 12:00am ET) per-agent: calls, talk, logged, leads (0 placeholder).
+// Uses env: RINGY_CALL_DETAIL_URL + RINGY_API_KEY_CALL_DETAIL.
+// Works with Ringy "get-calls" (POST JSON). Auto-paginates.
 
 export default async function handler(req, context) {
   try {
     const ET_TZ = "America/New_York";
     const {
-      RINGY_CALL_DETAIL_URL,      // e.g. https://app.ringy.com/api/public/external/get-calls/call-detail
-      RINGY_API_KEY_CALL_DETAIL,  // team/org API key (if your account uses x-api-key)
-      RINGY_TOKEN,                // org token (if your account uses Bearer)
+      RINGY_CALL_DETAIL_URL,      // e.g. https://app.ringy.com/api/public/external/get-calls
+      RINGY_API_KEY_CALL_DETAIL,  // Ringy "Call data" API key
     } = process.env;
 
-    if (!RINGY_CALL_DETAIL_URL) {
-      return json(500, { error: "Missing RINGY_CALL_DETAIL_URL env var" });
+    if (!RINGY_CALL_DETAIL_URL || !RINGY_API_KEY_CALL_DETAIL) {
+      return json(500, { error: "Missing RINGY_CALL_DETAIL_URL or RINGY_API_KEY_CALL_DETAIL env var" });
     }
 
-    // ---- Week window (ET) ----
-    const now = new Date();
-    const nowET = new Date(now.toLocaleString("en-US", { timeZone: ET_TZ }));
-    const day = nowET.getDay();                 // Sun=0…Sat=6
-    const sinceFri = (day + 2) % 7;             // distance back to Friday
-    const start = new Date(nowET); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
-    const end   = new Date(start); end.setDate(end.getDate() + 7);
+    // Compute Friday-to-Friday window (ET), send to Ringy as UTC ISO.
+    const [startET, endET] = weekRangeET();
+    const startISO = toUTCISO(startET);
+    const endISO   = toUTCISO(endET);
 
-    const startISO = toISO(start);              // 2025-10-10T00:00:00Z
-    const endISO   = toISO(end);
-    const startYMD = toYMD(start);              // 2025-10-10
-    const endYMD   = toYMD(end);
-
-    const headersBase = {
-      "accept": "application/json",
-    };
-    if (RINGY_API_KEY_CALL_DETAIL) headersBase["x-api-key"] = RINGY_API_KEY_CALL_DETAIL;
-    if (RINGY_TOKEN) headersBase["authorization"] = `Bearer ${RINGY_TOKEN}`;
-
-    // ---- Pull pages until empty ----
+    // Pull pages
+    const rows = [];
     let page = 1;
     const pageSize = 200;
-    const rows = [];
-    const errorsTried = [];
 
     while (true) {
-      // Prefer POST with JSON body (many Ringy public/external endpoints expect this)
-      const tries = [
-        {
-          kind: "POST dateFrom/dateTo JSON",
-          url: RINGY_CALL_DETAIL_URL,
-          init: {
-            method: "POST",
-            headers: { ...headersBase, "content-type": "application/json" },
-            body: JSON.stringify({ dateFrom: startYMD, dateTo: endYMD, page, pageSize }),
-          },
-        },
-        {
-          kind: "POST startDate/endDate JSON",
-          url: RINGY_CALL_DETAIL_URL,
-          init: {
-            method: "POST",
-            headers: { ...headersBase, "content-type": "application/json" },
-            body: JSON.stringify({ startDate: startISO, endDate: endISO, page, pageSize }),
-          },
-        },
-        {
-          kind: "GET ?dateFrom/dateTo",
-          url: withQS(RINGY_CALL_DETAIL_URL, { dateFrom: startYMD, dateTo: endYMD, page, pageSize }),
-          init: { method: "GET", headers: headersBase },
-        },
-        {
-          kind: "GET ?startDate/endDate (ISO)",
-          url: withQS(RINGY_CALL_DETAIL_URL, { startDate: startISO, endDate: endISO, page, pageSize }),
-          init: { method: "GET", headers: headersBase },
-        },
-        {
-          kind: "GET ?start/end (ISO)",
-          url: withQS(RINGY_CALL_DETAIL_URL, { start: startISO, end: endISO, page, pageSize }),
-          init: { method: "GET", headers: headersBase },
-        },
-      ];
+      const body = {
+        apiKey: RINGY_API_KEY_CALL_DETAIL,
+        dateFrom: startISO, // Ringy expects UTC ISO for get-calls
+        dateTo: endISO,
+        page,
+        pageSize,
+      };
 
-      let ok = false, list = null, lastErr = null;
+      const r = await fetch(RINGY_CALL_DETAIL_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
 
-      for (const t of tries) {
-        const r = await fetch(t.url, t.init).catch(e => ({ ok:false, status:0, _err:e }));
-        if (!r || !r.ok) {
-          errorsTried.push(`${t.kind} ${r?.status || 0}`);
-          lastErr = r;
-          continue;
-        }
-        // parse response
-        const data = await safeJson(r);
-        list = Array.isArray(data?.items) ? data.items
-             : Array.isArray(data?.data)  ? data.data
-             : Array.isArray(data)        ? data
-             : Array.isArray(data?.rows)  ? data.rows
-             : null;
-
-        if (!list) {
-          // sometimes wrapped like { result: { items: [...] } }
-          const maybe = data?.result || data?.payload || data?.response;
-          list = Array.isArray(maybe?.items) ? maybe.items
-               : Array.isArray(maybe?.data)  ? maybe.data
-               : Array.isArray(maybe)        ? maybe
-               : null;
-        }
-
-        if (Array.isArray(list)) { ok = true; break; }
-        // if response OK but empty structure, treat as success with empty page
-        if (r.ok && (list == null)) { list = []; ok = true; break; }
+      if (!r.ok) {
+        const msg = await safeText(r);
+        return json(502, { error: "upstream error", status: r.status, body: msg });
       }
 
-      if (!ok) {
-        // On first page, bail with details so you can see which patterns failed.
-        if (page === 1) {
-          return json(502, {
-            error: "fetch failed",
-            message: `All parameter/endpoint patterns returned ${errorsTried.join(" ; ")}`,
-            perAgent: [],
-            team: { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 }
-          });
-        }
-        // otherwise stop pagination
-        break;
-      }
+      const data = await r.json().catch(() => ({}));
+      const list = Array.isArray(data?.items) ? data.items
+                : Array.isArray(data?.data)  ? data.data
+                : Array.isArray(data)        ? data
+                : [];
 
       rows.push(...list);
-      if (!list || list.length < pageSize) break;
+
+      if (list.length < pageSize) break;
       page += 1;
-      if (page > 25) break; // safety
+      if (page > 50) break; // safety
     }
 
-    // ---- Aggregate -> perAgent + team ----
-    const per = new Map(); // key = agent name/email (lower), value agg
-    const team = { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
+    // Aggregate
+    const per = new Map();  // key=email||name lower
+    let team = { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
 
-    for (const x of rows) {
-      const name  = pickStr(x.agent, x.agentName, x.user, x.userName, x.ownerName) || "";
-      const email = pickStr(x.agentEmail, x.userEmail) || "";
+    for (const c of rows) {
+      const name  = pickStr(c.agent, c.agentName, c.userName, c.ownerName) || "";
+      const email = pickStr(c.agentEmail, c.userEmail) || "";
       const key   = (email || name).trim().toLowerCase();
       if (!key) continue;
 
-      const calls     = num(x.calls, 1); // many APIs are 1 row = 1 call
-      const talkMin   = minutes(x.talkTimeMin, x.talkMinutes, x.talk_time_min, x.talk_time);
-      const loggedMin = minutes(x.loggedMinutes, x.totalMinutes, x.durationMin, x.duration);
-      const leads     = num(x.leads, 0);
-      const sold      = num(x.sold, 0);
+      // Ringy get-calls returns a "duration" (seconds). We'll treat that as talk/logged time.
+      const durationSec = firstNumber(c.duration, c.totalDuration, c.callDuration);
+      const minutes = Math.max(0, Math.round((durationSec || 0) / 60));
 
       const cur = per.get(key) || { name: name || email, email, calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
-      cur.calls     += calls;
-      cur.talkMin   += talkMin;
-      cur.loggedMin += loggedMin;
-      cur.leads     += leads;
-      cur.sold      += sold;
-      if (!cur.name && name)  cur.name  = name;
-      if (!cur.email && email) cur.email = email;
+      cur.calls     += 1;
+      cur.talkMin   += minutes;
+      cur.loggedMin += minutes; // no separate logged available from get-calls
       per.set(key, cur);
 
-      team.calls     += calls;
-      team.talkMin   += talkMin;
-      team.loggedMin += loggedMin;
-      team.leads     += leads;
-      team.sold      += sold;
+      team.calls     += 1;
+      team.talkMin   += minutes;
+      team.loggedMin += minutes;
     }
 
     return json(200, {
@@ -169,12 +93,7 @@ export default async function handler(req, context) {
     });
 
   } catch (err) {
-    return json(500, {
-      error: "fetch failed",
-      message: String(err?.message || err),
-      perAgent: [],
-      team: { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 }
-    });
+    return json(500, { error: "fetch failed", message: String(err?.message || err), perAgent: [], team:{calls:0,talkMin:0,loggedMin:0,leads:0,sold:0} });
   }
 }
 
@@ -182,32 +101,19 @@ export default async function handler(req, context) {
 function json(status, body){
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" }});
 }
-function toISO(d){ return new Date(d).toISOString().slice(0,19) + "Z"; }
-function toYMD(d){
-  const x = new Date(d);
-  const y = x.getUTCFullYear();
-  const m = String(x.getUTCMonth()+1).padStart(2,"0");
-  const day = String(x.getUTCDate()).padStart(2,"0");
-  return `${y}-${m}-${day}`;
+function toUTCISO(d){
+  const utc = new Date(d.getTime() - d.getTimezoneOffset()*60000);
+  return utc.toISOString().slice(0,19) + "Z";
 }
-function withQS(base, kv){
-  const u = new URL(base);
-  Object.entries(kv).forEach(([k,v])=> u.searchParams.set(k, String(v)));
-  return u.toString();
-}
-async function safeJson(r){ try { return await r.json(); } catch { return null; } }
-function num(...vals){ for (const v of vals){ const n=Number(v); if (Number.isFinite(n)) return n; } return 0; }
-function minutes(...vals){
-  for (const v of vals){
-    if (v == null) continue;
-    if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, v);
-    if (typeof v === "string"){
-      const m = v.match(/^(\d+):(\d{2})$/); // "h:mm"
-      if (m) return Number(m[1])*60 + Number(m[2]);
-      const n = Number(v);
-      if (Number.isFinite(n)) return n > 600 ? Math.round(n/60) : n; // seconds -> minutes
-    }
-  }
-  return 0;
+function weekRangeET(){
+  const ET_TZ = "America/New_York";
+  const now = new Date(new Date().toLocaleString("en-US", { timeZone: ET_TZ }));
+  const day = now.getDay();              // Sun=0…Sat=6
+  const sinceFri = (day + 2) % 7;        // distance back to Friday
+  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
+  const end   = new Date(start); end.setDate(end.getDate() + 7);
+  return [start, end];
 }
 function pickStr(...vals){ for (const v of vals){ if (v && typeof v === "string") return v; } return ""; }
+function firstNumber(...vals){ for (const v of vals){ const n = Number(v); if (Number.isFinite(n)) return n; } return 0; }
+async function safeText(r){ try{ return await r.text(); }catch{ return ""; } }
