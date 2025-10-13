@@ -1,89 +1,107 @@
-// netlify/functions/calls_by_agent.js
-// Weekly (Fri 12:00am ET → next Fri 12:00am ET) per-phone: calls, talk, logged, leads, sold.
-// Works with Ringy "get-calls/call-detail" whether it returns items[] or raw array.
-// Derives the agent by phone number (INBOUND -> toPhoneNumber, OUTBOUND -> fromPhoneNumber).
+// Weekly (Fri 12:00am ET → next Fri 12:00am ET) per-agent: calls, talk, logged, leads.
+// Uses env: RINGY_CALL_DETAIL_URL (must be .../get-calls/call-detail) + RINGY_API_KEY_CALL_DETAIL
 
-export default async function handler(req, context) {
+export default async function handler(req) {
   try {
     const ET_TZ = "America/New_York";
-    const {
-      RINGY_CALL_DETAIL_URL,      // e.g. https://app.ringy.com/api/public/external/get-calls/call-detail
-      RINGY_API_KEY_CALL_DETAIL,  // team API key for calls
-    } = process.env;
+    const { RINGY_CALL_DETAIL_URL, RINGY_API_KEY_CALL_DETAIL } = process.env;
 
     if (!RINGY_CALL_DETAIL_URL || !RINGY_API_KEY_CALL_DETAIL) {
       return json(500, { error: "Missing RINGY_CALL_DETAIL_URL or RINGY_API_KEY_CALL_DETAIL env var" });
     }
 
-    // ---- Week window (ET)
+    // ---- Week window in ET (Fri 00:00:00 to Fri 00:00:00 next week) ----
     const now = new Date();
     const nowET = new Date(now.toLocaleString("en-US", { timeZone: ET_TZ }));
-    const day = nowET.getDay();                   // Sun=0…Sat=6
-    const sinceFri = (day + 2) % 7;               // distance back to Friday
-    const start = new Date(nowET); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
-    const end   = new Date(start); end.setDate(end.getDate() + 7);
-    const startISO = toISO(start);
-    const endISO   = toISO(end);
+    const day = nowET.getDay();                  // Sun=0…Sat=6
+    const sinceFri = (day + 2) % 7;              // distance back to Friday
+    const startET = new Date(nowET); startET.setHours(0,0,0,0); startET.setDate(startET.getDate() - sinceFri);
+    const endET   = new Date(startET); endET.setDate(endET.getDate() + 7);
 
-    // ---- Pull pages until empty (try several parameter/verb patterns)
-    const rows = [];
+    // Ringy docs show "UTC, YYYY-MM-DD HH:mm:ss"
+    const startStr = toRingyUTC(startET);
+    const endStr   = toRingyUTC(endET);
+
+    // ---- Pull pages (POST JSON body) ----
     let page = 1, pageSize = 200;
-
+    const rows = [];
     while (true) {
-      const got = await tryAllPatterns({
-        baseUrl: RINGY_CALL_DETAIL_URL,
+      const body = {
         apiKey: RINGY_API_KEY_CALL_DETAIL,
-        startISO, endISO, page, pageSize
+        startDate: startStr,    // UTC "YYYY-MM-DD HH:mm:ss"
+        endDate: endStr,        // UTC "YYYY-MM-DD HH:mm:ss"
+        page,
+        pageSize
+      };
+
+      const r = await fetch(RINGY_CALL_DETAIL_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
       });
 
-      if (!got.ok) {
-        // Return the most useful hints only on first page to avoid spam
-        if (page === 1) {
-          return json(502, { error: "fetch failed", message: got.message, hints: got.hints, perAgent: [], team: { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 } });
-        }
-        break;
+      if (!r.ok) {
+        // Give concrete hints so debugging is easy
+        const txt = await safeText(r);
+        return json(502, {
+          error: "fetch failed",
+          message: "Ringy call-detail returned " + r.status,
+          hint: "Ensure URL ends with /get-calls/call-detail and we POST JSON {apiKey,startDate,endDate,page,pageSize}",
+          body: txt,
+          startDate: startStr,
+          endDate: endStr
+        });
       }
 
-      rows.push(...got.items);
-      if (got.items.length < pageSize) break;
+      const data = await r.json().catch(()=>null);
+      const items =
+        (Array.isArray(data?.items) && data.items) ||
+        (Array.isArray(data?.data)  && data.data)  ||
+        (Array.isArray(data)        && data)       || [];
+
+      rows.push(...items);
+
+      if (items.length < pageSize) break;
       page += 1;
-      if (page > 30) break; // safety
+      if (page > 25) break; // safety
     }
 
-    // ---- Aggregate per phone
-    const perPhone = new Map(); // phone10 -> agg
+    // ---- Aggregate ----
+    const per = new Map(); // key = name/email (lowercase)
     let team = { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
 
     for (const x of rows) {
-      const dir = (pickStr(x.callDirection, x.direction) || "").toUpperCase(); // INBOUND / OUTBOUND
-      const to  = phone10(pickStr(x.toPhoneNumber, x.to_phone, x.toNumber));
-      const from= phone10(pickStr(x.fromPhoneNumber, x.from_phone, x.fromNumber));
+      const name  = pickStr(x.user_name, x.userName, x.agent, x.agentName, x.ownerName) || "";
+      const email = pickStr(x.userEmail, x.agentEmail, x.email) || "";
+      const key   = (email || name).trim().toLowerCase() || "unknown";
 
-      const phone = (dir === "INBOUND") ? to : (dir === "OUTBOUND" ? from : (to || from));
-      const key   = phone || "unknown";
-
-      const talkMin   = minutes(
-        x.talkMinutes, x.talk_time_min, x.talk_time, x.talkMin,
-        // general durations (seconds) fallbacks:
-        secsToMin(x.duration), secsToMin(x.totalSeconds),
-        x.durationMin, x.totalMinutes
-      );
-
-      const loggedMin = minutes(
-        x.loggedMinutes, x.totalMinutes, x.handleMinutes, secsToMin(x.totalSeconds)
-      );
-
+      // Calls: usually one row = one call
       const calls = 1;
-      const leads = num(x.leads, 0);
-      const sold  = num(x.sold, 0);
 
-      const cur = perPhone.get(key) || { phone: key, calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
+      // Talk minutes: try several fields (seconds or minutes)
+      const talkMin = minutes(
+        x.talkMinutes, x.talk_time_min, x.talk_time, x.talk_min,
+        x.duration, x.durationSec, x.durationSeconds
+      );
+
+      // Logged minutes: total call time if provided
+      const loggedMin = minutes(
+        x.loggedMinutes, x.totalMinutes, x.durationMin, x.totalDuration, x.call_duration
+      );
+
+      // Leads / sold rarely present in call detail
+      const leads = Number(x.leads||0);
+      const sold  = Number(x.sold||0);
+
+      const cur = per.get(key) || { name: name || email || "Unknown", email, calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
       cur.calls     += calls;
       cur.talkMin   += talkMin;
       cur.loggedMin += loggedMin;
       cur.leads     += leads;
       cur.sold      += sold;
-      perPhone.set(key, cur);
+      if (!cur.name && name) cur.name = name;
+      if (!cur.email && email) cur.email = email;
+      per.set(key, cur);
 
       team.calls     += calls;
       team.talkMin   += talkMin;
@@ -93,121 +111,47 @@ export default async function handler(req, context) {
     }
 
     return json(200, {
-      startDate: startISO,
-      endDate:   endISO,
+      startDate: startStr,
+      endDate:   endStr,
       team,
-      perPhone: Array.from(perPhone.values()).sort((a,b)=> (b.calls - a.calls)),
-      // kept for backwards-compat with older dashboard code:
-      perAgent: []
+      perAgent: Array.from(per.values()).sort((a,b)=> b.calls - a.calls)
     });
 
   } catch (err) {
-    return json(500, { error: "fetch failed", message: String(err?.message || err), perAgent: [], team:{calls:0,talkMin:0,loggedMin:0,leads:0,sold:0} });
+    return json(500, { error: "fetch failed", message: String(err?.message||err), perAgent: [], team:{calls:0,talkMin:0,loggedMin:0,leads:0,sold:0} });
   }
-}
-
-/* ---------- fetching patterns ---------- */
-async function tryAllPatterns({ baseUrl, apiKey, startISO, endISO, page, pageSize }) {
-  const hints = [];
-
-  const GET_params = [
-    ["startDate","endDate"],
-    ["dateFrom","dateTo"],
-    ["start","end"],
-  ];
-
-  // --- try GET variants
-  for (const [a, b] of GET_params) {
-    try {
-      const u = new URL(baseUrl);
-      u.searchParams.set(a, startISO);
-      u.searchParams.set(b, endISO);
-      u.searchParams.set("page", String(page));
-      u.searchParams.set("pageSize", String(pageSize));
-
-      const r = await fetch(u.toString(), {
-        headers: {
-          "x-api-key": apiKey,
-          "accept": "application/json",
-        },
-      });
-
-      if (r.ok) {
-        const list = await parseList(r);
-        if (list) return { ok:true, items:list };
-      } else {
-        hints.push(`${u.pathname}?${a}/${b} ${r.status}`);
-      }
-    } catch (e) {
-      hints.push(`${baseUrl}?${a}/${b} -> ${String(e.message||e)}`);
-    }
-  }
-
-  // --- try POST JSON (some tenants require body JSON with apiKey)
-  try {
-    const r = await fetch(baseUrl, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "accept": "application/json",
-      },
-      body: JSON.stringify({
-        apiKey,
-        startDate: startISO,
-        endDate: endISO,
-        page,
-        pageSize
-      })
-    });
-
-    if (r.ok) {
-      const list = await parseList(r);
-      if (list) return { ok:true, items:list };
-    } else {
-      hints.push(`POST ${new URL(baseUrl).pathname} ${r.status}`);
-    }
-  } catch (e) {
-    hints.push(`POST JSON -> ${String(e.message||e)}`);
-  }
-
-  return { ok:false, message:"All parameter/endpoint patterns returned 400/404.", hints };
-}
-
-async function parseList(r) {
-  const data = await r.json().catch(()=>null);
-  if (!data) return null;
-
-  if (Array.isArray(data?.items)) return data.items;
-  if (Array.isArray(data?.data))  return data.data;
-  if (Array.isArray(data))        return data;
-  return null;
 }
 
 /* ---------- helpers ---------- */
 function json(status, body){
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" }});
 }
-function toISO(d){ return new Date(d).toISOString().slice(0,19) + "Z"; }
-function num(...vals){ for (const v of vals){ const n=Number(v); if (Number.isFinite(n)) return n; } return 0; }
+// Convert a local Date to "YYYY-MM-DD HH:mm:ss" in UTC
+function toRingyUTC(d){
+  const z = new Date(d);
+  const yyyy = z.getUTCFullYear();
+  const mm   = String(z.getUTCMonth()+1).padStart(2,"0");
+  const dd   = String(z.getUTCDate()).padStart(2,"0");
+  const HH   = String(z.getUTCHours()).padStart(2,"0");
+  const MM   = String(z.getUTCMinutes()).padStart(2,"0");
+  const SS   = String(z.getUTCSeconds()).padStart(2,"0");
+  return `${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}`;
+}
+function pickStr(...vals){ for (const v of vals){ if (v && typeof v === "string") return v; } return ""; }
 function minutes(...vals){
   for (const v of vals){
     if (v == null) continue;
-    if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, v);
+    if (typeof v === "number" && Number.isFinite(v)) {
+      // assume numbers > 600 are seconds, otherwise minutes
+      return v > 600 ? Math.round(v/60) : v;
+    }
     if (typeof v === "string"){
-      const m = v.match(/^(\d+):(\d{2})$/); // "h:mm"
-      if (m) return Number(m[1])*60 + Number(m[2]);
+      const h = v.match(/^(\d+):(\d{2})$/); // "h:mm"
+      if (h) return Number(h[1])*60 + Number(h[2]);
       const n = Number(v);
-      if (Number.isFinite(n)){
-        return n > 600 ? Math.round(n/60) : n; // if it's seconds, convert
-      }
+      if (Number.isFinite(n)) return n > 600 ? Math.round(n/60) : n;
     }
   }
   return 0;
 }
-const secsToMin = s => (Number.isFinite(Number(s)) ? Math.round(Number(s)/60) : 0);
-function pickStr(...vals){ for (const v of vals){ if (v && typeof v === "string") return v; } return ""; }
-function phone10(s){
-  const d = String(s||"").replace(/\D+/g, "");
-  if (!d) return "";
-  return d.slice(-10); // last 10 digits standardized
-}
+async function safeText(r){ try { return await r.text(); } catch { return ""; } }
