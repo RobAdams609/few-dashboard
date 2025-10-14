@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE FILE (stable) ============ */
+/* ============ FEW Dashboard — COMPLETE FILE (stable, with Sold-from-sales & rule styling) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -29,7 +29,6 @@ function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){
   const r = await fetch(bust(u), { cache:"no-store" });
   if (!r.ok) throw new Error(`${u} ${r.status}`);
-  // guard bad JSON
   const text = await r.text();
   try { return JSON.parse(text); }
   catch(e){ throw new Error(`Bad JSON from ${u}: ${e.message}`); }
@@ -104,7 +103,7 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Sale toast (existing behavior) ---------- */
+/* ---------- Sale toast ---------- */
 function showSalePop({name, amount}){
   const el = $("#salePop");
   if (!el) return;
@@ -153,6 +152,24 @@ async function loadStatic(){
     getJSON("/rules.json").catch(()=>[])
   ]);
   setRuleText(rules);
+
+  // Hide the thin ticker; keep the big centered rule only
+  try {
+    const tk = document.querySelector("#ticker");
+    if (tk && tk.parentElement) tk.parentElement.style.display = "none";
+  } catch {}
+  // Style the big rule text: bold, dark-green, slight “brick/embossed” feel
+  try {
+    const pr = document.querySelector("#principle");
+    if (pr) {
+      pr.style.fontSize = "28px";
+      pr.style.fontWeight = "900";
+      pr.style.letterSpacing = "0.5px";
+      pr.style.color = "#0f3d2e";
+      pr.style.textShadow =
+        "0 1px 0 #0b2d22, 0 2px 0 #0b2d22, 0 3px 0 #0b2d22, 0 4px 6px rgba(0,0,0,0.35)";
+    }
+  } catch {}
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -361,16 +378,20 @@ function renderRoster(){
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
     const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
-    const conv = c.leads > 0 ? (c.sold / c.leads) : null;
+
+    // ✅ Sold comes from sales; conversion uses sold/leads
+    const soldDeals = Number(s.sales || 0);
+    const conv = c.leads > 0 ? (soldDeals / c.leads) : null;
+
     return [
       avatarCell(a),
       fmtInt(c.calls),
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
       fmtInt(c.leads),
-      fmtInt(c.sold),
+      fmtInt(soldDeals),          // from sales function
       fmtPct(conv),
-      fmtMoney(s.av12x)
+      fmtMoney(Number(s.av12x||0))
     ];
   });
   setRows(rows);
