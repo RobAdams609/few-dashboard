@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE FILE (single rule banner + full-screen sale splash) ============ */
+/* ============ FEW Dashboard — COMPLETE FILE (single rule banner + full-screen sale splash + sound) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -64,52 +64,31 @@ const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
 /* ---------- ONE big “Rule of the Day” banner (centered, money-green brick style) ---------- */
 function setRuleText(rulesObj){
-  // Build list
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
   const idx  = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
 
-  // Kill any legacy duplicate rule elements if they exist
-  const legacyIds = ["ticker","principle"];
-  legacyIds.forEach(id=>{ const el = document.getElementById(id); if (el) el.remove(); });
+  // Remove any legacy rule nodes
+  ["ticker","principle"].forEach(id=>{ const el = document.getElementById(id); if (el) el.remove(); });
 
-  // Inject CSS once
   if (!document.getElementById("rule-banner-css")){
-    const css = `
-      #ruleBanner{
-        display:flex; align-items:center; justify-content:center;
-        text-align:center;
-        padding:16px 22px; margin:8px auto 12px;
-        max-width:1200px; border-radius:18px;
-        background: repeating-linear-gradient(
-          135deg,
-          #0f2914, #0f2914 10px,
-          #124019 10px, #124019 20px
-        );
-        color:#c8f7c8; letter-spacing:.6px;
-        border:3px solid rgba(76,175,80,.6);
-        box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 2px rgba(133,255,133,.18);
-      }
-      #ruleBanner .ruleLabel{
-        font-weight:900; margin-right:10px; opacity:.9;
-        color:#e7ffe7;
-      }
-      #ruleBanner .ruleText{
-        font-weight:900;
-        font-size: clamp(22px, 3.0vw, 40px);
-        color:#b6ff7a; text-shadow: 0 3px 10px rgba(0,0,0,.35);
-      }
-      /* keep it near top */
-      .ruleBanner-host{ position:relative; z-index:2; }
-    `;
     const el = document.createElement("style");
     el.id = "rule-banner-css";
-    el.textContent = css;
+    el.textContent = `
+      #ruleBanner{
+        display:flex; align-items:center; justify-content:center; text-align:center;
+        padding:16px 22px; margin:8px auto 12px; max-width:1200px; border-radius:18px;
+        background: repeating-linear-gradient(135deg,#0f2914,#0f2914 10px,#124019 10px,#124019 20px);
+        color:#c8f7c8; letter-spacing:.6px; border:3px solid rgba(76,175,80,.6);
+        box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 2px rgba(133,255,133,.18);
+      }
+      #ruleBanner .ruleLabel{ font-weight:900; margin-right:10px; opacity:.9; color:#e7ffe7; }
+      #ruleBanner .ruleText{ font-weight:900; font-size: clamp(22px, 3.0vw, 40px); color:#b6ff7a; text-shadow: 0 3px 10px rgba(0,0,0,.35); }
+      .ruleBanner-host{ position:relative; z-index:2; }
+    `;
     document.head.appendChild(el);
   }
-
-  // Ensure host exists once, near top of main content
   let host = document.querySelector(".ruleBanner-host");
   if (!host){
     host = document.createElement("div");
@@ -117,8 +96,6 @@ function setRuleText(rulesObj){
     const target = document.querySelector("#app") || document.body;
     target.insertBefore(host, target.firstChild);
   }
-
-  // Write banner
   host.innerHTML = `
     <div id="ruleBanner">
       <span class="ruleLabel">RULE OF THE DAY —</span>
@@ -159,10 +136,36 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Full-screen sale splash (queue + 60s + chime; no toaster) ---------- */
+/* ---------- Full-screen sale splash (queue + 60s + money-counter sound) ---------- */
 (function initSaleSplash(){
   let queue = [];
   let showing = false;
+
+  // Point to YOUR uploaded sound (root of site)
+  const SOUND_URL = "/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3";
+
+  // Preload & unlock audio for autoplay policies
+  const baseAudio = new Audio(SOUND_URL);
+  baseAudio.preload = "auto";
+  baseAudio.volume = 1.0;
+
+  // Best practice: create a clone each time so multiple splashes (or quick repeats) never cut off each other
+  function playSound(){
+    try{
+      const a = baseAudio.cloneNode(true);
+      a.currentTime = 0;
+      a.play().catch(()=>{ /* ignore; browser may block until first user gesture */ });
+      // auto-cleanup
+      a.addEventListener("ended", ()=> a.remove());
+    }catch(e){ log("audio play err", e?.message||e); }
+  }
+
+  // Try to unlock audio on first user interaction so browsers let it play
+  ["click","keydown","touchstart"].forEach(evt=>{
+    window.addEventListener(evt, ()=>{
+      baseAudio.play().then(()=>{ baseAudio.pause(); baseAudio.currentTime = 0; }).catch(()=>{});
+    }, { once:true, passive:true });
+  });
 
   function injectCssOnce(){
     if (document.getElementById("sale-splash-css")) return;
@@ -202,20 +205,6 @@ function avatarBlock(a){
     document.head.appendChild(el);
   }
 
-  function chime(){
-    try{
-      const ctx = new (window.AudioContext||window.webkitAudioContext)();
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.type = "sine"; o.frequency.value = 880;
-      o.connect(g); g.connect(ctx.destination);
-      g.gain.setValueAtTime(0.0001, ctx.currentTime);
-      g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + 0.03);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
-      o.start(); o.stop(ctx.currentTime + 0.65);
-    }catch{}
-  }
-
   function showNext(){
     if (showing || queue.length === 0) return;
     showing = true;
@@ -240,7 +229,9 @@ function avatarBlock(a){
     document.body.appendChild(host);
 
     requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
-    chime();
+
+    // Play the money counter (in addition to the visual splash)
+    playSound();
 
     const done = ()=> {
       host.classList.remove("saleSplash-show");
@@ -292,7 +283,7 @@ async function loadStatic(){
     getJSON("/headshots/roster.json").catch(()=>[]),
     getJSON("/rules.json").catch(()=>[])
   ]);
-  setRuleText(rules);  // writes the single big banner
+  setRuleText(rules);  // single big banner
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -388,8 +379,7 @@ async function refreshSales(){
         const when = s.dateSold ? toET(s.dateSold) : null;
         if (!when || when < WSTART || when >= WEND) continue;
 
-        // Track newest
-        if (!newest || when > toET(newest.dateSold||0)) newest = s;
+        if (!newest || when > toET(newest?.dateSold||0)) newest = s;
 
         const name   = String(s.agent||"").trim();
         if (!name) continue;
@@ -442,13 +432,13 @@ async function refreshSales(){
       out.set(k, s);
     }
 
-    // Update team totals
+    // Update totals
     const prevDeals = STATE.team.deals || 0;
     STATE.salesWeekByKey = out;
     STATE.team.av    = Math.max(0, Math.round(totalAV));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // 1) Primary anti-dup splash: hash the newest raw sale
+    // 1) Primary anti-dup: splash the newest raw sale we saw
     if (newest){
       const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
@@ -457,11 +447,9 @@ async function refreshSales(){
       }
     }
 
-    // 2) Fallback splash if total deals increased but we didn't have raw/newest (e.g., condensed API)
+    // 2) Fallback if deals ticked up but no per-sale rows
     if (!newest && STATE.team.deals > prevDeals && STATE.team.deals > STATE.lastDealsShown){
-      // Pick top agent by increase (best effort)
       let best = { name:"Team", amount:0 };
-      // Find who currently leads by sales/amount
       for (const a of STATE.roster){
         const k = agentKey(a);
         const s = STATE.salesWeekByKey.get(k) || { sales:0, amount:0 };
@@ -525,7 +513,7 @@ function renderRoster(){
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
     const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
 
-    const soldDeals = Number(s.sales || 0);            // Sold column from sales function (truth)
+    const soldDeals = Number(s.sales || 0);
     const conv = c.leads > 0 ? (soldDeals / c.leads) : null;
 
     return [
