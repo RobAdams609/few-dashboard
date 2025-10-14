@@ -100,16 +100,113 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Sale toast ---------- */
-function showSalePop({name, amount}){
-  const el = $("#salePop");
-  if (!el) return;
-  const av12 = Number(amount||0) * 12;
-  el.textContent = `${name} submitted ${fmtMoney(av12)} AV 🎉`;
-  el.classList.add("show");
-  setTimeout(()=> el.classList.remove("show"), 3500);
-}
+/* ---------- Full-screen sale splash (60s + queue + chime) ---------- */
+(function initSaleSplash(){
+  let queue = [];
+  let showing = false;
 
+  function injectCssOnce(){
+    if (document.getElementById("sale-splash-css")) return;
+    const css = `
+      .saleSplash-backdrop{
+        position:fixed; inset:0; z-index:99999;
+        display:flex; align-items:center; justify-content:center;
+        background:rgba(0,0,0,.55); backdrop-filter: blur(2px);
+        opacity:0; transition: opacity .35s ease;
+      }
+      .saleSplash-wrap{
+        max-width:88vw; text-align:center;
+        transform:scale(.96); transition: transform .35s ease, opacity .35s ease;
+        opacity:.98;
+      }
+      .saleSplash-bubble{
+        display:inline-block; padding:28px 40px;
+        border-radius:28px;
+        background:linear-gradient(180deg,#1a3b1f,#0f2914);
+        box-shadow: 0 18px 60px rgba(0,0,0,.45), inset 0 0 0 3px rgba(133,255,133,.25);
+        color:#eaffea; font-weight:900; line-height:1.2;
+        letter-spacing:.4px;
+        border:2px solid rgba(76,175,80,.5);
+      }
+      .saleSplash-name{ font-size:64px; }
+      .saleSplash-txt { font-size:40px; margin:8px 0 0; color:#c7f5c7; }
+      .saleSplash-amount{
+        display:block; font-size:86px; color:#b7ff7a; margin-top:10px;
+        text-shadow: 0 4px 14px rgba(0,0,0,.35);
+      }
+      @media (max-width: 900px){
+        .saleSplash-name{ font-size:44px; }
+        .saleSplash-amount{ font-size:64px; }
+        .saleSplash-txt{ font-size:28px; }
+      }
+      .saleSplash-show .saleSplash-backdrop{ opacity:1; }
+      .saleSplash-show .saleSplash-wrap{ transform:scale(1); }
+    `;
+    const el = document.createElement("style");
+    el.id = "sale-splash-css";
+    el.textContent = css;
+    document.head.appendChild(el);
+  }
+
+  function chime(){
+    try{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+      o.start(); o.stop(ctx.currentTime + 0.65);
+    }catch{}
+  }
+
+  function showNext(){
+    if (showing || queue.length === 0) return;
+    showing = true;
+    injectCssOnce();
+
+    const { name, amount, ms=60_000 } = queue.shift();
+    const av12 = Math.round(Number(amount||0)*12).toLocaleString("en-US");
+
+    const host = document.createElement("div");
+    host.className = "saleSplash-host";
+    host.innerHTML = `
+      <div class="saleSplash-backdrop">
+        <div class="saleSplash-wrap">
+          <div class="saleSplash-bubble">
+            <div class="saleSplash-name">${(name||"").toUpperCase()}</div>
+            <div class="saleSplash-txt">SUBMITTED</div>
+            <span class="saleSplash-amount">$${av12} AV</span>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(host);
+
+    // animate in
+    requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
+    chime();
+
+    // auto-hide after ms (default 60s)
+    const done = ()=> {
+      host.classList.remove("saleSplash-show");
+      setTimeout(()=>{ host.remove(); showing = false; showNext(); }, 400);
+    };
+    const t = setTimeout(done, Math.max(3000, ms));
+
+    // allow click to dismiss early
+    host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
+  }
+
+  // Expose global function for the dashboard
+  window.showSalePop = function({name, amount, ms}){
+    queue.push({name, amount, ms});
+    showNext();
+  };
+})();
+}
 /* ---------- Summary cards ---------- */
 function massageSummaryLayout(){
   try {
