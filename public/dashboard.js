@@ -1,12 +1,12 @@
-/* ============ FEW Dashboard — COMPLETE FILE (stable) ============ */
+/* ============ FEW Dashboard — COMPLETE FILE (single rule banner + full-screen sale splash) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
 const DEBUG     = new URLSearchParams(location.search).has("debug");
 const log       = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;  // refresh data
-const ROTATE_MS = 30_000;  // rotate views
+const DATA_MS   = 30_000;   // refresh data every 30s
+const ROTATE_MS = 30_000;   // rotate views every 30s
 const VIEWS     = ["roster","av","aotw","vendors","ytd"];
 let   viewIdx   = 0;
 
@@ -57,18 +57,74 @@ const STATE = {
   overrides: { calls:null, av:null },
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
-  seenSaleHashes: new Set()
+  seenSaleHashes: new Set(),   // stop duplicate splashes (leadId|soldProductId|dateSold)
+  lastDealsShown: 0            // fallback: if deals count increases, show splash for newest
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------- Headline rule ---------- */
+/* ---------- ONE big “Rule of the Day” banner (centered, money-green brick style) ---------- */
 function setRuleText(rulesObj){
+  // Build list
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
   const idx  = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
-  if ($("#ticker"))    $("#ticker").textContent    = `RULE OF THE DAY — ${text}`;
-  if ($("#principle")) $("#principle").textContent = text;
+
+  // Kill any legacy duplicate rule elements if they exist
+  const legacyIds = ["ticker","principle"];
+  legacyIds.forEach(id=>{ const el = document.getElementById(id); if (el) el.remove(); });
+
+  // Inject CSS once
+  if (!document.getElementById("rule-banner-css")){
+    const css = `
+      #ruleBanner{
+        display:flex; align-items:center; justify-content:center;
+        text-align:center;
+        padding:16px 22px; margin:8px auto 12px;
+        max-width:1200px; border-radius:18px;
+        background: repeating-linear-gradient(
+          135deg,
+          #0f2914, #0f2914 10px,
+          #124019 10px, #124019 20px
+        );
+        color:#c8f7c8; letter-spacing:.6px;
+        border:3px solid rgba(76,175,80,.6);
+        box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 2px rgba(133,255,133,.18);
+      }
+      #ruleBanner .ruleLabel{
+        font-weight:900; margin-right:10px; opacity:.9;
+        color:#e7ffe7;
+      }
+      #ruleBanner .ruleText{
+        font-weight:900;
+        font-size: clamp(22px, 3.0vw, 40px);
+        color:#b6ff7a; text-shadow: 0 3px 10px rgba(0,0,0,.35);
+      }
+      /* keep it near top */
+      .ruleBanner-host{ position:relative; z-index:2; }
+    `;
+    const el = document.createElement("style");
+    el.id = "rule-banner-css";
+    el.textContent = css;
+    document.head.appendChild(el);
+  }
+
+  // Ensure host exists once, near top of main content
+  let host = document.querySelector(".ruleBanner-host");
+  if (!host){
+    host = document.createElement("div");
+    host.className = "ruleBanner-host";
+    const target = document.querySelector("#app") || document.body;
+    target.insertBefore(host, target.firstChild);
+  }
+
+  // Write banner
+  host.innerHTML = `
+    <div id="ruleBanner">
+      <span class="ruleLabel">RULE OF THE DAY —</span>
+      <span class="ruleText">${escapeHtml(text)}</span>
+    </div>
+  `;
 }
 
 /* ---------- Simple table helpers ---------- */
@@ -103,7 +159,7 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Full-screen sale splash (60s queue + chime) ---------- */
+/* ---------- Full-screen sale splash (queue + 60s + chime; no toaster) ---------- */
 (function initSaleSplash(){
   let queue = [];
   let showing = false;
@@ -194,14 +250,14 @@ function avatarBlock(a){
     host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
   }
 
-  // global
+  // Global API to queue a splash
   window.showSalePop = function({name, amount, ms}){
     queue.push({name, amount, ms});
     showNext();
   };
 })();
 
-/* ---------- Summary cards ---------- */
+/* ---------- Summary cards (exactly 3) ---------- */
 function massageSummaryLayout(){
   try {
     const callsVal = $("#sumCalls");
@@ -236,7 +292,7 @@ async function loadStatic(){
     getJSON("/headshots/roster.json").catch(()=>[]),
     getJSON("/rules.json").catch(()=>[])
   ]);
-  setRuleText(rules);
+  setRuleText(rules);  // writes the single big banner
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -283,7 +339,7 @@ async function refreshCalls(){
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Manual overrides
+  // Manual overrides (optional)
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
@@ -314,7 +370,7 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Ringy: Weekly Sales → AV(12×) & Deals ---------- */
+/* ---------- Ringy: Weekly Sales → AV(12×) & Deals + Splash trigger ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
@@ -325,10 +381,15 @@ async function refreshSales(){
     let totalAV    = 0;
 
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
+    let newest = null; // keep the newest sale object we see in-window
+
     if (raw.length){
       for (const s of raw){
         const when = s.dateSold ? toET(s.dateSold) : null;
         if (!when || when < WSTART || when >= WEND) continue;
+
+        // Track newest
+        if (!newest || when > toET(newest.dateSold||0)) newest = s;
 
         const name   = String(s.agent||"").trim();
         if (!name) continue;
@@ -356,7 +417,7 @@ async function refreshSales(){
       }
     }
 
-    // Manual AV overrides (merge, do not wipe)
+    // Manual AV overrides (merge)
     if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
       const oa = STATE.overrides.av.perAgent || {};
       for (const [rawName, v] of Object.entries(oa)){
@@ -381,20 +442,37 @@ async function refreshSales(){
       out.set(k, s);
     }
 
+    // Update team totals
+    const prevDeals = STATE.team.deals || 0;
     STATE.salesWeekByKey = out;
     STATE.team.av    = Math.max(0, Math.round(totalAV));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // splash on newest sale (only once per lead/product/date)
-    const last = raw.length ? raw[raw.length-1] : null;
-    if (last){
-      const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
+    // 1) Primary anti-dup splash: hash the newest raw sale
+    if (newest){
+      const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        // Note: amount is monthly; splash shows 12×
-        window.showSalePop({ name:last.agent || "Team", amount:last.amount || 0 });
+        window.showSalePop({ name:newest.agent || "Team", amount:newest.amount || 0, ms:60_000 });
       }
     }
+
+    // 2) Fallback splash if total deals increased but we didn't have raw/newest (e.g., condensed API)
+    if (!newest && STATE.team.deals > prevDeals && STATE.team.deals > STATE.lastDealsShown){
+      // Pick top agent by increase (best effort)
+      let best = { name:"Team", amount:0 };
+      // Find who currently leads by sales/amount
+      for (const a of STATE.roster){
+        const k = agentKey(a);
+        const s = STATE.salesWeekByKey.get(k) || { sales:0, amount:0 };
+        if (!best._score || (s.sales*10000 + s.amount) > best._score){
+          best = { name:a.name, amount:(s.amount||0), _score:(s.sales*10000 + s.amount) };
+        }
+      }
+      window.showSalePop({ name:best.name, amount:best.amount || 0, ms:60_000 });
+      STATE.lastDealsShown = STATE.team.deals;
+    }
+
   }catch(e){
     log("team_sold error", e?.message||e);
     STATE.salesWeekByKey = new Map();
@@ -446,7 +524,8 @@ function renderRoster(){
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
     const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
-    const soldDeals = Number(s.sales || 0);  // sold column comes from sales function (truth source)
+
+    const soldDeals = Number(s.sales || 0);            // Sold column from sales function (truth)
     const conv = c.leads > 0 ? (soldDeals / c.leads) : null;
 
     return [
