@@ -136,6 +136,7 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
+/* ---------- Sale Splash CSS (modern clean gold) ---------- */
 function injectCssOnce(){
   if (document.getElementById("sale-splash-css")) return;
   const css = `
@@ -198,17 +199,75 @@ function injectCssOnce(){
   el.textContent = css;
   document.head.appendChild(el);
 }
-function showNext(){
-  host.innerHTML = `
-    <div class="saleSplash-backdrop">
-      <div class="saleSplash-card" role="status" aria-live="polite">
-        <div class="saleSplash-title">${(name||"").toUpperCase()}</div>
-        <div class="saleSplash-sub">SUBMITTED</div>
-        <div class="saleSplash-amount">$${av12} AV</div>
+
+/* ---------- Full-screen sale splash + sound (queue, 60s, money-counter) ---------- */
+(function initSaleSplash(){
+  let queue = [];
+  let showing = false;
+
+  // POINT THIS TO YOUR UPLOADED SOUND IN /public
+  const SOUND_URL = "/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3";
+
+  // Preload & unlock audio (for autoplay policies)
+  const baseAudio = new Audio(SOUND_URL);
+  baseAudio.preload = "auto";
+  baseAudio.volume  = 1.0;
+
+  function playSound(){
+    try{
+      const a = baseAudio.cloneNode(true);
+      a.currentTime = 0;
+      a.play().catch(()=>{}); // ignore if the browser blocks
+      a.addEventListener("ended", ()=> a.remove());
+    }catch{}
+  }
+  // Unlock on first user gesture so future plays auto-start
+  ["click","keydown","touchstart"].forEach(evt=>{
+    window.addEventListener(evt, ()=>{
+      baseAudio.play().then(()=>{ baseAudio.pause(); baseAudio.currentTime = 0; }).catch(()=>{});
+    }, { once:true, passive:true });
+  });
+
+  function showNext(){
+    if (showing || queue.length === 0) return;
+    showing = true;
+    injectCssOnce();
+
+    const { name, amount, ms = 60_000 } = queue.shift();
+    const av12 = Math.round(Number(amount || 0) * 12).toLocaleString("en-US");
+
+    const host = document.createElement("div");
+    host.className = "saleSplash-host";
+    host.innerHTML = `
+      <div class="saleSplash-backdrop">
+        <div class="saleSplash-card" role="status" aria-live="polite">
+          <div class="saleSplash-title">${(name||"").toUpperCase()}</div>
+          <div class="saleSplash-sub">SUBMITTED</div>
+          <div class="saleSplash-amount">$${av12} AV</div>
+        </div>
       </div>
-    </div>
-  `;
-}???
+    `;
+    document.body.appendChild(host);
+
+    // animate + sound
+    requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
+    playSound();
+
+    const done = () => {
+      host.classList.remove("saleSplash-show");
+      setTimeout(()=>{ host.remove(); showing = false; showNext(); }, 400);
+    };
+    const t = setTimeout(done, Math.max(3000, ms));
+    host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
+  }
+
+  // Public API
+  window.showSalePop = function({name, amount, ms}){
+    queue.push({ name, amount, ms });
+    showNext();
+  };
+})();
+
 /* ---------- Summary cards (exactly 3) ---------- */
 function massageSummaryLayout(){
   try {
