@@ -1,6 +1,15 @@
 {
   "perAgent": {
-    "michelle landis": { "av12x": 3208, "sales": 1 }
+    "philip baxter":        { "av12x": 16377, "sales": 1 },
+    "robert adams":         { "av12x": 15172, "sales": 1 },
+    "anna gleason":         { "av12x": 8313,  "sales": 1 },
+    "eli thermilus":        { "av12x": 7369,  "sales": 1 },
+    "marie saint cyr":      { "av12x": 4394,  "sales": 1 },
+    "michelle landis":      { "av12x": 3734,  "sales": 1 },
+    "ajani senior":         { "av12x": 795,   "sales": 1 },
+    "nathan johnson":       { "av12x": 653,   "sales": 1 },
+    "fabricio navarrete cervantes": { "av12x": 520, "sales": 1 }
   },
-  "team": { "totalAV12x": 3208, "totalSales": 1 }
+  "team": { "totalAV12x": 57328, "totalSales": 9 },
+  "note": "One-time AV correction for week 25.42 to remove most recent deal; override resets next week."
 }
