@@ -136,217 +136,79 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Full-screen sale splash (gold slime splat + sound) ---------- */
-(function initSaleSplash(){
-  let queue = [];
-  let showing = false;
-
-  // Point to your uploaded sound (root of site)
-  const SOUND_URL = "/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3";
-
-  // Preload & unlock audio for autoplay policies
-  const baseAudio = new Audio(SOUND_URL);
-  baseAudio.preload = "auto";
-  baseAudio.volume  = 1.0;
-
-  // Play a fresh clone so fast back-to-back splashes never cut each other off
-  function playSound(){
-    try{
-      const a = baseAudio.cloneNode(true);
-      a.currentTime = 0;
-      a.play().catch(()=>{ /* ignore; needs first user gesture or autoplay allow */ });
-      a.addEventListener("ended", ()=> a.remove());
-    }catch(e){ /* no-op */ }
-  }
-
-  // Try to unlock audio on first interaction so browsers let it auto-play
-  ["click","keydown","touchstart"].forEach(evt=>{
-    window.addEventListener(evt, ()=>{
-      baseAudio.play().then(()=>{ baseAudio.pause(); baseAudio.currentTime = 0; }).catch(()=>{});
-    }, { once:true, passive:true });
-  });
-
-  function injectCssOnce(){
-    if (document.getElementById("sale-splash-css")) return;
-    const css = `
-      /* Backdrop & layout */
-      .saleSplash-backdrop{ position:fixed; inset:0; z-index:99999;
-        display:flex; align-items:center; justify-content:center;
-        background:rgba(0,0,0,.55); backdrop-filter: blur(2px);
-        opacity:0; transition: opacity .35s ease; }
-      .saleSplash-wrap{ position:relative; width:min(92vw,1100px); height:min(60vh,640px);
-        display:flex; align-items:center; justify-content:center;
-        transform:scale(.96); transition: transform .35s ease; }
-
-      /* Gooey filter host */
-      .saleSplash-goo { position:absolute; inset:0; filter:url(#gooey-gold); }
-
-      /* Main splat */
-      .splat {
-        position:absolute; left:50%; top:50%; transform:translate(-50%,-50%) scale(.3);
-        width:min(70vw,820px); height:min(70vw,820px); border-radius:50%;
-        background:radial-gradient(60% 60% at 50% 40%, #ffd76a 0%, #e9b83a 40%, #b88714 70%, #7a5b10 100%);
-        box-shadow:
-          0 10px 40px rgba(0,0,0,.45),
-          inset 0 8px 30px rgba(255, 255, 255, .25),
-          inset 0 -10px 40px rgba(0,0,0,.35);
-        animation: popSplat 450ms cubic-bezier(.14,.69,.23,1.24) forwards;
-      }
-
-      /* Flying blobs (gold slime) */
-      .blob {
-        position:absolute; width:var(--s,120px); height:var(--s,120px);
-        background:radial-gradient(60% 60% at 50% 40%, #ffe28a 0%, #efc14a 50%, #a27212 100%);
-        border-radius:50%;
-        left:calc(50% + var(--x,0px)); top:calc(50% + var(--y,0px));
-        transform:translate(-50%,-50%) scale(0);
-        animation: blobOut var(--t,650ms) ease-out forwards var(--d,0ms);
-        box-shadow: inset 0 8px 24px rgba(255,255,255,.18), inset 0 -12px 28px rgba(0,0,0,.28);
-      }
-
-      /* Text stack */
-      .splatText {
-        position:absolute; inset:0; display:flex; flex-direction:column;
-        align-items:center; justify-content:center; gap:12px; text-align:center;
-        transform:translateZ(0);
-        filter: drop-shadow(0 6px 18px rgba(0,0,0,.45));
-      }
-      .splatName {
-        font-weight:1000; letter-spacing:.8px;
-        font-size:clamp(32px, 5.8vw, 88px);
-        color:#fff6d2;
-        -webkit-text-stroke: 2px rgba(128,88,10,.55);
-        text-shadow: 0 2px 0 rgba(128,88,10,.45), 0 10px 24px rgba(0,0,0,.50);
-        animation: textPop 420ms ease-out forwards 140ms;
-      }
-      .splatSub { font-size:clamp(16px, 2.2vw, 30px); font-weight:800; color:#ffeaa4; opacity:.95; }
-      .splatAmount {
-        font-weight:1000; font-size:clamp(44px, 9vw, 120px);
-        color:#fff6d2;
-        -webkit-text-stroke: 3px rgba(128,88,10,.55);
-        text-shadow: 0 3px 0 rgba(128,88,10,.5), 0 14px 28px rgba(0,0,0,.55);
-        animation: textPop 460ms ease-out forwards 220ms;
-      }
-      .goldShimmer{
-        background:linear-gradient(90deg, rgba(255,255,255,.00) 0%, rgba(255,255,255,.45) 35%, rgba(255,255,255,0) 70%);
-        -webkit-background-clip:text; background-clip:text; color:transparent;
-        animation: shimmer 1600ms ease-in-out infinite;
-      }
-
-      /* Show/Hide state */
-      .saleSplash-show .saleSplash-backdrop{ opacity:1; }
-      .saleSplash-show .saleSplash-wrap{ transform:scale(1); }
-
-      /* Keyframes */
-      @keyframes popSplat {
-        0%   { transform:translate(-50%,-50%) scale(.3); filter:brightness(.9) saturate(1.1); }
-        60%  { transform:translate(-50%,-50%) scale(1.06); filter:brightness(1.05) saturate(1.2); }
-        100% { transform:translate(-50%,-50%) scale(1);    filter:brightness(1) saturate(1); }
-      }
-      @keyframes blobOut {
-        0%   { transform:translate(-50%,-50%) scale(0); }
-        60%  { transform:translate(-50%,-50%) scale(1.15); }
-        100% { transform:translate(-50%,-50%) scale(1); }
-      }
-      @keyframes textPop {
-        0%   { transform:translateY(14px) scale(.9); opacity:0; }
-        100% { transform:translateY(0)    scale(1);  opacity:1; }
-      }
-      @keyframes shimmer {
-        0%   { background-position:-180% 0; }
-        100% { background-position: 180% 0; }
-      }
-    `;
-    const el = document.createElement("style");
-    el.id = "sale-splash-css";
-    el.textContent = css;
-    document.head.appendChild(el);
-
-    // Add a gooey SVG filter for slime blending (once)
-    if (!document.getElementById("sale-splash-goo-svg")){
-      const svg = document.createElementNS("http://www.w3.org/2000/svg","svg");
-      svg.setAttribute("id","sale-splash-goo-svg");
-      svg.setAttribute("width","0"); svg.setAttribute("height","0"); svg.style.position="absolute";
-      svg.innerHTML = `
-        <defs>
-          <filter id="gooey-gold">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="10" result="blur"/>
-            <feColorMatrix in="blur" mode="matrix"
-              values="1 0 0 0 0
-                      0 1 0 0 0
-                      0 0 1 0 0
-                      0 0 0 40 -15" result="goo"/>
-            <feComposite in="SourceGraphic" in2="goo" operator="atop"/>
-          </filter>
-        </defs>
-      `;
-      document.body.appendChild(svg);
+function injectCssOnce(){
+  if (document.getElementById("sale-splash-css")) return;
+  const css = `
+    :root{
+      --gold-1:#FFE79A;
+      --gold-2:#FFD86B;
+      --gold-3:#E1B64F;
+      --gold-glow:rgba(255, 215, 128, .35);
     }
-  }
 
-  function showNext(){
-    if (showing || queue.length === 0) return;
-    showing = true;
-    injectCssOnce();
+    .saleSplash-backdrop{
+      position:fixed; inset:0; z-index:99999;
+      display:flex; align-items:center; justify-content:center;
+      background:rgba(0,0,0,.55); backdrop-filter: blur(4px);
+      opacity:0; transition: opacity .28s ease;
+    }
+    .saleSplash-card{
+      display:flex; flex-direction:column; align-items:center; gap:10px;
+      padding:28px 40px; border-radius:28px;
+      background:linear-gradient(170deg, var(--gold-1) 0%, var(--gold-2) 40%, var(--gold-3) 100%);
+      border:1px solid rgba(255,255,255,.18);
+      box-shadow:
+        0 18px 60px rgba(0,0,0,.45),
+        0 0 0 3px var(--gold-glow) inset;
+      transform:scale(.96) translateY(6px);
+      opacity:.98;
+      transition: transform .28s ease, opacity .28s ease, box-shadow .28s ease;
+    }
 
-    const { name, amount, ms=60_000 } = queue.shift();
-    const av12 = Math.round(Number(amount||0)*12).toLocaleString("en-US");
+    .saleSplash-title{
+      font-size: clamp(28px, 5vw, 56px);
+      font-weight: 900; letter-spacing:.4px;
+      color:#1a1a1a;
+      text-shadow: 0 1px 0 rgba(255,255,255,.35);
+    }
+    .saleSplash-sub{
+      font-size: clamp(14px, 2.4vw, 20px);
+      font-weight:800; letter-spacing:.5px;
+      color:#2a2a2a; opacity:.8;
+    }
+    .saleSplash-amount{
+      font-size: clamp(36px, 7.2vw, 88px);
+      font-weight: 1000; letter-spacing:.6px; line-height:1.02;
+      color:#111;
+      text-shadow:
+        0 1px 0 rgba(255,255,255,.45),
+        0 10px 30px rgba(0,0,0,.30);
+    }
 
-    const host = document.createElement("div");
-    host.className = "saleSplash-host";
-    host.innerHTML = `
-      <div class="saleSplash-backdrop">
-        <div class="saleSplash-wrap">
-          <div class="saleSplash-goo">
-            <div class="splat"></div>
-            ${makeBlobs(9)}  <!-- flying gold blobs -->
-          </div>
-          <div class="splatText">
-            <div class="splatName goldShimmer">${(name||"").toUpperCase()}</div>
-            <div class="splatSub">SUBMITTED</div>
-            <div class="splatAmount goldShimmer">$${av12} AV</div>
-          </div>
-        </div>
+    @media (max-width: 900px){
+      .saleSplash-card{ padding:20px 24px; border-radius:22px; }
+    }
+
+    /* enter */
+    .saleSplash-show .saleSplash-backdrop{ opacity:1; }
+    .saleSplash-show .saleSplash-card{ transform:scale(1) translateY(0); }
+  `;
+  const el = document.createElement("style");
+  el.id = "sale-splash-css";
+  el.textContent = css;
+  document.head.appendChild(el);
+}
+function showNext(){
+  host.innerHTML = `
+    <div class="saleSplash-backdrop">
+      <div class="saleSplash-card" role="status" aria-live="polite">
+        <div class="saleSplash-title">${(name||"").toUpperCase()}</div>
+        <div class="saleSplash-sub">SUBMITTED</div>
+        <div class="saleSplash-amount">$${av12} AV</div>
       </div>
-    `;
-    document.body.appendChild(host);
-
-    // Animate in + play sound
-    requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
-    playSound();
-
-    const done = ()=> {
-      host.classList.remove("saleSplash-show");
-      setTimeout(()=>{ host.remove(); showing = false; showNext(); }, 420);
-    };
-    const t = setTimeout(done, Math.max(3000, ms));
-    host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
-  }
-
-  // Gold blob generator (positions/timing randomized but deterministic each show)
-  function makeBlobs(n=8){
-    const rnd = (min,max)=> (Math.random()*(max-min)+min)|0;
-    let html = "";
-    for (let i=0;i<n;i++){
-      const ang = (i / n) * Math.PI*2 + (Math.random()*0.6-0.3);
-      const r   = rnd(120, 300); // distance from center px
-      const x   = Math.cos(ang) * r;
-      const y   = Math.sin(ang) * r;
-      const s   = rnd(70, 160);     // size px
-      const d   = rnd(20, 220);     // delay ms
-      const t   = rnd(580, 820);    // anim duration
-      html += `<div class="blob" style="--x:${x}px; --y:${y}px; --s:${s}px; --d:${d}ms; --t:${t}ms"></div>`;
-    }
-    return html;
-  }
-
-  // Public API (unchanged)
-  window.showSalePop = function({name, amount, ms}){
-    queue.push({name, amount, ms});
-    showNext();
-  };
-})();
-
+    </div>
+  `;
+}???
 /* ---------- Summary cards (exactly 3) ---------- */
 function massageSummaryLayout(){
   try {
