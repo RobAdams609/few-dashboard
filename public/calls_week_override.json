@@ -1,93 +1,38 @@
 {
   "robert@rkinsuranceadvisors.com": {
-    "calls": 459,
-    "talkMin": 223,
-    "loggedMin": 714,
-    "leads": 30,
-    "sold": 3
-  },
-  "andresthehealthagent@gmail.com": {
-    "calls": 0,
-    "talkMin": 1,
-    "loggedMin": 362,
-    "leads": 93,
-    "sold": 0
+    "calls": 539, "talkMin": 259, "loggedMin": 796, "leads": 31, "sold": 4
   },
   "fabricio.a.navarrete@gmail.com": {
-    "calls": 0,
-    "talkMin": 0,
-    "loggedMin": 402,
-    "leads": 41,
-    "sold": 1
+    "calls": 0, "talkMin": 0, "loggedMin": 456, "leads": 48, "sold": 1
   },
   "landisagency@gmail.com": {
-    "calls": 0,
-    "talkMin": 0,
-    "loggedMin": 40,
-    "leads": 2,
-    "sold": 0
+    "calls": 0, "talkMin": 0, "loggedMin": 61, "leads": 2, "sold": 0
   },
-  "ajanisenior.healthadvisor@gmail.com": {
-    "calls": 0,
-    "talkMin": 0,
-    "loggedMin": 280,
-    "leads": 29,
-    "sold": 1
+  "ajansenior.healthadvisor@gmail.com": {
+    "calls": 1, "talkMin": 0, "loggedMin": 402, "leads": 33, "sold": 1
   },
   "phil@americanpathinsurance.com": {
-    "calls": 29,
-    "talkMin": 131,
-    "loggedMin": 208,
-    "leads": 18,
-    "sold": 2
+    "calls": 32, "talkMin": 131, "loggedMin": 209, "leads": 20, "sold": 2
   },
   "anna.ushealthadvisors@gmail.com": {
-    "calls": 1191,
-    "talkMin": 148,
-    "loggedMin": 809,
-    "leads": 21,
-    "sold": 2
+    "calls": 1199, "talkMin": 171, "loggedMin": 895, "leads": 25, "sold": 3
   },
   "eli.thermilushealthadvisor@gmail.com": {
-    "calls": 0,
-    "talkMin": 0,
-    "loggedMin": 409,
-    "leads": 18,
-    "sold": 2
+    "calls": 0, "talkMin": 0, "loggedMin": 523, "leads": 26, "sold": 3
   },
   "maries.healthadvisor@gmail.com": {
-    "calls": 181,
-    "talkMin": 51,
-    "loggedMin": 464,
-    "leads": 33,
-    "sold": 1
+    "calls": 271, "talkMin": 72, "loggedMin": 530, "leads": 37, "sold": 1
   },
   "fraitzlineg.healthadvisor@gmail.com": {
-    "calls": 0,
-    "talkMin": 0,
-    "loggedMin": 0,
-    "leads": 0,
-    "sold": 0
+    "calls": 0, "talkMin": 0, "loggedMin": 0, "leads": 0, "sold": 0
   },
   "nathanjohnson.healthadvisor@gmail.com": {
-    "calls": 653,
-    "talkMin": 162,
-    "loggedMin": 1150,
-    "leads": 71,
-    "sold": 0
+    "calls": 734, "talkMin": 202, "loggedMin": 1282, "leads": 78, "sold": 1
   },
   "sebastianbeltran.healthadvisor@gmail.com": {
-    "calls": 695,
-    "talkMin": 150,
-    "loggedMin": 494,
-    "leads": 62,
-    "sold": 1
+    "calls": 875, "talkMin": 169, "loggedMin": 627, "leads": 71, "sold": 2
   },
   "elizabethsnyde.healthadvisor@gmail.com": {
-    "calls": 90,
-    "talkMin": 8,
-    "loggedMin": 273,
-    "leads": 24,
-    "sold": 0
+    "calls": 243, "talkMin": 78, "loggedMin": 414, "leads": 31, "sold": 0
   }
 }
