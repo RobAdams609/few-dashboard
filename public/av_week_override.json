@@ -1,9 +1,9 @@
 {
   "perAgent": {
-    "philip baxter":        { "av12x": 16377, "sales": 1 },
-    "robert adams":         { "av12x": 15172, "sales": 1 },
-    "anna gleason":         { "av12x": 8313,  "sales": 1 },
-    "eli thermilus":        { "av12x": 7369,  "sales": 1 },
+    "philip baxter":        { "av12x": 16377, "sales": 3 },
+    "robert adams":         { "av12x": 15172, "sales": 4 },
+    "anna gleason":         { "av12x": 8313,  "sales": 3 },
+    "eli thermilus":        { "av12x": 7369,  "sales": 3 },
     "marie saint cyr":      { "av12x": 4394,  "sales": 1 },
     "michelle landis":      { "av12x": 3734,  "sales": 1 },
     "ajani senior":         { "av12x": 795,   "sales": 1 },
