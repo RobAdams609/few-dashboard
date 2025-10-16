@@ -8,7 +8,7 @@
     "michelle landis":               { "av12x": 3734,  "sales": 1 },
     "ajani senior":                  { "av12x": 795,   "sales": 1 },
     "nathan johnson":                { "av12x": 653,   "sales": 1 },
-    "fabricio navarrete cervantes":  { "av12x": 521,   "sales": 1 }
+    "fabricio navarrete cervantes":  { "av12x": 520,   "sales": 1 }
   },
-  "team": { "totalAV12x": 57328, "totalSales": 22 }
+  "team": { "totalAV12x": 0, "totalSales": 0 }
 }
