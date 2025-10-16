@@ -9,7 +9,5 @@
     "ajani senior":         { "av12x": 795,   "sales": 1 },
     "nathan johnson":       { "av12x": 653,   "sales": 1 },
     "fabricio navarrete cervantes": { "av12x": 520, "sales": 1 }
-  },
-  "team": { "totalAV12x": 57328, "totalSales": 9 },
-  "note": "One-time AV correction for week 25.42 to remove most recent deal; override resets next week."
+  }
 }
