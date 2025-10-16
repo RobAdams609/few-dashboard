@@ -1,4 +1,4 @@
-/* ============ FEW Dashboard — COMPLETE FILE (single rule banner + full-screen sale splash + sound) ============ */
+/* ============ FEW Dashboard (clean rewrite) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -57,35 +57,33 @@ const STATE = {
   overrides: { calls:null, av:null },
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
+  vendors: { asOf:"", windowDays:45, list:[] },
   seenSaleHashes: new Set(),   // stop duplicate splashes (leadId|soldProductId|dateSold)
   lastDealsShown: 0            // fallback: if deals count increases, show splash for newest
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------- ONE big “Rule of the Day” banner (centered, money-green brick style) ---------- */
+/* ---------- ONE big Rule banner ---------- */
 function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
   const idx  = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
 
-  // Remove any legacy rule nodes
   ["ticker","principle"].forEach(id=>{ const el = document.getElementById(id); if (el) el.remove(); });
 
   if (!document.getElementById("rule-banner-css")){
     const el = document.createElement("style");
     el.id = "rule-banner-css";
     el.textContent = `
-      #ruleBanner{
-        display:flex; align-items:center; justify-content:center; text-align:center;
-        padding:16px 22px; margin:8px auto 12px; max-width:1200px; border-radius:18px;
-        background: repeating-linear-gradient(135deg,#0f2914,#0f2914 10px,#124019 10px,#124019 20px);
-        color:#c8f7c8; letter-spacing:.6px; border:3px solid rgba(76,175,80,.6);
-        box-shadow: 0 10px 30px rgba(0,0,0,.35), inset 0 0 0 2px rgba(133,255,133,.18);
-      }
-      #ruleBanner .ruleLabel{ font-weight:900; margin-right:10px; opacity:.9; color:#e7ffe7; }
-      #ruleBanner .ruleText{ font-weight:900; font-size: clamp(22px, 3.0vw, 40px); color:#b6ff7a; text-shadow: 0 3px 10px rgba(0,0,0,.35); }
-      .ruleBanner-host{ position:relative; z-index:2; }
+      #ruleBanner{display:flex;align-items:center;justify-content:center;text-align:center;
+        padding:16px 22px;margin:8px auto 12px;max-width:1200px;border-radius:18px;
+        background:repeating-linear-gradient(135deg,#0f2914,#0f2914 10px,#124019 10px,#124019 20px);
+        color:#c8f7c8;border:3px solid rgba(76,175,80,.6);
+        box-shadow:0 10px 30px rgba(0,0,0,.35),inset 0 0 0 2px rgba(133,255,133,.18);}
+      #ruleBanner .ruleLabel{font-weight:900;margin-right:10px;opacity:.9;color:#e7ffe7;}
+      #ruleBanner .ruleText{font-weight:900;font-size:clamp(22px,3vw,40px);color:#b6ff7a;text-shadow:0 3px 10px rgba(0,0,0,.35);}
+      .ruleBanner-host{position:relative;z-index:2;}
     `;
     document.head.appendChild(el);
   }
@@ -136,63 +134,23 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Sale Splash CSS (modern clean gold) ---------- */
+/* ---------- Sale Splash CSS ---------- */
 function injectCssOnce(){
   if (document.getElementById("sale-splash-css")) return;
   const css = `
-    :root{
-      --gold-1:#FFE79A;
-      --gold-2:#FFD86B;
-      --gold-3:#E1B64F;
-      --gold-glow:rgba(255, 215, 128, .35);
-    }
-
-    .saleSplash-backdrop{
-      position:fixed; inset:0; z-index:99999;
-      display:flex; align-items:center; justify-content:center;
-      background:rgba(0,0,0,.55); backdrop-filter: blur(4px);
-      opacity:0; transition: opacity .28s ease;
-    }
-    .saleSplash-card{
-      display:flex; flex-direction:column; align-items:center; gap:10px;
-      padding:28px 40px; border-radius:28px;
-      background:linear-gradient(170deg, var(--gold-1) 0%, var(--gold-2) 40%, var(--gold-3) 100%);
-      border:1px solid rgba(255,255,255,.18);
-      box-shadow:
-        0 18px 60px rgba(0,0,0,.45),
-        0 0 0 3px var(--gold-glow) inset;
-      transform:scale(.96) translateY(6px);
-      opacity:.98;
-      transition: transform .28s ease, opacity .28s ease, box-shadow .28s ease;
-    }
-
-    .saleSplash-title{
-      font-size: clamp(28px, 5vw, 56px);
-      font-weight: 900; letter-spacing:.4px;
-      color:#1a1a1a;
-      text-shadow: 0 1px 0 rgba(255,255,255,.35);
-    }
-    .saleSplash-sub{
-      font-size: clamp(14px, 2.4vw, 20px);
-      font-weight:800; letter-spacing:.5px;
-      color:#2a2a2a; opacity:.8;
-    }
-    .saleSplash-amount{
-      font-size: clamp(36px, 7.2vw, 88px);
-      font-weight: 1000; letter-spacing:.6px; line-height:1.02;
-      color:#111;
-      text-shadow:
-        0 1px 0 rgba(255,255,255,.45),
-        0 10px 30px rgba(0,0,0,.30);
-    }
-
-    @media (max-width: 900px){
-      .saleSplash-card{ padding:20px 24px; border-radius:22px; }
-    }
-
-    /* enter */
-    .saleSplash-show .saleSplash-backdrop{ opacity:1; }
-    .saleSplash-show .saleSplash-card{ transform:scale(1) translateY(0); }
+    :root{--gold-1:#FFE79A;--gold-2:#FFD86B;--gold-3:#E1B64F;--gold-glow:rgba(255,215,128,.35);}
+    .saleSplash-backdrop{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;
+      background:rgba(0,0,0,.55);backdrop-filter:blur(4px);opacity:0;transition:opacity .28s ease;}
+    .saleSplash-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:28px 40px;border-radius:28px;
+      background:linear-gradient(170deg,var(--gold-1) 0%,var(--gold-2) 40%,var(--gold-3) 100%);
+      border:1px solid rgba(255,255,255,.18);box-shadow:0 18px 60px rgba(0,0,0,.45),0 0 0 3px var(--gold-glow) inset;
+      transform:scale(.96) translateY(6px);opacity:.98;transition:transform .28s ease,opacity .28s ease,box-shadow .28s ease;}
+    .saleSplash-title{font-size:clamp(28px,5vw,56px);font-weight:900;letter-spacing:.4px;color:#1a1a1a;text-shadow:0 1px 0 rgba(255,255,255,.35);}
+    .saleSplash-sub{font-size:clamp(14px,2.4vw,20px);font-weight:800;letter-spacing:.5px;color:#2a2a2a;opacity:.8;}
+    .saleSplash-amount{font-size:clamp(36px,7.2vw,88px);font-weight:1000;letter-spacing:.6px;line-height:1.02;color:#111;
+      text-shadow:0 1px 0 rgba(255,255,255,.45),0 10px 30px rgba(0,0,0,.30);}
+    .saleSplash-show .saleSplash-backdrop{opacity:1;}
+    .saleSplash-show .saleSplash-card{transform:scale(1) translateY(0);}
   `;
   const el = document.createElement("style");
   el.id = "sale-splash-css";
@@ -200,38 +158,27 @@ function injectCssOnce(){
   document.head.appendChild(el);
 }
 
-/* ---------- Full-screen sale splash + sound (queue, 60s, money-counter) ---------- */
+/* ---------- Full-screen sale splash + sound (queue) ---------- */
 (function initSaleSplash(){
   let queue = [];
   let showing = false;
-
-  // POINT THIS TO YOUR UPLOADED SOUND IN /public
   const SOUND_URL = "/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3";
 
-  // Preload & unlock audio (for autoplay policies)
   const baseAudio = new Audio(SOUND_URL);
-  baseAudio.preload = "auto";
-  baseAudio.volume  = 1.0;
-
-  function playSound(){
-    try{
-      const a = baseAudio.cloneNode(true);
-      a.currentTime = 0;
-      a.play().catch(()=>{}); // ignore if the browser blocks
-      a.addEventListener("ended", ()=> a.remove());
-    }catch{}
-  }
-  // Unlock on first user gesture so future plays auto-start
+  baseAudio.preload = "auto"; baseAudio.volume = 1.0;
   ["click","keydown","touchstart"].forEach(evt=>{
     window.addEventListener(evt, ()=>{
       baseAudio.play().then(()=>{ baseAudio.pause(); baseAudio.currentTime = 0; }).catch(()=>{});
     }, { once:true, passive:true });
   });
 
+  function playSound(){
+    try{ const a = baseAudio.cloneNode(true); a.currentTime = 0; a.play().catch(()=>{}); a.addEventListener("ended", ()=> a.remove()); }catch{}
+  }
+
   function showNext(){
     if (showing || queue.length === 0) return;
-    showing = true;
-    injectCssOnce();
+    showing = true; injectCssOnce();
 
     const { name, amount, ms = 60_000 } = queue.shift();
     const av12 = Math.round(Number(amount || 0) * 12).toLocaleString("en-US");
@@ -245,11 +192,9 @@ function injectCssOnce(){
           <div class="saleSplash-sub">SUBMITTED</div>
           <div class="saleSplash-amount">$${av12} AV</div>
         </div>
-      </div>
-    `;
+      </div>`;
     document.body.appendChild(host);
 
-    // animate + sound
     requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
     playSound();
 
@@ -261,14 +206,10 @@ function injectCssOnce(){
     host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
   }
 
-  // Public API
-  window.showSalePop = function({name, amount, ms}){
-    queue.push({ name, amount, ms });
-    showNext();
-  };
+  window.showSalePop = function({name, amount, ms}){ queue.push({ name, amount, ms }); showNext(); };
 })();
 
-/* ---------- Summary cards (exactly 3) ---------- */
+/* ---------- Summary cards ---------- */
 function massageSummaryLayout(){
   try {
     const callsVal = $("#sumCalls");
@@ -290,11 +231,7 @@ function updateSummary(){
   if ($("#sumCalls")) $("#sumCalls").textContent = fmtInt(STATE.team.calls);
   if ($("#sumSales")) $("#sumSales").textContent = fmtMoney(STATE.team.av);
   const dealsEl = $("#sumTalk");
-  if (dealsEl) {
-    const lbl = dealsEl.previousElementSibling;
-    if (lbl) lbl.textContent = "This Week — Deals Submitted";
-    dealsEl.textContent = fmtInt(STATE.team.deals || 0);
-  }
+  if (dealsEl) { const lbl = dealsEl.previousElementSibling; if (lbl) lbl.textContent = "This Week — Deals Submitted"; dealsEl.textContent = fmtInt(STATE.team.deals || 0); }
 }
 
 /* ---------- Load static assets & overrides ---------- */
@@ -303,7 +240,7 @@ async function loadStatic(){
     getJSON("/headshots/roster.json").catch(()=>[]),
     getJSON("/rules.json").catch(()=>[])
   ]);
-  setRuleText(rules);  // single big banner
+  setRuleText(rules);
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -313,11 +250,20 @@ async function loadStatic(){
     phones: Array.isArray(a.phones) ? a.phones : []
   }));
 
+  // Optional overrides (safe)
   try { STATE.overrides.calls = await getJSON("/calls_week_override.json"); } catch { STATE.overrides.calls = null; }
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
+
+  // Vendors JSON for pie replacement
+  try {
+    const v = await getJSON("/sales_by_vendor.json");
+    STATE.vendors.asOf = v?.as_of || "";
+    STATE.vendors.windowDays = Number(v?.window_days||45);
+    STATE.vendors.list = Array.isArray(v?.vendors) ? v.vendors : [];
+  } catch { STATE.vendors = { asOf:"", windowDays:45, list:[] }; }
 }
 
-/* ---------- Ringy: Calls / Talk / Leads / Sold (from calls fn) ---------- */
+/* ---------- Ringy: Calls / Talk / Leads / Sold ---------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
@@ -350,7 +296,7 @@ async function refreshCalls(){
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Manual overrides (optional)
+  // Optional per-agent replacement (no double count)
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
@@ -358,7 +304,6 @@ async function refreshCalls(){
       if (!a) continue;
       const k   = agentKey(a);
       const cur = byKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
-
       teamCalls -= cur.calls; teamTalk -= cur.talkMin; teamLeads -= cur.leads; teamSold -= cur.sold;
 
       const row = {
@@ -369,7 +314,6 @@ async function refreshCalls(){
         sold     : Number(o.sold||0)
       };
       byKey.set(k, row);
-
       teamCalls += row.calls; teamTalk += row.talkMin; teamLeads += row.leads; teamSold += row.sold;
     }
   }
@@ -381,19 +325,17 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Ringy: Weekly Sales → AV(12×) & Deals + Splash trigger ---------- */
+/* ---------- Ringy: Weekly Sales → AV(12×) & Deals + Splash ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
     const [WSTART, WEND] = weekRangeET();
     const perByName = new Map();     // nameKey -> { sales, amount, av12x }
-    let totalDeals = 0;
-    let totalAV    = 0;
+    let newest = null;
 
+    // 1) Build per-agent from RAW per-sale rows (preferred for splash)
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
-    let newest = null; // keep the newest sale object we see in-window
-
     if (raw.length){
       for (const s of raw){
         const when = s.dateSold ? toET(s.dateSold) : null;
@@ -401,9 +343,8 @@ async function refreshSales(){
 
         if (!newest || when > toET(newest?.dateSold||0)) newest = s;
 
-        const name   = String(s.agent||"").trim();
-        if (!name) continue;
-        const key    = name.toLowerCase();
+        const key    = String(s.agent||"").trim().toLowerCase();
+        if (!key) continue;
         const amount = Number(s.amount||0);
 
         const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
@@ -411,70 +352,63 @@ async function refreshSales(){
         cur.amount += amount;
         cur.av12x   = cur.amount * 12;
         perByName.set(key, cur);
-
-        totalDeals += 1;
-        totalAV    += amount * 12;
       }
     } else {
+      // Fallback: API perAgent summary
       const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of pa){
         const key    = String(a.name||"").trim().toLowerCase();
         const sales  = Number(a.sales||0);
         const amount = Number(a.amount||0);
         perByName.set(key, { sales, amount, av12x: amount*12 });
-        totalDeals += sales;
-        totalAV    += amount*12;
       }
     }
 
-    // Manual AV overrides (merge)
+    // 2) Apply per-agent AV overrides as REPLACEMENTS only (no team adders)
     if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
       const oa = STATE.overrides.av.perAgent || {};
       for (const [rawName, v] of Object.entries(oa)){
         const k = String(rawName||"").trim().toLowerCase();
         const sales = Number(v.sales || 0);
         const av12x = Number(v.av12x || 0);
-        perByName.set(k, { sales, amount: av12x/12, av12x });
-      }
-      if (STATE.overrides.av.team){
-        const tAddAV  = Number(STATE.overrides.av.team.totalAV12x || 0);
-        const tAddSls = Number(STATE.overrides.av.team.totalSales || 0);
-        totalAV   += tAddAV;
-        totalDeals+= tAddSls;
+        perByName.set(k, { sales, amount: av12x/12, av12x });  // replace that agent only
       }
     }
 
+    // 3) Map onto roster & recompute totals from the final map
     const out = new Map();
+    let totalDeals = 0;
+    let totalAV12x = 0;
+
     for (const a of STATE.roster){
-      const k  = agentKey(a);
       const nk = String(a.name||"").toLowerCase();
       const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
-      out.set(k, s);
+      out.set(agentKey(a), s);
+      totalDeals += Number(s.sales||0);
+      totalAV12x += Number(s.av12x||0);
     }
 
-    // Update totals
     const prevDeals = STATE.team.deals || 0;
     STATE.salesWeekByKey = out;
-    STATE.team.av    = Math.max(0, Math.round(totalAV));
+    STATE.team.av    = Math.max(0, Math.round(totalAV12x));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // 1) Primary anti-dup: splash the newest raw sale we saw
+    // Splash: primary anti-dup on newest sale
     if (newest){
       const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
         window.showSalePop({ name:newest.agent || "Team", amount:newest.amount || 0, ms:60_000 });
       }
-    }
-
-    // 2) Fallback if deals ticked up but no per-sale rows
-    if (!newest && STATE.team.deals > prevDeals && STATE.team.deals > STATE.lastDealsShown){
+    } else if (STATE.team.deals > prevDeals && STATE.team.deals > STATE.lastDealsShown){
+      // Fallback splash (choose agent with highest score)
       let best = { name:"Team", amount:0 };
       for (const a of STATE.roster){
         const k = agentKey(a);
         const s = STATE.salesWeekByKey.get(k) || { sales:0, amount:0 };
-        if (!best._score || (s.sales*10000 + s.amount) > best._score){
-          best = { name:a.name, amount:(s.amount||0), _score:(s.sales*10000 + s.amount) };
+        const score = (Number(s.sales||0)*10000 + Number(s.amount||0));
+        if (!best._score || score > best._score){
+          best = { name:a.name, amount:(s.amount||0), _score:score };
         }
       }
       window.showSalePop({ name:best.name, amount:best.amount || 0, ms:60_000 });
@@ -489,10 +423,10 @@ async function refreshSales(){
   }
 }
 
-/* ---------- YTD Manual board ---------- */
+/* ---------- YTD board ---------- */
 async function loadYTD(){
   try {
-    const list = await getJSON("/ytd_av.json");           // [{name,email,av}]
+    const list = await getJSON("/ytd_av.json");
     const totalObj = await getJSON("/ytd_total.json").catch(()=>({ytd_av_total:0}));
     const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
     const rows = Array.isArray(list) ? list : [];
@@ -522,6 +456,76 @@ function bestOfWeek(){
     return y.salesAmt - x.salesAmt;
   });
   return entries[0] || null;
+}
+
+/* ---------- Vendor donut (from sales_by_vendor.json) ---------- */
+function renderVendorDonut(){
+  const host = document.createElement("div");
+  host.style.cssText = "display:flex;flex-direction:column;align-items:center;gap:8px;padding:8px 0 16px";
+  const c = document.createElement("canvas");
+  c.width = 800; c.height = 380;
+  host.appendChild(c);
+
+  const foot = document.createElement("div");
+  foot.style.cssText = "color:#9fb0c8;font-size:12px";
+  const when = STATE.vendors.asOf ? `as of ${STATE.vendors.asOf}` : "";
+  foot.textContent = `Last ${STATE.vendors.windowDays || 45} days ${when}`;
+  host.appendChild(foot);
+
+  const ctx = c.getContext("2d");
+  ctx.clearRect(0,0,c.width,c.height);
+
+  const data = STATE.vendors.list || [];
+  const total = Math.max(1, data.reduce((s,v)=> s + Number(v.deals||0), 0));
+
+  // Donut sizing
+  const cx = 220, cy = 190, R = 140, r = 80;
+  let start = -Math.PI/2;
+
+  // Colors (pleasant modern palette)
+  const COLS = [
+    "#7DD3FC","#A78BFA","#FCA5A5","#FCD34D","#86EFAC","#F9A8D4",
+    "#93C5FD","#FBBF24","#34D399","#F472B6","#60A5FA","#F59E0B",
+    "#22D3EE","#C084FC","#FDBA74"
+  ];
+
+  // arcs
+  data.forEach((v,i)=>{
+    const frac = Number(v.deals||0) / total;
+    const end  = start + frac * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.fillStyle = COLS[i % COLS.length];
+    ctx.arc(cx,cy,R,start,end,false);
+    ctx.arc(cx,cy,r,end,start,true);
+    ctx.closePath();
+    ctx.fill();
+    start = end;
+  });
+
+  // hole
+  ctx.beginPath();
+  ctx.fillStyle = "#0f172a"; // background hole color (dark blue-ish)
+  ctx.arc(cx,cy,r,0,Math.PI*2);
+  ctx.fill();
+
+  // legend
+  const x0 = 430, y0 = 90, lh = 24;
+  data
+    .map(v => ({ name: String(v.name||""), deals: Number(v.deals||0) }))
+    .sort((a,b)=> b.deals - a.deals)
+    .forEach((v,i)=>{
+      const pct = (v.deals/total)*100;
+      ctx.fillStyle = COLS[i % COLS.length];
+      ctx.fillRect(x0, y0 + i*lh - 12, 12, 12);
+      ctx.fillStyle = "#cfd7e3";
+      ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+      ctx.fillText(`${v.name}`, x0 + 20, y0 + i*lh - 2);
+      ctx.fillStyle = "#9fb0c8";
+      ctx.fillText(`${v.deals} • ${pct.toFixed(1)}%`, x0 + 20, y0 + i*lh + 12);
+    });
+
+  return host.outerHTML;
 }
 
 /* ---------- Renderers ---------- */
@@ -587,10 +591,8 @@ function renderAOTW(){
 function renderVendors(){
   setLabel("Lead Vendors — % of Sales (Last 45 days)");
   setHead([]);
-  const img = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
-    <img src="/boards/Sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:100%;height:auto"/>
-  </div>`;
-  setRows([[img]]);
+  const html = renderVendorDonut();
+  setRows([[html]]);
 }
 
 function renderYTD(){
