@@ -1,17 +1,19 @@
 {
   "perAgent": {
-    "robert@rkinsuranceadvisors.com": { "av12x": 15172, "sales": 4 },
-    "fabricio.a.navarrete@gmail.com": { "av12x": 0, "sales": 1 },
-    "landisagency@gmail.com": { "av12x": 3734, "sales": 0 },
-    "ajansenior.healthadvisor@gmail.com": { "av12x": 0, "sales": 1 },
-    "phil@americanpathinsurance.com": { "av12x": 16377, "sales": 2 },
-    "anna.ushealthadvisors@gmail.com": { "av12x": 8313, "sales": 3 },
-    "eli.thermilushealthadvisor@gmail.com": { "av12x": 7369, "sales": 3 },
-    "maries.healthadvisor@gmail.com": { "av12x": 4394, "sales": 1 },
-    "fraitzlineg.healthadvisor@gmail.com": { "av12x": 0, "sales": 0 },
-    "nathanjohnson.healthadvisor@gmail.com": { "av12x": 653, "sales": 1 },
-    "sebastianbeltran.healthadvisor@gmail.com": { "av12x": 0, "sales": 2 },
-    "elizabethsnyde.healthadvisor@gmail.com": { "av12x": 0, "sales": 0 }
+    "Robert Adams":        { "av12x": 15172, "sales": 4 },
+    "A C":                 { "av12x": 0,     "sales": 0 },
+    "F N":                 { "av12x": 0,     "sales": 1 },
+    "Michelle Landis":     { "av12x": 3734,  "sales": 0 },
+    "A S":                 { "av12x": 0,     "sales": 1 },
+    "Philip Baxter":       { "av12x": 16377, "sales": 2 },
+    "Joseph Lipari":       { "av12x": 0,     "sales": 0 },
+    "Anna Gleason":        { "av12x": 8313,  "sales": 3 },
+    "Eli Thermilus":       { "av12x": 7369,  "sales": 3 },
+    "Marie Saint Cyr":     { "av12x": 4394,  "sales": 1 },
+    "Fraitzline Gustave":  { "av12x": 0,     "sales": 0 },
+    "Nathan Johnson":      { "av12x": 653,   "sales": 1 },
+    "Sebastian Beltran":   { "av12x": 0,     "sales": 2 },
+    "Elizabeth Snyder":    { "av12x": 0,     "sales": 0 }
   },
-  "team": { "totalAV12x": 57328, "totalSales": 18 }
+  "team": { "totalAV12x": 1316, "totalSales": 0 }
 }
