@@ -1,0 +1,20 @@
+{
+  "as_of": "2025-10-15",
+  "window_days": 45,
+  "vendors": [
+    { "name": "Red Media", "deals": 139 },
+    { "name": "Referral", "deals": 13 },
+    { "name": "CG Exclusive", "deals": 10 },
+    { "name": "ABC", "deals": 8 },
+    { "name": "Lamy Dynasty Specials", "deals": 6 },
+    { "name": "VS Default", "deals": 5 },
+    { "name": "Exclusive JUMBO", "deals": 4 },
+    { "name": "$7.50", "deals": 4 },
+    { "name": "Exclusive 30s", "deals": 3 },
+    { "name": "RKA Website", "deals": 3 },
+    { "name": "JUMBO Splits", "deals": 1 },
+    { "name": "Blast/Bulk", "deals": 1 },
+    { "name": "Redrip/Give up Purchased", "deals": 1 },
+    { "name": "HotLine Bling", "deals": 1 }
+  ]
+}
