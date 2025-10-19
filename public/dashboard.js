@@ -24,7 +24,8 @@ const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) +
 const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
-// Normalize agent names for reliable matching across sources
+
+/* ---------- Name normalize + alias (ONE copy) ---------- */
 function normName(s){
   return String(s||"")
     .toLowerCase()
@@ -33,37 +34,16 @@ function normName(s){
     .replace(/\s+/g," ")
     .trim();
 }
-
-// Optional alias bridge (LEFT → RIGHT)
 const NAME_ALIASES = new Map([
   ["a s", "ajani senior"],
   ["ajani s", "ajani senior"]
 ]);
-
 function resolveAlias(n){
   const nn = normName(n);
   return NAME_ALIASES.get(nn) || nn;
 }
-// Normalize agent names for reliable matching across sources
-function normName(s){
-  return String(s||"")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\p{Letter}\p{Number}\s]/gu,"")
-    .replace(/\s+/g," ")
-    .trim();
-}
 
-// Optional alias bridge (LEFT → RIGHT)
-const NAME_ALIASES = new Map([
-  ["a s", "ajani senior"],
-  ["ajani s", "ajani senior"]
-]);
-
-function resolveAlias(n){
-  const nn = normName(n);
-  return NAME_ALIASES.get(nn) || nn;
-}
+/* ---------- Fetch helpers ---------- */
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){
   const r = await fetch(bust(u), { cache:"no-store" });
@@ -95,7 +75,19 @@ const STATE = {
   salesWeekByKey: new Map(),                    // key -> {sales,amount,av12x}
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
-  vendors: { as_of:"", window_days:45, rows:[] } // [{name,deals}]
+  vendors: { as_of:"", window_days:45, rows:[] }, // [{name,deals}]
+  // splash de-dup + tick memory
+  seenSaleHashes: new Set(),
+  lastDealsShown: 0,
+  // ONE-TIME weekly override (remove when no longer needed)
+  overrides: {
+    av: {
+      perAgent: {
+        "Philip Baxter": { av12x: 5637, sales: 2, mode: "hard" } // hard replace just for this week
+      }
+      // team: { totalAV12x: 0, totalSales: 0 } // (optional)
+    }
+  }
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
@@ -120,14 +112,14 @@ function setRuleTextOne(rulesObj){
       #ruleBanner{
         display:flex; align-items:center; justify-content:center; text-align:center;
         padding:18px 22px; margin:10px auto 12px; max-width:1200px; border-radius:18px;
-        background: #0e1116; border: 1px solid rgba(255,255,255,.06);
-        box-shadow: 0 10px 30px rgba(0,0,0,.35);
+        background:#0e1116; border:1px solid rgba(255,255,255,.06);
+        box-shadow:0 10px 30px rgba(0,0,0,.35);
       }
       #ruleBanner .ruleText{
-        font-weight: 900;
-        color: #cfd2d6;                   /* gray text */
+        font-weight:900;
+        color:#cfd2d6;                  /* gray text */
         letter-spacing:.4px;
-        font-size: clamp(22px, 3.4vw, 44px);
+        font-size:clamp(22px,3.4vw,44px);
       }
       .ruleBanner-host{ position:relative; z-index:2; }
     `;
@@ -267,7 +259,7 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Weekly Sales → AV(12×) & Deals ---------- */
+/* ---------- Weekly Sales → AV(12×) & Deals + Splash ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
@@ -285,7 +277,6 @@ async function refreshSales(){
         const when = s.dateSold ? toET(s.dateSold) : null;
         if (!when || when < WSTART || when >= WEND) continue;
 
-        // pick the newest sale we saw this refresh
         if (!newest || when > toET(newest?.dateSold||0)) newest = s;
 
         const nameRaw = s.agent || s.name || "";
@@ -314,9 +305,7 @@ async function refreshSales(){
       }
     }
 
-    /* ---- ONE-TIME WEEKLY OVERRIDE (merge) ----
-       - "mode":"hard"   -> replace for that agent
-       - default/absent  -> add/overwrite as-is (soft)               */
+    /* ---- ONE-TIME WEEKLY OVERRIDE (merge/replace) ---- */
     if (STATE.overrides?.av && typeof STATE.overrides.av === "object"){
       const oa = STATE.overrides.av.perAgent || {};
       for (const [rawName, v] of Object.entries(oa)){
@@ -326,10 +315,8 @@ async function refreshSales(){
         const isHard   = String(v.mode||"").toLowerCase() === "hard";
 
         if (isHard){
-          // replace for this agent
           perByName.set(k, { sales, amount: av12x/12, av12x });
         } else {
-          // soft merge (keep the larger of api vs override)
           const cur = perByName.get(k) || { sales:0, amount:0, av12x:0 };
           const mergedSales = Math.max(cur.sales, sales);
           const mergedAV12x = Math.max(cur.av12x, av12x);
@@ -356,22 +343,21 @@ async function refreshSales(){
     STATE.team.av        = Math.max(0, Math.round(totalAV));
     STATE.team.deals     = Math.max(0, Math.round(totalDeals));
 
-    // Prefer a real newest sale; else fallback if totalDeals ticked up
+    // Splash logic (requires seenSaleHashes)
     if (newest){
       const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        window.showSalePop({ name: newest.agent || "Team", amount: newest.amount || 0, ms: 60_000 });
+        window.showSalePop?.({ name: newest.agent || "Team", amount: newest.amount || 0, ms: 60_000 });
       }
     } else if (STATE.team.deals > prevDeals) {
-      // pick the strongest contributor this tick
       let best = { name:"Team", score:-1, amount:0 };
       for (const a of STATE.roster){
         const s = STATE.salesWeekByKey.get(agentKey(a)) || { sales:0, amount:0 };
         const score = s.sales*10000 + s.amount;
         if (score > best.score) best = { name:a.name, amount:s.amount||0, score };
       }
-      window.showSalePop({ name: best.name, amount: best.amount||0, ms: 60_000 });
+      window.showSalePop?.({ name: best.name, amount: best.amount||0, ms: 60_000 });
     }
 
   }catch(e){
@@ -380,7 +366,8 @@ async function refreshSales(){
     STATE.team.av = 0; STATE.team.deals = 0;
   }
 }
-/* ---------- YTD board (optional) ---------- */
+
+/* ---------- YTD board ---------- */
 async function loadYTD(){
   try {
     const list = await getJSON("/ytd_av.json");           // [{name,email,av}]
@@ -491,7 +478,7 @@ function renderVendors(){
   const normalized = rows.map(r => ({ name:r.name, val:Number(r.deals||0) }))
                          .filter(r=>r.val>0)
                          .sort((a,b)=> b.val - a.val);
-  const size = 420;           // scaled down
+  const size = 420;  // scaled down
   const r    = 180;
   let angle  = 0;
 
