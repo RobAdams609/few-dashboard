@@ -24,7 +24,46 @@ const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) +
 const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
+// Normalize agent names for reliable matching across sources
+function normName(s){
+  return String(s||"")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{Letter}\p{Number}\s]/gu,"")
+    .replace(/\s+/g," ")
+    .trim();
+}
 
+// Optional alias bridge (LEFT → RIGHT)
+const NAME_ALIASES = new Map([
+  ["a s", "ajani senior"],
+  ["ajani s", "ajani senior"]
+]);
+
+function resolveAlias(n){
+  const nn = normName(n);
+  return NAME_ALIASES.get(nn) || nn;
+}
+// Normalize agent names for reliable matching across sources
+function normName(s){
+  return String(s||"")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^\p{Letter}\p{Number}\s]/gu,"")
+    .replace(/\s+/g," ")
+    .trim();
+}
+
+// Optional alias bridge (LEFT → RIGHT)
+const NAME_ALIASES = new Map([
+  ["a s", "ajani senior"],
+  ["ajani s", "ajani senior"]
+]);
+
+function resolveAlias(n){
+  const nn = normName(n);
+  return NAME_ALIASES.get(nn) || nn;
+}
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){
   const r = await fetch(bust(u), { cache:"no-store" });
@@ -232,22 +271,26 @@ async function refreshCalls(){
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
-    const [WSTART, WEND] = weekRangeET();
-    const perByName = new Map();     // nameKey -> { sales, amount, av12x }
-    let totalDeals = 0;
-    let totalAV12  = 0;
 
-    // Prefer raw sales array (accurate per deal). Fallback to perAgent summary if absent.
+    const [WSTART, WEND] = weekRangeET();
+    const perByName = new Map();   // nameKey -> { sales, amount, av12x }
+    let totalDeals = 0;
+    let totalAV    = 0;
+
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
+    let newest = null;
+
     if (raw.length){
       for (const s of raw){
         const when = s.dateSold ? toET(s.dateSold) : null;
         if (!when || when < WSTART || when >= WEND) continue;
 
-        const name   = String(s.agent||"").trim();
-        if (!name) continue;
-        const key    = name.toLowerCase();
-        const amount = Number(s.amount||0);
+        // pick the newest sale we saw this refresh
+        if (!newest || when > toET(newest?.dateSold||0)) newest = s;
+
+        const nameRaw = s.agent || s.name || "";
+        const key     = resolveAlias(nameRaw);
+        const amount  = Number(s.amount||0);
 
         const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
         cur.sales  += 1;
@@ -256,40 +299,87 @@ async function refreshSales(){
         perByName.set(key, cur);
 
         totalDeals += 1;
-        totalAV12  += amount * 12;
+        totalAV    += amount * 12;
       }
     } else {
+      // fallback: only perAgent totals provided by backend
       const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of pa){
-        const key    = String(a.name||"").trim().toLowerCase();
+        const key    = resolveAlias(a.name || "");
         const sales  = Number(a.sales||0);
-        const amount = Number(a.amount||0);
+        const amount = Number(a.amount||0);   // weekly $ (not 12x)
         perByName.set(key, { sales, amount, av12x: amount*12 });
         totalDeals += sales;
-        totalAV12  += amount*12;
+        totalAV    += amount*12;
       }
     }
 
-    // map onto roster keys
-    const out = new Map();
-    for (const a of STATE.roster){
-      const k  = agentKey(a);
-      const nk = String(a.name||"").toLowerCase();
-      const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
-      out.set(k, s);
+    /* ---- ONE-TIME WEEKLY OVERRIDE (merge) ----
+       - "mode":"hard"   -> replace for that agent
+       - default/absent  -> add/overwrite as-is (soft)               */
+    if (STATE.overrides?.av && typeof STATE.overrides.av === "object"){
+      const oa = STATE.overrides.av.perAgent || {};
+      for (const [rawName, v] of Object.entries(oa)){
+        const k        = resolveAlias(rawName);
+        const sales    = Number(v.sales || 0);
+        const av12x    = Number(v.av12x || 0);
+        const isHard   = String(v.mode||"").toLowerCase() === "hard";
+
+        if (isHard){
+          // replace for this agent
+          perByName.set(k, { sales, amount: av12x/12, av12x });
+        } else {
+          // soft merge (keep the larger of api vs override)
+          const cur = perByName.get(k) || { sales:0, amount:0, av12x:0 };
+          const mergedSales = Math.max(cur.sales, sales);
+          const mergedAV12x = Math.max(cur.av12x, av12x);
+          perByName.set(k, { sales: mergedSales, amount: mergedAV12x/12, av12x: mergedAV12x });
+        }
+      }
+      if (STATE.overrides.av.team){
+        totalAV    += Number(STATE.overrides.av.team.totalAV12x || 0);
+        totalDeals += Number(STATE.overrides.av.team.totalSales  || 0);
+      }
     }
 
+    // Build map keyed by roster identities so rows line up
+    const out = new Map();
+    for (const a of STATE.roster){
+      const nk = resolveAlias(a.name);
+      const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
+      out.set(agentKey(a), s);
+    }
+
+    // update totals + splash
+    const prevDeals = Number(STATE.team.deals || 0);
     STATE.salesWeekByKey = out;
-    STATE.team.av    = Math.max(0, Math.round(totalAV12));
-    STATE.team.deals = Math.max(0, Math.round(totalDeals));
+    STATE.team.av        = Math.max(0, Math.round(totalAV));
+    STATE.team.deals     = Math.max(0, Math.round(totalDeals));
+
+    // Prefer a real newest sale; else fallback if totalDeals ticked up
+    if (newest){
+      const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
+      if (!STATE.seenSaleHashes.has(h)){
+        STATE.seenSaleHashes.add(h);
+        window.showSalePop({ name: newest.agent || "Team", amount: newest.amount || 0, ms: 60_000 });
+      }
+    } else if (STATE.team.deals > prevDeals) {
+      // pick the strongest contributor this tick
+      let best = { name:"Team", score:-1, amount:0 };
+      for (const a of STATE.roster){
+        const s = STATE.salesWeekByKey.get(agentKey(a)) || { sales:0, amount:0 };
+        const score = s.sales*10000 + s.amount;
+        if (score > best.score) best = { name:a.name, amount:s.amount||0, score };
+      }
+      window.showSalePop({ name: best.name, amount: best.amount||0, ms: 60_000 });
+    }
+
   }catch(e){
     log("team_sold error", e?.message||e);
     STATE.salesWeekByKey = new Map();
-    STATE.team.av    = 0;
-    STATE.team.deals = 0;
+    STATE.team.av = 0; STATE.team.deals = 0;
   }
 }
-
 /* ---------- YTD board (optional) ---------- */
 async function loadYTD(){
   try {
