@@ -1,4 +1,4 @@
-/* ================= FEW Dashboard — FULL FILE (final) ================= */
+/* ================= FEW Dashboard — FULL FILE ================= */
 "use strict";
 
 /* ---------- Config ---------- */
@@ -25,7 +25,7 @@ const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("
 const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 
-/* ---------- Name normalize + alias (ONE copy) ---------- */
+/* ---------- Name normalizer + aliases ---------- */
 function normName(s){
   return String(s||"")
     .toLowerCase()
@@ -34,16 +34,19 @@ function normName(s){
     .replace(/\s+/g," ")
     .trim();
 }
+// LEFT → RIGHT alias (normalize both sides)
 const NAME_ALIASES = new Map([
-  ["a s", "ajani senior"],
-  ["ajani s", "ajani senior"]
+  ["a s","ajani senior"],
+  ["ajani s","ajani senior"],
+  ["f n","fabricio navarrete cervantes"],
+  ["fabricio navarrete","fabricio navarrete cervantes"],
 ]);
 function resolveAlias(n){
   const nn = normName(n);
   return NAME_ALIASES.get(nn) || nn;
 }
 
-/* ---------- Fetch helpers ---------- */
+/* ---------- utils ---------- */
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){
   const r = await fetch(bust(u), { cache:"no-store" });
@@ -72,22 +75,12 @@ function weekRangeET(){
 const STATE = {
   roster: [],                                   // [{name,email,photo,phones}]
   callsWeekByKey: new Map(),                    // key -> {calls,talkMin,loggedMin,leads,sold}
-  salesWeekByKey: new Map(),                    // key -> {sales,amount,av12x}
+  salesWeekByKey: new Map(),                    // key -> {sales,amount}
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
   vendors: { as_of:"", window_days:45, rows:[] }, // [{name,deals}]
-  // splash de-dup + tick memory
-  seenSaleHashes: new Set(),
-  lastDealsShown: 0,
-  // ONE-TIME weekly override (remove when no longer needed)
-  overrides: {
-    av: {
-      perAgent: {
-        "Philip Baxter": { av12x: 5637, sales: 2, mode: "hard" } // hard replace just for this week
-      }
-      // team: { totalAV12x: 0, totalSales: 0 } // (optional)
-    }
-  }
+  overrides: null,
+  seenSaleHashes: new Set()
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
@@ -112,14 +105,14 @@ function setRuleTextOne(rulesObj){
       #ruleBanner{
         display:flex; align-items:center; justify-content:center; text-align:center;
         padding:18px 22px; margin:10px auto 12px; max-width:1200px; border-radius:18px;
-        background:#0e1116; border:1px solid rgba(255,255,255,.06);
-        box-shadow:0 10px 30px rgba(0,0,0,.35);
+        background: #0e1116; border: 1px solid rgba(255,255,255,.06);
+        box-shadow: 0 10px 30px rgba(0,0,0,.35);
       }
       #ruleBanner .ruleText{
-        font-weight:900;
-        color:#cfd2d6;                  /* gray text */
+        font-weight: 900;
+        color: #cfd2d6;                   /* gray text */
         letter-spacing:.4px;
-        font-size:clamp(22px,3.4vw,44px);
+        font-size: clamp(22px, 3.4vw, 44px);
       }
       .ruleBanner-host{ position:relative; z-index:2; }
     `;
@@ -190,12 +183,13 @@ function updateSummary(){
   if (dealsEl) dealsEl.textContent = fmtInt(STATE.team.deals || 0);
 }
 
-/* ---------- Load static: roster, rules, vendors ---------- */
+/* ---------- Load static: roster, rules, vendors, *override* ---------- */
 async function loadStatic(){
-  const [rosterRaw, rules, vendorRaw] = await Promise.all([
+  const [rosterRaw, rules, vendorRaw, overridesRaw] = await Promise.all([
     getJSON("/headshots/roster.json").catch(()=>[]),
     getJSON("/rules.json").catch(()=>[]),
-    getJSON("/sales_by_vendor.json").catch(()=>({ as_of:"", window_days:45, vendors:[] }))
+    getJSON("/sales_by_vendor.json").catch(()=>({ as_of:"", window_days:45, vendors:[] })),
+    getJSON("/av_week_override.json").catch(()=>null) // { perAgent:{ "philip baxter":{av12x:5637,sales:2,mode?:"hard"}, ... }, team? }
   ]);
 
   // banner
@@ -217,6 +211,9 @@ async function loadStatic(){
     window_days: Number(vendorRaw?.window_days || 45),
     rows: rows.map(v => ({ name:String(v.name||""), deals:Number(v.deals||0) }))
   };
+
+  // overrides
+  STATE.overrides = overridesRaw;
 }
 
 /* ---------- Calls / talk / logged / leads / sold ---------- */
@@ -229,11 +226,11 @@ async function refreshCalls(){
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
 
     const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
-    const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
+    const nameToKey  = new Map(STATE.roster.map(a => [normName(a.name), agentKey(a)]));
 
     for (const r of per){
       const e = String(r.email||"").trim().toLowerCase();
-      const n = String(r.name ||"").trim().toLowerCase();
+      const n = resolveAlias(r.name || "");
       const k = emailToKey.get(e) || nameToKey.get(n);
       if (!k) continue;
 
@@ -259,13 +256,13 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Weekly Sales → AV(12×) & Deals + Splash ---------- */
+/* ---------- Weekly Sales → Submitted AV (NO ×12) & Deals ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
     const [WSTART, WEND] = weekRangeET();
-    const perByName = new Map();   // nameKey -> { sales, amount, av12x }
+    const perByName = new Map();   // nameKey -> { sales, amount }
     let totalDeals = 0;
     let totalAV    = 0;
 
@@ -281,16 +278,15 @@ async function refreshSales(){
 
         const nameRaw = s.agent || s.name || "";
         const key     = resolveAlias(nameRaw);
-        const amount  = Number(s.amount||0);
+        const amount  = Number(s.amount||0);       // amount is already “Submitted AV”, NOT ×12
 
-        const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
+        const cur = perByName.get(key) || { sales:0, amount:0 };
         cur.sales  += 1;
         cur.amount += amount;
-        cur.av12x   = cur.amount * 12;
         perByName.set(key, cur);
 
         totalDeals += 1;
-        totalAV    += amount * 12;
+        totalAV    += amount;
       }
     } else {
       // fallback: only perAgent totals provided by backend
@@ -298,42 +294,51 @@ async function refreshSales(){
       for (const a of pa){
         const key    = resolveAlias(a.name || "");
         const sales  = Number(a.sales||0);
-        const amount = Number(a.amount||0);   // weekly $ (not 12x)
-        perByName.set(key, { sales, amount, av12x: amount*12 });
+        const amount = Number(a.amount||0);
+        perByName.set(key, { sales, amount });
         totalDeals += sales;
-        totalAV    += amount*12;
+        totalAV    += amount;
       }
     }
 
-    /* ---- ONE-TIME WEEKLY OVERRIDE (merge/replace) ---- */
-    if (STATE.overrides?.av && typeof STATE.overrides.av === "object"){
-      const oa = STATE.overrides.av.perAgent || {};
-      for (const [rawName, v] of Object.entries(oa)){
+    /* ---- ONE-TIME WEEKLY OVERRIDE (merge) ----
+       File: /av_week_override.json
+       Shape:
+       {
+         "perAgent": {
+           "philip baxter": { "av12x": 5637, "sales": 2, "mode": "hard" }
+         },
+         "team": { "totalAV12x": 0, "totalSales": 0 }
+       }
+       NOTE: Field name “av12x” kept for backward compat; we treat it as submitted AV (not ×12).
+    */
+    if (STATE.overrides?.perAgent && typeof STATE.overrides.perAgent === "object"){
+      for (const [rawName, v] of Object.entries(STATE.overrides.perAgent)){
         const k        = resolveAlias(rawName);
         const sales    = Number(v.sales || 0);
-        const av12x    = Number(v.av12x || 0);
+        const amount   = Number(v.av12x || v.amount || 0); // accept either
         const isHard   = String(v.mode||"").toLowerCase() === "hard";
 
         if (isHard){
-          perByName.set(k, { sales, amount: av12x/12, av12x });
+          // replace for this agent this week
+          perByName.set(k, { sales, amount });
         } else {
-          const cur = perByName.get(k) || { sales:0, amount:0, av12x:0 };
-          const mergedSales = Math.max(cur.sales, sales);
-          const mergedAV12x = Math.max(cur.av12x, av12x);
-          perByName.set(k, { sales: mergedSales, amount: mergedAV12x/12, av12x: mergedAV12x });
+          // soft merge (keep the larger of api vs override)
+          const cur = perByName.get(k) || { sales:0, amount:0 };
+          perByName.set(k, { sales: Math.max(cur.sales, sales), amount: Math.max(cur.amount, amount) });
         }
       }
-      if (STATE.overrides.av.team){
-        totalAV    += Number(STATE.overrides.av.team.totalAV12x || 0);
-        totalDeals += Number(STATE.overrides.av.team.totalSales  || 0);
-      }
+    }
+    if (STATE.overrides?.team){
+      totalAV    += Number(STATE.overrides.team.totalAV12x || 0);
+      totalDeals += Number(STATE.overrides.team.totalSales  || 0);
     }
 
     // Build map keyed by roster identities so rows line up
     const out = new Map();
     for (const a of STATE.roster){
       const nk = resolveAlias(a.name);
-      const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
+      const s  = perByName.get(nk) || { sales:0, amount:0 };
       out.set(agentKey(a), s);
     }
 
@@ -343,21 +348,22 @@ async function refreshSales(){
     STATE.team.av        = Math.max(0, Math.round(totalAV));
     STATE.team.deals     = Math.max(0, Math.round(totalDeals));
 
-    // Splash logic (requires seenSaleHashes)
+    // Prefer a real newest sale; else fallback if totalDeals ticked up
     if (newest){
       const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        window.showSalePop?.({ name: newest.agent || "Team", amount: newest.amount || 0, ms: 60_000 });
+        if (window.showSalePop) window.showSalePop({ name: newest.agent || "Team", amount: newest.amount || 0, ms: 60_000 });
       }
     } else if (STATE.team.deals > prevDeals) {
+      // pick the strongest contributor this tick
       let best = { name:"Team", score:-1, amount:0 };
       for (const a of STATE.roster){
         const s = STATE.salesWeekByKey.get(agentKey(a)) || { sales:0, amount:0 };
         const score = s.sales*10000 + s.amount;
         if (score > best.score) best = { name:a.name, amount:s.amount||0, score };
       }
-      window.showSalePop?.({ name: best.name, amount: best.amount||0, ms: 60_000 });
+      if (window.showSalePop) window.showSalePop({ name: best.name, amount: best.amount||0, ms: 60_000 });
     }
 
   }catch(e){
@@ -367,15 +373,15 @@ async function refreshSales(){
   }
 }
 
-/* ---------- YTD board ---------- */
+/* ---------- YTD board (optional; 12× stays for YTD) ---------- */
 async function loadYTD(){
   try {
     const list = await getJSON("/ytd_av.json");           // [{name,email,av}]
     const totalObj = await getJSON("/ytd_total.json").catch(()=>({ytd_av_total:0}));
-    const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
+    const rosterByName = new Map(STATE.roster.map(a => [normName(a.name), a]));
     const rows = Array.isArray(list) ? list : [];
     const withAvatars = rows.map(r=>{
-      const a = rosterByName.get(String(r.name||"").toLowerCase());
+      const a = rosterByName.get(normName(r.name));
       return { name:r.name, email:r.email, av:Number(r.av||0), photo:a?.photo||"" };
     });
     withAvatars.sort((x,y)=> (y.av)-(x.av));
@@ -391,13 +397,13 @@ async function loadYTD(){
 function bestOfWeek(){
   const entries = STATE.roster.map(a=>{
     const k = agentKey(a);
-    const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
-    return { a, av12x:Number(s.av12x||0), sales:Number(s.sales||0), salesAmt:Number(s.amount||0) };
+    const s = STATE.salesWeekByKey.get(k) || { amount:0, sales:0 };
+    return { a, amount:Number(s.amount||0), sales:Number(s.sales||0) };
   });
   entries.sort((x,y)=>{
-    if (y.av12x !== x.av12x) return y.av12x - x.av12x;
-    if (y.sales !== x.sales) return y.sales - x.sales;
-    return y.salesAmt - x.salesAmt;
+    if (y.amount !== x.amount) return y.amount - x.amount;
+    if (y.sales  !== x.sales ) return y.sales  - x.sales;
+    return 0;
   });
   return entries[0] || null;
 }
@@ -409,7 +415,7 @@ function renderRoster(){
   const rows = (STATE.roster||[]).map(a=>{
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
-    const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
+    const s = STATE.salesWeekByKey.get(k) || { amount:0, sales:0 };
 
     const soldDeals = Number(s.sales || 0);
     const conv = c.leads > 0 ? (soldDeals / c.leads) : null;
@@ -422,7 +428,7 @@ function renderRoster(){
       fmtInt(c.leads),
       fmtInt(soldDeals),
       fmtPct(conv),
-      fmtMoney(Number(s.av12x||0))
+      fmtMoney(Number(s.amount||0))
     ];
   });
   setRows(rows);
@@ -434,8 +440,8 @@ function renderWeekAV(){
   const ranked = (STATE.roster||[])
     .map(a=>{
       const k = agentKey(a);
-      const s = STATE.salesWeekByKey.get(k) || { av12x:0 };
-      return { a, val: Number(s.av12x||0) };
+      const s = STATE.salesWeekByKey.get(k) || { amount:0 };
+      return { a, val: Number(s.amount||0) };
     })
     .sort((x,y)=> (y.val)-(x.val));
   setRows(ranked.map(({a,val})=> [avatarCell(a), fmtMoney(val)]));
@@ -445,7 +451,7 @@ function renderAOTW(){
   const top = bestOfWeek();
   setLabel("Agent of the Week");
   if (!top){ setHead([]); setRows([]); return; }
-  const { a, av12x, sales } = top;
+  const { a, amount, sales } = top;
   const html = `
     <div style="display:flex;gap:18px;align-items:center;">
       ${avatarBlock(a)}
@@ -454,7 +460,7 @@ function renderAOTW(){
         <div style="color:#9fb0c8;margin-bottom:6px;">LEADING FOR AGENT OF THE WEEK</div>
         <div style="display:flex;gap:18px;color:#9fb0c8">
           <div><b style="color:#cfd7e3">${fmtInt(sales)}</b> deals</div>
-          <div><b style="color:#ffd36a">${fmtMoney(av12x)}</b> submitted AV</div>
+          <div><b style="color:#ffd36a">${fmtMoney(amount)}</b> submitted AV</div>
         </div>
       </div>
     </div>
@@ -478,7 +484,7 @@ function renderVendors(){
   const normalized = rows.map(r => ({ name:r.name, val:Number(r.deals||0) }))
                          .filter(r=>r.val>0)
                          .sort((a,b)=> b.val - a.val);
-  const size = 420;  // scaled down
+  const size = 420;           // scaled down
   const r    = 180;
   let angle  = 0;
 
