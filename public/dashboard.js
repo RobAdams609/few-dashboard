@@ -1,18 +1,23 @@
-/* ================= FEW Dashboard — FULL REWRITE ================= */
+/* ================= FEW Dashboard — FULL REWRITE (permanent) ================= */
 "use strict";
 
 /* ---------- Config ---------- */
-const DEBUG      = new URLSearchParams(location.search).has("debug");
-const log        = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 const ET_TZ      = "America/New_York";
-const DATA_MS    = 30_000;  // refresh cadence
-const ROTATE_MS  = 30_000;  // view rotation cadence
+const DATA_MS    = 30_000;               // refresh cadence
+const ROTATE_MS  = 30_000;               // view rotation cadence
 const VIEWS      = ["roster","av","aotw","vendors","ytd"];
 let   viewIdx    = 0;
 
-const QS = new URLSearchParams(location.search);
-const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
-const FORCE_VENDOR_FALLBACK = (QS.get("vendor") || "").toLowerCase() === "fallback";
+const QS         = new URLSearchParams(location.search);
+const DEBUG      = QS.has("debug");
+const VIEW       = (QS.get("view") || "").toLowerCase();
+
+/* ---------- Logging ---------- */
+const log = (...a)=>{ if (DEBUG) console.log("[FEW]", ...a); };
+
+/* ---------- URL helpers (no hard-coded domain) ---------- */
+const abs = (p)=> new URL(p, location.origin).href;
+const api = (p)=> abs(p);
 
 /* ---------- DOM helpers ---------- */
 const $  = s => document.querySelector(s);
@@ -25,7 +30,10 @@ const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) +
 const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 const escapeHtml= s => String(s||"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
-const hmm       = mins => { const m=Math.max(0,Math.round(Number(mins||0))); const h=Math.floor(m/60), r=m%60; return `${h}:${String(r).padStart(2,"0")}`; };
+const hmm       = mins => {
+  const m=Math.max(0,Math.round(Number(mins||0)));
+  const h=Math.floor(m/60), r=m%60; return `${h}:${String(r).padStart(2,"0")}`;
+};
 
 /* ---------- Name normalization + aliases ---------- */
 function normName(s){
@@ -36,7 +44,6 @@ function normName(s){
     .replace(/\s+/g," ")
     .trim();
 }
-
 // (LEFT → RIGHT)
 const NAME_ALIASES = new Map([
   ["a s", "ajani senior"],
@@ -44,21 +51,40 @@ const NAME_ALIASES = new Map([
   ["f n", "fabricio navarrete cervantes"],
   ["fabricio navarrete", "fabricio navarrete cervantes"]
 ]);
-function resolveAlias(n){
-  const nn = normName(n);
-  return NAME_ALIASES.get(nn) || nn;
-}
+const resolveAlias = n => NAME_ALIASES.get(normName(n)) || normName(n);
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
 /* ---------- Weekly window = Fri 12:00am ET → next Fri 12:00am ET ---------- */
 function weekRangeET(){
-  const now = toET(new Date());
+  const now = toET(new Date());                 // ET
   const day = now.getDay();                     // Sun=0 … Sat=6
   const sinceFri = (day + 2) % 7;               // distance back to Friday
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
   const end   = new Date(start); end.setDate(end.getDate()+7);
   return [start, end];                           // [inclusive, exclusive)
 }
+
+/* ---------- Permanent vendor labels (canonical) ---------- */
+const VENDOR_LABELS = [
+  "$7.50",
+  "George Region Shared",
+  "Red Media",
+  "Blast/Bulk",
+  "Exclusive JUMBO",
+  "ABC",
+  "Shared Jumbo",
+  "VS Default",
+  "RKA Website",
+  "Redrip/Give up Purchased",
+  "Lamy Dynasty Specials",
+  "JUMBO Splits",
+  "Exclusive 30s",
+  "Positive Intent/Argos",
+  "HotLine Bling",
+  "Referral",
+  "CG Exclusive"
+];
+const VENDOR_SET = new Set(VENDOR_LABELS.map(v => v.toLowerCase()));
 
 /* ---------- State ---------- */
 const STATE = {
@@ -69,28 +95,29 @@ const STATE = {
   ytd: { list:[], total:0 },
   vendors: { as_of:"", window_days:45, rows:[] }, // [{name,deals}]
   overrides: { av: null },
-  seenSaleHashes: new Set()
+  seenSaleHashes: new Set(),
+  lastNewestSoldAt: 0
 };
 
 /* ---------- Small helpers ---------- */
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){
-  const r = await fetch(bust(u), { cache:"no-store" });
-  if (!r.ok) throw new Error(`${u} ${r.status}`);
+  const href = api(u);
+  if (DEBUG) console.log("GET", href);
+  const r = await fetch(bust(href), { cache:"no-store" });
+  if (!r.ok) throw new Error(`${href} ${r.status}`);
   const t = await r.text();
   try { return JSON.parse(t); }
-  catch(e){ throw new Error(`Bad JSON from ${u}: ${e.message}`); }
+  catch(e){ throw new Error(`Bad JSON from ${href}: ${e.message}`); }
 }
 
-/* ---------- One banner ---------- */
+/* ---------- One banner (rotates a single rule) ---------- */
 function setRuleTextOne(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
 
-  // remove legacy/duplicate banners
   ["ruleBanner","ticker","principle"].forEach(id=>{ const el = document.getElementById(id); if (el) el.remove(); });
-  const hostOld = document.querySelector(".ruleBanner-host");
-  if (hostOld) hostOld.remove();
+  const hostOld = document.querySelector(".ruleBanner-host"); if (hostOld) hostOld.remove();
 
   const idx  = (new Date().getUTCDate()) % list.length;
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
@@ -214,9 +241,9 @@ async function loadStatic(){
   STATE.overrides.av = aOverride || null;
 
   if (DEBUG){
-    console.log("[DBG] roster", STATE.roster);
-    console.log("[DBG] vendors", STATE.vendors);
-    console.log("[DBG] overrides", STATE.overrides);
+    console.table(STATE.roster);
+    console.table(STATE.vendors.rows);
+    console.log("override", STATE.overrides);
   }
 }
 
@@ -261,80 +288,94 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------- Vendor live recompute from sales events ---------- */
+/* ---------- Vendor recompute (LIVE from sales events, last N days) ---------- */
+function canonicalVendorLabel(raw){
+  const s = String(raw||"").trim();
+  // exact match first
+  if (VENDOR_SET.has(s.toLowerCase())) return s;
+  // light heuristics (add more normalizers as needed)
+  const n = s.toLowerCase();
+  if (n.includes("jumbo") && n.includes("exclusive")) return "Exclusive JUMBO";
+  if (n.includes("shared") && n.includes("jumbo"))    return "Shared Jumbo";
+  if (n.includes("blast") || n.includes("bulk"))      return "Blast/Bulk";
+  if (n.includes("exclusive 30"))                     return "Exclusive 30s";
+  if (n.includes("positive intent") || n.includes("argos")) return "Positive Intent/Argos";
+  if (n.includes("hotline"))                          return "HotLine Bling";
+  if (n.includes("red media"))                        return "Red Media";
+  if (n.includes("rka") && n.includes("website"))     return "RKA Website";
+  if (n.includes("vs default"))                       return "VS Default";
+  if (n.includes("referral"))                         return "Referral";
+  if (n.includes("abc"))                              return "ABC";
+  if (n.includes("redrip"))                           return "Redrip/Give up Purchased";
+  if (n.includes("lamy") && n.includes("special"))    return "Lamy Dynasty Specials";
+  if (n.includes("$7.50"))                            return "$7.50";
+  if (n.includes("george") && n.includes("shared"))   return "George Region Shared";
+  if (n.includes("cg") && n.includes("exclusive"))    return "CG Exclusive";
+  return s || "Other";
+}
 function recomputeVendorsFromSales(allSales, days=45){
   if (!Array.isArray(allSales) || !allSales.length) return null;
 
-  const now = toET(new Date());
+  const now   = toET(new Date());
   const since = new Date(now); since.setDate(since.getDate() - days);
 
-  const bucket = new Map(); // name -> deals
+  const bucket = new Map(); // label -> deals
   for (const s of allSales){
     const when = s.dateSold ? toET(s.dateSold) : null;
     if (!when || when < since || when > now) continue;
-    const name = String(s.vendor || s.soldProductName || "Other").trim() || "Other";
-    bucket.set(name, (bucket.get(name)||0) + 1);
+
+    const rawName = s.soldProductName || s.vendor || s.source || "Other";
+    const label   = canonicalVendorLabel(rawName);
+    bucket.set(label, (bucket.get(label)||0) + 1);
   }
-  const rows = Array.from(bucket, ([name,deals]) => ({ name, deals })).sort((a,b)=> b.deals - a.deals);
+
+  // ensure canonical labels show up when present in data; sort by deals
+  const rows = Array.from(bucket, ([name,deals]) => ({ name, deals }))
+                    .sort((a,b)=> b.deals - a.deals);
   return { as_of: now.toISOString().slice(0,10), window_days: days, rows };
 }
 
-/* ---------- Splash (Bold & Gold, center screen — NO TOASTER) ---------- */
-(function ensureSplashStyles(){
-  const id="few-splash-css";
-  if (document.getElementById(id)) return;
-  const st=document.createElement("style");
-  st.id=id;
-  st.textContent = `
-    #saleSplash {
-      position: fixed; inset: 0;
-      display: none; align-items: center; justify-content: center;
-      background: rgba(0,0,0,0.60); backdrop-filter: blur(2px);
-      z-index: 99999;
+/* ---------- Weekly Sales → AV(12×) & Deals (with overrides + centered splash) ---------- */
+function ensureSplashHost(){
+  if (document.getElementById("sale-splash-host")) return;
+  const css = document.createElement("style");
+  css.id = "sale-splash-css";
+  css.textContent = `
+    #sale-splash-host{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; z-index:99999; }
+    #sale-splash-backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.55); backdrop-filter: blur(2px); }
+    #sale-splash{
+      position:relative; max-width:80vw; padding:28px 36px; border-radius:20px;
+      background:#0e1116; border:1px solid rgba(255,255,255,.08);
+      box-shadow:0 30px 120px rgba(0,0,0,.55);
+      text-align:center;
     }
-    #saleSplash .panel {
-      background: #0b0f14; border: 2px solid rgba(255,211,106,.35);
-      border-radius: 20px; padding: 32px 40px; text-align: center;
-      box-shadow: 0 20px 80px rgba(0,0,0,.55);
-      max-width: 80vw;
-      animation: pop .18s ease-out;
-    }
-    #saleSplash .agent {
-      font-size: clamp(28px, 4.6vw, 64px);
-      font-weight: 900; letter-spacing: .5px;
-      color: #e9f1ff; margin-bottom: 10px;
-      text-transform: uppercase;
-    }
-    #saleSplash .av {
-      font-size: clamp(36px, 5.2vw, 86px);
-      font-weight: 1000;
-      color: #ffd36a; text-shadow: 0 0 24px rgba(255,211,106,.2);
-    }
-    #saleSplash .sub {
-      margin-top: 8px; color: #8ea4bf; font-size: clamp(14px, 2vw, 18px);
-    }
-    @keyframes pop { from { transform: scale(.96); opacity:.6 } to { transform: scale(1); opacity:1 } }
+    #sale-splash .name{ font-weight:900; font-size: clamp(28px, 6vw, 64px); color:#ffd36a; line-height:1.1; }
+    #sale-splash .sub { margin-top:10px; font-weight:800; font-size: clamp(18px, 3.5vw, 36px); color:#ffd36a; opacity:.95; }
   `;
-  document.head.appendChild(st);
+  document.head.appendChild(css);
 
   const host = document.createElement("div");
-  host.id = "saleSplash";
-  host.innerHTML = `<div class="panel"><div class="agent"></div><div class="av"></div><div class="sub">Submitted AV (12×)</div></div>`;
+  host.id = "sale-splash-host";
+  host.innerHTML = `
+    <div id="sale-splash-backdrop"></div>
+    <div id="sale-splash">
+      <div class="name" id="sale-splash-name"></div>
+      <div class="sub"  id="sale-splash-av"></div>
+    </div>
+  `;
   document.body.appendChild(host);
+}
 
-  window.__showSplash = (name, amount12x, ms=60_000)=>{
-    const el = document.getElementById("saleSplash");
-    if (!el) return;
-    el.querySelector(".agent").textContent = (name||"").toUpperCase();
-    el.querySelector(".av").textContent = fmtMoney(amount12x||0);
-    el.style.display = "flex";
-    clearTimeout(window.__splashTimer);
-    window.__splashTimer = setTimeout(()=>{ el.style.display="none"; }, ms);
-  };
-  window.testSplash = ()=> window.__showSplash("TEST AGENT", 12345, 3000);
-})();
+function showCenteredSaleSplash({name, amountAv12x, ms}){
+  ensureSplashHost();
+  const host = $("#sale-splash-host");
+  $("#sale-splash-name").textContent = String(name||"Team").toUpperCase();
+  $("#sale-splash-av").textContent   = `${fmtMoney(amountAv12x||0)} AV`;
+  host.style.display = "flex";
+  clearTimeout(window.__saleSplashTimer);
+  window.__saleSplashTimer = setTimeout(()=>{ host.style.display="none"; }, ms||60_000);
+}
 
-/* ---------- Weekly Sales → AV(12×) & Deals (with overrides + splash) ---------- */
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
@@ -344,7 +385,7 @@ async function refreshSales(){
     let totalDeals = 0;
     let totalAV    = 0;
 
-    // Prefer detailed events if available (best for vendor + splash)
+    // Prefer detailed events if available (best for splash + vendor)
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
     let newest = null;
 
@@ -356,7 +397,7 @@ async function refreshSales(){
         if (!newest || when > toET(newest?.dateSold||0)) newest = s;
 
         const key     = resolveAlias(s.agent || s.name || "");
-        const amount  = Number(s.amount||0);           // weekly $
+        const amount  = Number(s.amount||0);         // weekly $ (monthly premium)
         const av12x   = amount * 12;
 
         const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
@@ -376,7 +417,7 @@ async function refreshSales(){
       for (const a of pa){
         const key    = resolveAlias(a.name || "");
         const sales  = Number(a.sales||0);
-        const amount = Number(a.amount||0);   // weekly $
+        const amount = Number(a.amount||0);   // weekly $ (monthly premium)
         const av12x  = amount * 12;
         perByName.set(key, { sales, amount, av12x });
         totalDeals += sales;
@@ -384,7 +425,7 @@ async function refreshSales(){
       }
     }
 
-    /* ---- ONE-TIME WEEKLY OVERRIDE (hard) ---- */
+    /* ---- WEEKLY OVERRIDE (hard replace) ---- */
     if (STATE.overrides?.av && typeof STATE.overrides.av === "object"){
       const oa = STATE.overrides.av.perAgent || {};
       for (const [rawName, v] of Object.entries(oa)){
@@ -394,8 +435,8 @@ async function refreshSales(){
         perByName.set(k, { sales, amount: av12x/12, av12x });
       }
       if (STATE.overrides.av.team){
-        totalAV    = Math.max(0, Math.round(Number(STATE.overrides.av.team.totalAV12x||0)));
-        totalDeals = Math.max(0, Math.round(Number(STATE.overrides.av.team.totalSales ||0)));
+        totalAV    = Math.max(0, Math.round(Number(STATE.overrides.av.team.totalAV12x || 0)));
+        totalDeals = Math.max(0, Math.round(Number(STATE.overrides.av.team.totalSales  || 0)));
       }else{
         let tAV = 0, tD = 0;
         perByName.forEach(v => { tAV += v.av12x||0; tD += v.sales||0; });
@@ -417,30 +458,28 @@ async function refreshSales(){
     STATE.team.av        = Math.max(0, Math.round(totalAV));
     STATE.team.deals     = Math.max(0, Math.round(totalDeals));
 
-    // Vendor live update unless forced fallback
-    if (!FORCE_VENDOR_FALLBACK){
-      const liveVendors = recomputeVendorsFromSales(payload?.allSales, STATE.vendors.window_days || 45);
-      if (liveVendors) STATE.vendors = liveVendors;
-    }
+    // Vendor LIVE update (if the API had events)
+    const liveVendors = recomputeVendorsFromSales(payload?.allSales, STATE.vendors.window_days || 45);
+    if (liveVendors) STATE.vendors = liveVendors;
 
-    // Splash on new sale (center-screen, bold & gold)
+    // Centered splash on NEW sale (bold & gold, 60s)
     if (raw.length && newest){
-      const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
-      if (!STATE.seenSaleHashes.has(h)){
-        STATE.seenSaleHashes.add(h);
-        const agent   = (newest.agent || "Team").toString();
-        const amountX = Number(newest.amount||0) * 12;
-        window.__showSplash(agent, amountX, 60_000);
+      const newestTs = +toET(newest.dateSold||0);
+      if (newestTs > STATE.lastNewestSoldAt){
+        STATE.lastNewestSoldAt = newestTs;
+        const name = newest.agent || "Team";
+        const av12x = (Number(newest.amount||0))*12;
+        showCenteredSaleSplash({ name, amountAv12x: av12x, ms: 60_000 });
       }
     } else if (STATE.team.deals > prevDeals) {
-      // If only totals improved (no itemized events), pick highest contributor
+      // pick the strongest contributor this tick
       let best = { name:"Team", score:-1, amount:0 };
       for (const a of STATE.roster){
         const s = STATE.salesWeekByKey.get(agentKey(a)) || { sales:0, amount:0 };
         const score = (s.sales||0)*10000 + (s.amount||0);
         if (score > best.score) best = { name:a.name, amount:s.amount||0, score };
       }
-      window.__showSplash(best.name, Number(best.amount||0)*12, 60_000);
+      showCenteredSaleSplash({ name: best.name, amountAv12x: (best.amount||0)*12, ms: 60_000 });
     }
 
   }catch(e){
@@ -614,7 +653,7 @@ function renderYTD(){
 function renderCurrentView(){
   try{
     updateSummary();
-    const v = VIEW_OVERRIDE || VIEWS[viewIdx % VIEWS.length];
+    const v = VIEW || VIEWS[viewIdx % VIEWS.length];
     if (v === "roster")      renderRoster();
     else if (v === "av")     renderWeekAV();
     else if (v === "aotw")   renderAOTW();
@@ -644,11 +683,16 @@ async function boot(){
     }, DATA_MS);
 
     // rotation (unless manually pinned with ?view=…)
-    if (!VIEW_OVERRIDE){
+    if (!VIEW){
       setInterval(()=>{
         viewIdx = (viewIdx + 1) % VIEWS.length;
         renderCurrentView();
       }, ROTATE_MS);
+    }
+
+    if (DEBUG){
+      console.log("Origin:", location.origin);
+      console.log("Functions:", api("/.netlify/functions/team_sold"), api("/.netlify/functions/calls_by_agent"));
     }
   }catch(e){
     console.error("Dashboard boot error:", e);
