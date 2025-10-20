@@ -12,6 +12,7 @@ let   viewIdx    = 0;
 
 const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
+const FORCE_VENDOR_FALLBACK = (QS.get("vendor") || "").toLowerCase() === "fallback";
 
 /* ---------- DOM helpers ---------- */
 const $  = s => document.querySelector(s);
@@ -43,17 +44,15 @@ const NAME_ALIASES = new Map([
   ["f n", "fabricio navarrete cervantes"],
   ["fabricio navarrete", "fabricio navarrete cervantes"]
 ]);
-
 function resolveAlias(n){
   const nn = normName(n);
   return NAME_ALIASES.get(nn) || nn;
 }
-
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
 /* ---------- Weekly window = Fri 12:00am ET → next Fri 12:00am ET ---------- */
 function weekRangeET(){
-  const now = toET(new Date());                 // ET
+  const now = toET(new Date());
   const day = now.getDay();                     // Sun=0 … Sat=6
   const sinceFri = (day + 2) % 7;               // distance back to Friday
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
@@ -88,7 +87,7 @@ function setRuleTextOne(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
 
-  // remove any legacy/duplicate banners
+  // remove legacy/duplicate banners
   ["ruleBanner","ticker","principle"].forEach(id=>{ const el = document.getElementById(id); if (el) el.remove(); });
   const hostOld = document.querySelector(".ruleBanner-host");
   if (hostOld) hostOld.remove();
@@ -273,12 +272,67 @@ function recomputeVendorsFromSales(allSales, days=45){
   for (const s of allSales){
     const when = s.dateSold ? toET(s.dateSold) : null;
     if (!when || when < since || when > now) continue;
-    const name = String(s.soldProductName || s.vendor || "Other").trim() || "Other";
+    const name = String(s.vendor || s.soldProductName || "Other").trim() || "Other";
     bucket.set(name, (bucket.get(name)||0) + 1);
   }
   const rows = Array.from(bucket, ([name,deals]) => ({ name, deals })).sort((a,b)=> b.deals - a.deals);
   return { as_of: now.toISOString().slice(0,10), window_days: days, rows };
 }
+
+/* ---------- Splash (Bold & Gold, center screen — NO TOASTER) ---------- */
+(function ensureSplashStyles(){
+  const id="few-splash-css";
+  if (document.getElementById(id)) return;
+  const st=document.createElement("style");
+  st.id=id;
+  st.textContent = `
+    #saleSplash {
+      position: fixed; inset: 0;
+      display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.60); backdrop-filter: blur(2px);
+      z-index: 99999;
+    }
+    #saleSplash .panel {
+      background: #0b0f14; border: 2px solid rgba(255,211,106,.35);
+      border-radius: 20px; padding: 32px 40px; text-align: center;
+      box-shadow: 0 20px 80px rgba(0,0,0,.55);
+      max-width: 80vw;
+      animation: pop .18s ease-out;
+    }
+    #saleSplash .agent {
+      font-size: clamp(28px, 4.6vw, 64px);
+      font-weight: 900; letter-spacing: .5px;
+      color: #e9f1ff; margin-bottom: 10px;
+      text-transform: uppercase;
+    }
+    #saleSplash .av {
+      font-size: clamp(36px, 5.2vw, 86px);
+      font-weight: 1000;
+      color: #ffd36a; text-shadow: 0 0 24px rgba(255,211,106,.2);
+    }
+    #saleSplash .sub {
+      margin-top: 8px; color: #8ea4bf; font-size: clamp(14px, 2vw, 18px);
+    }
+    @keyframes pop { from { transform: scale(.96); opacity:.6 } to { transform: scale(1); opacity:1 } }
+  `;
+  document.head.appendChild(st);
+
+  const host = document.createElement("div");
+  host.id = "saleSplash";
+  host.innerHTML = `<div class="panel"><div class="agent"></div><div class="av"></div><div class="sub">Submitted AV (12×)</div></div>`;
+  document.body.appendChild(host);
+
+  window.__showSplash = (name, amount12x, ms=60_000)=>{
+    const el = document.getElementById("saleSplash");
+    if (!el) return;
+    el.querySelector(".agent").textContent = (name||"").toUpperCase();
+    el.querySelector(".av").textContent = fmtMoney(amount12x||0);
+    el.style.display = "flex";
+    clearTimeout(window.__splashTimer);
+    window.__splashTimer = setTimeout(()=>{ el.style.display="none"; }, ms);
+  };
+  window.testSplash = ()=> window.__showSplash("TEST AGENT", 12345, 3000);
+})();
 
 /* ---------- Weekly Sales → AV(12×) & Deals (with overrides + splash) ---------- */
 async function refreshSales(){
@@ -290,7 +344,7 @@ async function refreshSales(){
     let totalDeals = 0;
     let totalAV    = 0;
 
-    // Prefer detailed events if available (best for splash + vendor)
+    // Prefer detailed events if available (best for vendor + splash)
     const raw = Array.isArray(payload?.allSales) ? payload.allSales : [];
     let newest = null;
 
@@ -302,7 +356,7 @@ async function refreshSales(){
         if (!newest || when > toET(newest?.dateSold||0)) newest = s;
 
         const key     = resolveAlias(s.agent || s.name || "");
-        const amount  = Number(s.amount||0);         // weekly $
+        const amount  = Number(s.amount||0);           // weekly $
         const av12x   = amount * 12;
 
         const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
@@ -330,26 +384,19 @@ async function refreshSales(){
       }
     }
 
-    /* ---- ONE-TIME WEEKLY OVERRIDE (hard) ----
-       Your sample (Phil=5,637 & 2 sales etc.) goes into /av_week_override.json.
-       We replace those agents exactly for this week, and optionally adjust team totals. */
+    /* ---- ONE-TIME WEEKLY OVERRIDE (hard) ---- */
     if (STATE.overrides?.av && typeof STATE.overrides.av === "object"){
       const oa = STATE.overrides.av.perAgent || {};
       for (const [rawName, v] of Object.entries(oa)){
         const k      = resolveAlias(rawName);
         const sales  = Number(v.sales || 0);
         const av12x  = Number(v.av12x || 0);
-        // Replace for that agent
         perByName.set(k, { sales, amount: av12x/12, av12x });
       }
       if (STATE.overrides.av.team){
-        // If you specify team adjustments in the override file, apply them
-        const addAV   = Number(STATE.overrides.av.team.totalAV12x || 0);
-        const addDeal = Number(STATE.overrides.av.team.totalSales  || 0);
-        totalAV    = Math.max(0, Math.round(addAV));
-        totalDeals = Math.max(0, Math.round(addDeal));
+        totalAV    = Math.max(0, Math.round(Number(STATE.overrides.av.team.totalAV12x||0)));
+        totalDeals = Math.max(0, Math.round(Number(STATE.overrides.av.team.totalSales ||0)));
       }else{
-        // Otherwise, recompute team totals from the merged perByName map
         let tAV = 0, tD = 0;
         perByName.forEach(v => { tAV += v.av12x||0; tD += v.sales||0; });
         totalAV = tAV; totalDeals = tD;
@@ -364,49 +411,36 @@ async function refreshSales(){
       out.set(agentKey(a), s);
     }
 
-    // update totals + splash
+    // update totals
     const prevDeals = Number(STATE.team.deals || 0);
     STATE.salesWeekByKey = out;
     STATE.team.av        = Math.max(0, Math.round(totalAV));
     STATE.team.deals     = Math.max(0, Math.round(totalDeals));
 
-    // Vendor live update (if the API had events)
-    const liveVendors = recomputeVendorsFromSales(payload?.allSales, STATE.vendors.window_days || 45);
-    if (liveVendors) STATE.vendors = liveVendors;
-
-    // Splash on new sale
-    if (!window.showSalePop){
-      window.showSalePop = ({name,amount,ms})=>{
-        const id = "sale-pop";
-        let el = document.getElementById(id);
-        if (!el){
-          el = document.createElement("div");
-          el.id = id;
-          el.style.cssText = "position:fixed;right:20px;bottom:20px;background:#0e1116;border:1px solid #2a3340;color:#e6f0ff;padding:14px 16px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.35);font-weight:700;z-index:9999";
-          document.body.appendChild(el);
-        }
-        el.innerHTML = `🎉 Sale: <b>${escapeHtml(name||"Team")}</b> — <span style="color:#ffd36a">${fmtMoney((Number(amount||0))*12)}</span> AV`;
-        el.style.display = "block";
-        clearTimeout(window.__salePopTimer);
-        window.__salePopTimer = setTimeout(()=>{ el.style.display="none"; }, ms||60000);
-      };
+    // Vendor live update unless forced fallback
+    if (!FORCE_VENDOR_FALLBACK){
+      const liveVendors = recomputeVendorsFromSales(payload?.allSales, STATE.vendors.window_days || 45);
+      if (liveVendors) STATE.vendors = liveVendors;
     }
 
+    // Splash on new sale (center-screen, bold & gold)
     if (raw.length && newest){
       const h = `${newest.leadId||""}|${newest.soldProductId||""}|${newest.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        window.showSalePop({ name: newest.agent || "Team", amount: newest.amount || 0, ms: 60_000 });
+        const agent   = (newest.agent || "Team").toString();
+        const amountX = Number(newest.amount||0) * 12;
+        window.__showSplash(agent, amountX, 60_000);
       }
     } else if (STATE.team.deals > prevDeals) {
-      // pick the strongest contributor this tick
+      // If only totals improved (no itemized events), pick highest contributor
       let best = { name:"Team", score:-1, amount:0 };
       for (const a of STATE.roster){
         const s = STATE.salesWeekByKey.get(agentKey(a)) || { sales:0, amount:0 };
         const score = (s.sales||0)*10000 + (s.amount||0);
         if (score > best.score) best = { name:a.name, amount:s.amount||0, score };
       }
-      window.showSalePop({ name: best.name, amount: best.amount||0, ms: 60_000 });
+      window.__showSplash(best.name, Number(best.amount||0)*12, 60_000);
     }
 
   }catch(e){
