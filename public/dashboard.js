@@ -1,17 +1,15 @@
-// ============ FEW Dashboard — FULL REPLACEMENT (AOTW + Agent Detail) ============
-// Rotation: AV (week) → YTD AV → Vendor Chart → Roster → AOTW
-
+<script>
+// ============ FEW Dashboard — FULL REPLACEMENT (Live Calls + AOTW + Agent Detail) ============
 const DEBUG = new URLSearchParams(location.search).has("debug");
 const log   = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 
 // ---- Config ----
 const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;                       // refresh cadence
-const ROTATE_MS = 30_000;                       // rotate views
-const VIEWS     = ["av", "ytd", "vendor", "roster", "aotw"]; // rotation sequence
+const DATA_MS   = 30_000;                      // refresh cadence
+const ROTATE_MS = 30_000;                      // rotate views
+const VIEWS     = ["av", "ytd", "vendor", "roster", "aotw"];
 let   viewIdx   = 0;
 
-// Optional view override via URL
 const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
 const AGENT_QS_NAME = (QS.get("name") || "").trim();
@@ -22,15 +20,14 @@ const fmtInt   = n => Number(n||0).toLocaleString("en-US");
 const fmtMoney = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
 const fmtPct   = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
 const initials = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
-
+const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
 async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
-const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 
-function weekRangeET(){               // Fri → Thu sales week
+function weekRangeET(){
   const now = toET(new Date());
-  const day = now.getDay();           // 0..6
-  const sinceFri = (day + 2) % 7;     // Fri=0
+  const day = now.getDay();                 // 0..6
+  const sinceFri = (day + 2) % 7;           // Fri=0
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
   const end   = new Date(start); end.setDate(end.getDate()+7);
   return [start, end];
@@ -76,8 +73,6 @@ function ensureUI(){
       </table>
 
       <div id="salePop" class="sale-pop"></div>
-
-      <!-- AOTW / Agent profile mount -->
       <div id="hero" class="hero" style="display:none"></div>
     `;
     document.body.prepend(root);
@@ -120,69 +115,80 @@ async function loadStatic(){
 
   STATE.ytd = Array.isArray(ytd) ? ytd : (Array.isArray(ytd?.rows) ? ytd.rows : []);
 
-  // overrides (file names as in repo root /public)
   try { STATE.overrides.calls = await getJSON("/calls_week_override.json"); } catch { STATE.overrides.calls = null; }
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
-async function refreshCalls(){
-  // We still pull Ringy for KPI safety; roster prefers overrides.
-  let teamCalls=0, teamTalk=0;
-  try{
-    const payload = await getJSON("/api/calls_diag?days=7&limit=5000");
-    const rows = (payload.records || payload.data || []).filter(Boolean);
-    const [start,end] = weekRangeET();
-
-    for (const r of rows){
-      const when = toET((r.callStartDate || r.dateRecorded || "").replace(" ","T")+"Z");
-      if (when >= start && when < end){
-        teamCalls += 1;
-        const sec = r.duration ?? r.callDuration ?? r.talk_time_seconds ?? 0;
-        teamTalk  += Number(sec)/60;
-      }
-    }
-  }catch(e){ log("calls pull error", e?.message||e); }
-
-  // Build per-agent map from overrides (preferred)
+// ---------- LIVE calls/talk by agent ----------
+async function refreshCalls() {
+  let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
-  const hasOverride = !!STATE.overrides.calls && typeof STATE.overrides.calls === "object";
-  if (hasOverride){
-    let sumC=0, sumT=0, sumLeads=0, sumSold=0;
-    for (const a of STATE.roster){
-      const o = STATE.overrides.calls[a.email];
-      if (!o) continue;
+
+  try {
+    const payload = await getJSON("/.netlify/functions/calls_by_agent");
+    const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
+    const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
+    const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
+
+    for (const r of per) {
+      const e = String(r.email||"").trim().toLowerCase();
+      const n = String(r.name ||"").trim().toLowerCase();
+      const k = emailToKey.get(e) || nameToKey.get(n);
+      if (!k) continue;
+
+      const row = {
+        calls    : Number(r.calls||0),
+        talkMin  : Number(r.talkMin||0),
+        loggedMin: Number(r.loggedMin||0),
+        leads    : Number(r.leads||0),
+        sold     : Number(r.sold||0),
+      };
+      byKey.set(k, row);
+
+      teamCalls += row.calls;
+      teamTalk  += row.talkMin;
+      teamLeads += row.leads;
+      teamSold  += row.sold;
+    }
+  } catch (e) {
+    log("calls_by_agent error", e?.message || e);
+  }
+
+  if (STATE.overrides.calls && typeof STATE.overrides.calls === "object") {
+    const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
+    for (const [email, o] of Object.entries(STATE.overrides.calls)) {
+      const a = byEmail.get(String(email).toLowerCase());
+      if (!a) continue;
+      const k   = agentKey(a);
+      const cur = byKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
+
+      teamCalls -= cur.calls; teamTalk -= cur.talkMin; teamLeads -= cur.leads; teamSold -= cur.sold;
+
       const row = {
         calls    : Number(o.calls||0),
         talkMin  : Number(o.talkMin||0),
         loggedMin: Number(o.loggedMin||0),
         leads    : Number(o.leads||0),
-        sold     : Number(o.sold||0)
+        sold     : Number(o.sold||0),
       };
-      byKey.set(agentKey(a), row);
-      sumC     += row.calls;
-      sumT     += row.talkMin;
-      sumLeads += row.leads;
-      sumSold  += row.sold;
+      byKey.set(k, row);
+
+      teamCalls += row.calls; teamTalk += row.talkMin; teamLeads += row.leads; teamSold += row.sold;
     }
-    // Team tiles mirror override when present
-    STATE.team.calls = sumC;
-    STATE.team.talk  = sumT;
-    STATE.team.leads = sumLeads;
-    STATE.team.sold  = sumSold;
-  } else {
-    STATE.team.calls = teamCalls;
-    STATE.team.talk  = teamTalk;
   }
 
   STATE.callsWeekByKey = byKey;
+  STATE.team.calls = Math.max(0, Math.round(teamCalls));
+  STATE.team.talk  = Math.max(0, Math.round(teamTalk));
+  STATE.team.leads = Math.max(0, Math.round(teamLeads));
+  STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-// ---------- Pull TEAM sales (per agent) from Netlify function ----------
+// ---------- TEAM Sales ----------
 async function refreshSales(){
   try{
     const payload = await getJSON("/.netlify/functions/team_sold");
 
-    // Build: agent name -> { salesAmt, av12x, sales }
     const mapByName = new Map();
     (payload.perAgent || []).forEach(a => {
       mapByName.set(String(a.name || "").trim().toLowerCase(), {
@@ -192,7 +198,6 @@ async function refreshSales(){
       });
     });
 
-    // Project to roster keys (match by name)
     const out = new Map();
     for (const a of STATE.roster){
       const nameKey = String(a.name || "").trim().toLowerCase();
@@ -200,7 +205,6 @@ async function refreshSales(){
       out.set(agentKey(a), v);
     }
 
-    // Weekly AV override (email -> amount) still wins if present
     if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
       let sum = 0;
       for (const a of STATE.roster){
@@ -220,7 +224,6 @@ async function refreshSales(){
 
     STATE.salesWeekByKey = out;
 
-    // sale pop (best-effort) from most recent item
     const all = Array.isArray(payload.allSales) ? payload.allSales : [];
     const last = all.length ? all[all.length - 1] : null;
     if (last){
@@ -234,14 +237,11 @@ async function refreshSales(){
         });
       }
     }
-  }catch(e){
-    log("team_sold error", e?.message || e);
-  }
+  }catch(e){ log("team_sold error", e?.message || e); }
 }
 
 // ---------------- Derived ----------------
 function bestOfWeek(){
-  // choose by AV first, then by sales count as tiebreaker, then by total sales amount
   const entries = STATE.roster.map(a=>{
     const k = agentKey(a);
     const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
@@ -270,9 +270,7 @@ function renderKPIs(){
   if (elA) elA.textContent = fmtMoney(av);
 }
 
-function setHead(cols){
-  $("#thead").innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`;
-}
+function setHead(cols){ $("#thead").innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`; }
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
 function setRows(rows){
   $("#tbody").innerHTML = rows.length
@@ -280,12 +278,10 @@ function setRows(rows){
     : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
 }
 
-// ---- Standard boards
 function renderRoster(){
   showHero(false);
   setLabel("This Week — Roster");
   setHead(["Agent","Calls","Talk Time (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
-
   const rows = STATE.roster.map(a=>{
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
@@ -323,6 +319,7 @@ function renderWeekAV(){
     tbody.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
     return;
   }
+
   let html = "";
   ranked.forEach(({a,val}, i)=>{
     const leader = (i === 0 && val > 0) ? ' class="leader"' : "";
@@ -332,8 +329,6 @@ function renderWeekAV(){
     </tr>`;
   });
   tbody.innerHTML = html;
-
-  // Click to open agent detail
   $("#tbody").querySelectorAll("tr[data-agent]").forEach(tr=>{
     tr.addEventListener("click", ()=>{
       const n = tr.getAttribute("data-agent");
@@ -342,46 +337,7 @@ function renderWeekAV(){
   });
 }
 
-function renderYTD(){
-  showHero(false);
-  setLabel("YTD — Leaderboard (AV)");
-  setHead(["Agent","YTD AV"]);
-  const byName  = new Map(STATE.roster.map(r=>[String(r.name||"").trim().toLowerCase(), r]));
-  const byEmail = new Map(STATE.roster.map(r=>[String(r.email||"").trim().toLowerCase(), r]));
-  const rows = STATE.ytd
-    .map(it=>{
-      const name  = String(it.name||"").trim();
-      const email = String(it.email||"").trim().toLowerCase();
-      const av    = Number(String(it.av||0).toString().replace(/[^\d.]/g,""))||0;
-      const match = (email && byEmail.get(email)) || byName.get(name.toLowerCase());
-      const a = match || { name, photo:"" };
-      return { a, val: av };
-    })
-    .sort((x,y)=> (y.val)-(x.val))
-    .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
-  setRows(rows);
-}
-
-function renderVendorBoard(){
-  showHero(false);
-  setLabel("% of Sales by Lead Vendor");
-  const thead = document.getElementById("thead");
-  if (thead) thead.innerHTML = "";
-  const tbody = document.getElementById("tbody");
-  tbody.innerHTML = `
-    <tr>
-      <td style="padding:16px" colspan="2">
-        <img
-          src="/boards/sales_by_vendor.png"
-          alt="% of Sales by Lead Vendor"
-          style="display:block;margin:0 auto;max-width:100%;height:auto;border-radius:12px;box-shadow:0 0 0 1px #24313f"
-        />
-      </td>
-    </tr>
-  `;
-}
-
-// ---- AOTW (Agent of the Week)
+// ---- Agent of the Week ----
 function renderAOTW(){
   const top = bestOfWeek();
   if (!top){ setLabel("Agent of the Week"); setHead([]); setRows([]); showHero(false); return; }
@@ -404,16 +360,10 @@ function renderAOTW(){
       </div>
     </div>
   `);
-
-  // Hide table/header in hero view
   setLabel("Agent of the Week");
-  setHead([]);
-  setRows([]);
-
+  setHead([]); setRows([]);
   const btn = $("#hero .aotw-btn");
-  if (btn){
-    btn.addEventListener("click",()=> openAgentDetail(a.name));
-  }
+  if (btn){ btn.addEventListener("click",()=> openAgentDetail(a.name)); }
 }
 
 function avatarBlock(a){
@@ -565,3 +515,4 @@ const CSS = `
 .aotw-btn:hover{ filter:brightness(1.08); }
 `;
 (() => { const s = document.createElement("style"); s.textContent = CSS; document.head.appendChild(s); })();
+</script>
