@@ -1,14 +1,14 @@
-/* ============ FEW Dashboard — COMPLETE FILE (stable, with Sold-from-sales & rule styling) ============ */
+/* ============ FEW Dashboard — COMPLETE FILE (stable) ============ */
 "use strict";
 
 /* ---------- Config ---------- */
-const DEBUG    = new URLSearchParams(location.search).has("debug");
-const log      = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
-const ET_TZ    = "America/New_York";
-const DATA_MS  = 30_000;                           // refresh data
-const ROTATE_MS= 30_000;                           // rotate views
-const VIEWS    = ["roster","av","aotw","vendors","ytd"];
-let   viewIdx  = 0;
+const DEBUG     = new URLSearchParams(location.search).has("debug");
+const log       = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
+const ET_TZ     = "America/New_York";
+const DATA_MS   = 30_000;  // refresh data
+const ROTATE_MS = 30_000;  // rotate views
+const VIEWS     = ["roster","av","aotw","vendors","ytd"];
+let   viewIdx   = 0;
 
 const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
@@ -39,21 +39,21 @@ function hmm(mins){
   return `${h}:${String(m2).padStart(2,"0")}`;
 }
 
-/* Weekly window = Friday 12:00am ET → next Friday 12:00am ET */
+/* ---------- Weekly window = Fri 12:00am ET -> next Fri 12:00am ET ---------- */
 function weekRangeET(){
-  const now = toET(new Date());
-  const day = now.getDay();                // Sun=0 … Sat=6
-  const sinceFri = (day + 2) % 7;          // distance back to Friday
+  const now = toET(new Date());                 // in ET
+  const day = now.getDay();                     // Sun=0 … Sat=6
+  const sinceFri = (day + 2) % 7;               // distance back to Friday
   const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
   const end   = new Date(start); end.setDate(end.getDate()+7);
-  return [start, end];                      // [inclusive, exclusive)
+  return [start, end];                           // [inclusive, exclusive)
 }
 
 /* ---------- State ---------- */
 const STATE = {
   roster: [],                  // [{name,email,photo,phones}]
   callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
-  salesWeekByKey: new Map(),   // key -> {sales,salesAmt,av12x}
+  salesWeekByKey: new Map(),   // key -> {sales,amount,av12x}
   overrides: { calls:null, av:null },
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
@@ -61,7 +61,7 @@ const STATE = {
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------- Headline rule (ticker) ---------- */
+/* ---------- Headline rule ---------- */
 function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
@@ -103,22 +103,110 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------- Sale toast ---------- */
-function showSalePop({name, amount}){
-  const el = $("#salePop");
-  if (!el) return;
-  const av12 = Number(amount||0) * 12;
-  el.textContent = `${name} submitted ${fmtMoney(av12)} AV 🎉`;
-  el.classList.add("show");
-  setTimeout(()=> el.classList.remove("show"), 3500);
-}
+/* ---------- Full-screen sale splash (60s queue + chime) ---------- */
+(function initSaleSplash(){
+  let queue = [];
+  let showing = false;
 
-/* ---------- Force exactly 3 KPI cards ---------- */
+  function injectCssOnce(){
+    if (document.getElementById("sale-splash-css")) return;
+    const css = `
+      .saleSplash-backdrop{
+        position:fixed; inset:0; z-index:99999;
+        display:flex; align-items:center; justify-content:center;
+        background:rgba(0,0,0,.55); backdrop-filter: blur(2px);
+        opacity:0; transition: opacity .35s ease;
+      }
+      .saleSplash-wrap{
+        max-width:88vw; text-align:center;
+        transform:scale(.96); transition: transform .35s ease, opacity .35s ease;
+        opacity:.98;
+      }
+      .saleSplash-bubble{
+        display:inline-block; padding:28px 40px; border-radius:28px;
+        background:linear-gradient(180deg,#1a3b1f,#0f2914);
+        box-shadow: 0 18px 60px rgba(0,0,0,.45), inset 0 0 0 3px rgba(133,255,133,.25);
+        color:#eaffea; font-weight:900; line-height:1.2; letter-spacing:.4px;
+        border:2px solid rgba(76,175,80,.5);
+      }
+      .saleSplash-name{ font-size:64px; }
+      .saleSplash-txt { font-size:40px; margin:8px 0 0; color:#c7f5c7; }
+      .saleSplash-amount{ display:block; font-size:86px; color:#b7ff7a; margin-top:10px; text-shadow: 0 4px 14px rgba(0,0,0,.35); }
+      @media (max-width: 900px){
+        .saleSplash-name{ font-size:44px; }
+        .saleSplash-amount{ font-size:64px; }
+        .saleSplash-txt{ font-size:28px; }
+      }
+      .saleSplash-show .saleSplash-backdrop{ opacity:1; }
+      .saleSplash-show .saleSplash-wrap{ transform:scale(1); }
+    `;
+    const el = document.createElement("style");
+    el.id = "sale-splash-css";
+    el.textContent = css;
+    document.head.appendChild(el);
+  }
+
+  function chime(){
+    try{
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine"; o.frequency.value = 880;
+      o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.4, ctx.currentTime + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+      o.start(); o.stop(ctx.currentTime + 0.65);
+    }catch{}
+  }
+
+  function showNext(){
+    if (showing || queue.length === 0) return;
+    showing = true;
+    injectCssOnce();
+
+    const { name, amount, ms=60_000 } = queue.shift();
+    const av12 = Math.round(Number(amount||0)*12).toLocaleString("en-US");
+
+    const host = document.createElement("div");
+    host.className = "saleSplash-host";
+    host.innerHTML = `
+      <div class="saleSplash-backdrop">
+        <div class="saleSplash-wrap">
+          <div class="saleSplash-bubble">
+            <div class="saleSplash-name">${(name||"").toUpperCase()}</div>
+            <div class="saleSplash-txt">SUBMITTED</div>
+            <span class="saleSplash-amount">$${av12} AV</span>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(host);
+
+    requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
+    chime();
+
+    const done = ()=> {
+      host.classList.remove("saleSplash-show");
+      setTimeout(()=>{ host.remove(); showing = false; showNext(); }, 400);
+    };
+    const t = setTimeout(done, Math.max(3000, ms));
+    host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
+  }
+
+  // global
+  window.showSalePop = function({name, amount, ms}){
+    queue.push({name, amount, ms});
+    showNext();
+  };
+})();
+
+/* ---------- Summary cards ---------- */
 function massageSummaryLayout(){
   try {
-    const callsVal = $("#sumCalls"); // Team Calls
-    const avVal    = $("#sumSales"); // Total Submitted AV
-    const dealsVal = $("#sumTalk");  // Deals Submitted
+    const callsVal = $("#sumCalls");
+    const avVal    = $("#sumSales");
+    const dealsVal = $("#sumTalk");
 
     if (callsVal){ const l = callsVal.previousElementSibling; if (l) l.textContent = "This Week — Team Calls"; }
     if (avVal){    const l = avVal.previousElementSibling;    if (l) l.textContent = "This Week — Total Submitted AV"; }
@@ -131,12 +219,9 @@ function massageSummaryLayout(){
     $$(".card").filter(c=>c.style.display!=="none").slice(3).forEach(c=> c.style.display="none");
   } catch(e){ log("massageSummaryLayout err", e?.message||e); }
 }
-
-/* ---------- KPI values ---------- */
 function updateSummary(){
   if ($("#sumCalls")) $("#sumCalls").textContent = fmtInt(STATE.team.calls);
   if ($("#sumSales")) $("#sumSales").textContent = fmtMoney(STATE.team.av);
-
   const dealsEl = $("#sumTalk");
   if (dealsEl) {
     const lbl = dealsEl.previousElementSibling;
@@ -153,24 +238,6 @@ async function loadStatic(){
   ]);
   setRuleText(rules);
 
-  // Hide the thin ticker; keep the big centered rule only
-  try {
-    const tk = document.querySelector("#ticker");
-    if (tk && tk.parentElement) tk.parentElement.style.display = "none";
-  } catch {}
-  // Style the big rule text: bold, dark-green, slight “brick/embossed” feel
-  try {
-    const pr = document.querySelector("#principle");
-    if (pr) {
-      pr.style.fontSize = "28px";
-      pr.style.fontWeight = "900";
-      pr.style.letterSpacing = "0.5px";
-      pr.style.color = "#0f3d2e";
-      pr.style.textShadow =
-        "0 1px 0 #0b2d22, 0 2px 0 #0b2d22, 0 3px 0 #0b2d22, 0 4px 6px rgba(0,0,0,0.35)";
-    }
-  } catch {}
-
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
     name: a.name,
@@ -183,7 +250,7 @@ async function loadStatic(){
   try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
-/* ---------- Ringy: Calls / Talk / Leads / Sold ---------- */
+/* ---------- Ringy: Calls / Talk / Leads / Sold (from calls fn) ---------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
@@ -216,7 +283,7 @@ async function refreshCalls(){
     }
   }catch(e){ log("calls_by_agent error", e?.message||e); }
 
-  // Manual overrides (optional)
+  // Manual overrides
   if (STATE.overrides.calls && typeof STATE.overrides.calls === "object"){
     const byEmail = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), a]));
     for (const [email, o] of Object.entries(STATE.overrides.calls)){
@@ -289,7 +356,7 @@ async function refreshSales(){
       }
     }
 
-    // Apply manual AV overrides (merge, don’t wipe)
+    // Manual AV overrides (merge, do not wipe)
     if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
       const oa = STATE.overrides.av.perAgent || {};
       for (const [rawName, v] of Object.entries(oa)){
@@ -318,13 +385,14 @@ async function refreshSales(){
     STATE.team.av    = Math.max(0, Math.round(totalAV));
     STATE.team.deals = Math.max(0, Math.round(totalDeals));
 
-    // toast on newest sale
+    // splash on newest sale (only once per lead/product/date)
     const last = raw.length ? raw[raw.length-1] : null;
     if (last){
       const h = `${last.leadId||""}|${last.soldProductId||""}|${last.dateSold||""}`;
       if (!STATE.seenSaleHashes.has(h)){
         STATE.seenSaleHashes.add(h);
-        showSalePop({ name:last.agent || "Team", amount:last.amount || 0 });
+        // Note: amount is monthly; splash shows 12×
+        window.showSalePop({ name:last.agent || "Team", amount:last.amount || 0 });
       }
     }
   }catch(e){
@@ -378,9 +446,7 @@ function renderRoster(){
     const k = agentKey(a);
     const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
     const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, amount:0 };
-
-    // ✅ Sold comes from sales; conversion uses sold/leads
-    const soldDeals = Number(s.sales || 0);
+    const soldDeals = Number(s.sales || 0);  // sold column comes from sales function (truth source)
     const conv = c.leads > 0 ? (soldDeals / c.leads) : null;
 
     return [
@@ -389,7 +455,7 @@ function renderRoster(){
       fmtInt(Math.round(c.talkMin)),
       hmm(c.loggedMin),
       fmtInt(c.leads),
-      fmtInt(soldDeals),          // from sales function
+      fmtInt(soldDeals),
       fmtPct(conv),
       fmtMoney(Number(s.av12x||0))
     ];
