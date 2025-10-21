@@ -1,402 +1,567 @@
-/* ===========================================
-   THE FEW — dashboard.js (full production)
-   Domain-locked, resilient, metric-accurate
-   Updated: 2025-10-20
-   =========================================== */
+// ============ FEW Dashboard — FULL REPLACEMENT (AOTW + Agent Detail) ============
+// Rotation: AV (week) → YTD AV → Vendor Chart → Roster → AOTW
 
-/* ---------- CONSTANTS ---------- */
-const DOMAIN = "https://few-dashboard-live.netlify.app"; // absolute only
-const ROSTER_URL = `${DOMAIN}/headshots/roster.json`;
-const HEADSHOT_URL = (f) => `${DOMAIN}/headshots/${encodeURIComponent(f || "default.png")}`;
+const DEBUG = new URLSearchParams(location.search).has("debug");
+const log   = (...a)=>{ if (DEBUG) console.log("[DBG]", ...a); };
 
-// Permanent 17-vendor list (exact)
-const VENDORS = [
-  "$7.50", "George Region Shared", "Red Media", "Blast/Bulk", "Exclusive JUMBO", "ABC",
-  "Shared Jumbo", "VS Default", "RKA Website", "Redrip/Give up Purchased",
-  "Lamy Dynasty Specials", "JUMBO Splits", "Exclusive 30s", "Positive Intent/Argos",
-  "HotLine Bling", "Referral", "CG Exclusive"
-];
+// ---- Config ----
+const ET_TZ     = "America/New_York";
+const DATA_MS   = 30_000;                       // refresh cadence
+const ROTATE_MS = 30_000;                       // rotate views
+const VIEWS     = ["av", "ytd", "vendor", "roster", "aotw"]; // rotation sequence
+let   viewIdx   = 0;
 
-// Ringy public endpoints (client-side per user direction)
-const RINGY = {
-  soldProducts: "https://app.ringy.com/api/public/external/get-lead-sold-products",
-  recordings:   "https://app.ringy.com/api/public/external/get-recordings"
-};
-// LIVE keys (user-provided previously)
-const KEYS = {
-  SOLD:  "RGYiqo808w4kv7of0t7rxgn45g8xl11n", // sold leads
-  CALL:  "RGY60brwg9qq24bfrqfj0x11rbnlpap",  // recordings/calls
-  LEADS: "RGYt9bght8w0rd5qfn65v9ud0g2oam8e"   // (reserved)
-};
+// Optional view override via URL
+const QS = new URLSearchParams(location.search);
+const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
+const AGENT_QS_NAME = (QS.get("name") || "").trim();
 
-// Rotations
-const VIEW_ROTATE_MS = 30_000;        // 30s view rotation
-const PRINCIPLE_ROTATE_MS = 3 * 60 * 60 * 1000; // 3 hours
+// ---- Utils ----
+const $  = s => document.querySelector(s);
+const fmtInt   = n => Number(n||0).toLocaleString("en-US");
+const fmtMoney = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
+const fmtPct   = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
+const initials = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 
-// Principles (11). Banner prefix permanent.
-const PRINCIPLE_PREFIX = "THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT";
-const PRINCIPLES = [
-  "Own the outcome. Excuses don’t pay.",
-  "Speed to lead wins. Seconds matter.",
-  "Control the frame: questions > monologues.",
-  "Help first. Value before price.",
-  "Consistency beats intensity.",
-  "Track, measure, improve. Daily.",
-  "Coachability is a superpower.",
-  "High standards, zero drama.",
-  "Work the process. Trust the math.",
-  "Lead by example. Always.",
-  "Objections = interest; isolate and resolve."
-];
+function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
+async function getJSON(u){ const r=await fetch(bust(u),{cache:"no-store"}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); }
+const toET = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 
-// OE countdown target (Open Enrollment start)
-const OE_TARGET = new Date("2025-11-01T05:00:00Z"); // 12:00 AM ET ≈ 05:00 UTC
-
-/* ---------- DATE HELPERS ---------- */
-const now = () => new Date();
-const iso = (d) => d.toISOString().slice(0,10);
-const daysAgo = (n) => { const d = now(); d.setDate(d.getDate() - n); return d; };
-
-// Windows
-const RANGE = {
-  // Sales week = Fri → Thu per user; for simplicity, we’ll show *current week* + last 45 days vendors
-  salesStartISO: iso(daysAgo(6)),    // 7-day window for totals/leaderboards (live/rolling)
-  salesEndISO:   iso(now()),
-  vendorStartISO: iso(daysAgo(44)),  // last 45 days inclusive
-  vendorEndISO:   iso(now()),
-  callsStartISO:  iso(daysAgo(6)),
-  callsEndISO:    iso(now())
+function weekRangeET(){               // Fri → Thu sales week
+  const now = toET(new Date());
+  const day = now.getDay();           // 0..6
+  const sinceFri = (day + 2) % 7;     // Fri=0
+  const start = new Date(now); start.setHours(0,0,0,0); start.setDate(start.getDate() - sinceFri);
+  const end   = new Date(start); end.setDate(end.getDate()+7);
+  return [start, end];
+}
+const hmm = m => {
+  const mm = Math.max(0, Math.round(Number(m||0)));
+  const h = Math.floor(mm/60), m2 = mm%60;
+  return `${h}:${String(m2).padStart(2,"0")}`;
 };
 
-/* ---------- DOM HOOKS ---------- */
-// Single banner rule: exactly one
-const els = {
-  principleBanner: document.querySelector("#principleBanner"),
-  viewTitle: document.querySelector("#viewTitle"),
-  dataTableBody: document.querySelector("#dataTable tbody"),
-  vendorCanvas: document.querySelector("#vendorChart"),
-  vendorFallback: document.querySelector("#vendorChartFallback"),
-  salesTicker: document.querySelector("#salesTicker"),
-  totalAV: document.querySelector("#totalAV"),
-  totalSales: document.querySelector("#totalDeals"),
-  totalCalls: document.querySelector("#totalCalls"),
-  totalTalk: document.querySelector("#totalTalk"),
-  lastUpdated: document.querySelector("#lastUpdated"),
-  oeCountdown: document.querySelector("#oeCountdown")
+// ---------------- State ----------------
+const STATE = {
+  roster: [],                  // [{name,email,photo,phones[]}]
+  callsWeekByKey: new Map(),   // key -> {calls,talkMin,loggedMin,leads,sold}
+  salesWeekByKey: new Map(),   // key -> {salesAmt,av12x,sales}
+  team: { calls:0, talk:0, av:0, leads:0, sold:0 },
+  overrides: { calls:null, av:null },
+  ytd: [],                     // [{name,email,av}]
+  seenSaleHashes: new Set()
 };
+const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------- UI COLORS (applied inline to ensure dark / gold / white) ---------- */
-document.documentElement.style.setProperty("--gold", "#FFD700");
-document.documentElement.style.setProperty("--fg", "#FFFFFF");
-document.documentElement.style.setProperty("--bg", "#0E0F12");
+// ---------------- Shell ----------------
+function ensureUI(){
+  let root = $("#few-root");
+  if (!root){
+    root = document.createElement("div"); root.id="few-root";
+    root.innerHTML = `
+      <div id="ticker" class="ticker"></div>
+      <h1 class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</h1>
+      <h4 id="principle" class="sub"></h4>
 
-/* ---------- UTILS ---------- */
-const $safe = (el, txt) => { if (el) el.textContent = txt; };
-const $html = (el, html) => { if (el) el.innerHTML = html; };
-const fmtMoney0 = (n) => Number(n||0).toLocaleString("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0});
-const fmtInt = (n) => Number(n||0).toLocaleString("en-US");
-const fmtHMS = (sec) => {
-  const s = Math.max(0, Math.floor(Number(sec||0)));
-  const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), r=s%60;
-  return `${h}:${String(m).padStart(2,"0")}:${String(r).padStart(2,"0")}`;
-};
-const byDesc = (k) => (a,b) => (Number(b[k]||0) - Number(a[k]||0));
+      <div id="kpis" class="kpis">
+        <div class="kpi"><div class="label">This Week — Team Calls</div><div id="kpi-calls" class="value">0</div></div>
+        <div class="kpi"><div class="label">This Week — Team Talk (min)</div><div id="kpi-talk" class="value">0</div></div>
+        <div class="kpi"><div class="label">This Week — Team AV</div><div id="kpi-av" class="value">$0</div></div>
+      </div>
 
-async function fetchJSON(url, opts) {
-  try {
-    const r = await fetch(url, {...opts, cache:"no-store"});
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return await r.json();
-  } catch(e) {
-    console.error("fetchJSON fail", url, e);
-    return null;
+      <div class="label"><span id="viewLabel"></span></div>
+      <table class="grid">
+        <thead id="thead"></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+
+      <div id="salePop" class="sale-pop"></div>
+
+      <!-- AOTW / Agent profile mount -->
+      <div id="hero" class="hero" style="display:none"></div>
+    `;
+    document.body.prepend(root);
   }
 }
 
-/* ---------- ROSTER ---------- */
-let ROSTER_IDX = new Map(); // name -> headshot filename
-function normalizeName(s=""){ return s.toLowerCase().replace(/\(.*?\)/g,"").replace(/[^a-z\s]/g,"").replace(/\s+/g," ").trim(); }
-function buildRosterIndex(roster) {
-  const idx = new Map();
-  if (Array.isArray(roster)) {
-    for (const r of roster) {
-      if (!r) continue;
-      const name = r.name || r.displayName || r.alias;
-      const file = r.headshot || r.image || r.file;
-      if (name && file) idx.set(normalizeName(name), file);
-    }
-  } else if (roster && typeof roster === "object") {
-    for (const [name, file] of Object.entries(roster)) {
-      idx.set(normalizeName(name), file);
-    }
-  }
-  return idx;
-}
-function headshotFor(name) {
-  const f = ROSTER_IDX.get(normalizeName(name||""));
-  return HEADSHOT_URL(f);
+function setRuleText(rulesObj){
+  const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
+  if (!list.length) return;
+  const idx  = (new Date().getUTCDate()) % list.length;
+  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
+  const tik = $("#ticker");    if (tik) tik.textContent = `RULE OF THE DAY — ${text}`;
+  const sub = $("#principle"); if (sub) sub.textContent = text;
 }
 
-/* ---------- RINGY FETCHERS + FALLBACKS ---------- */
-async function fetchSold(startDate, endDate) {
-  const body = new URLSearchParams({ apiKey: KEYS.SOLD, startDate, endDate, limit: "5000" });
-  const json = await fetchJSON(RINGY.soldProducts, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body });
-  if (!json || !Array.isArray(json.data)) return [];
-  return json.data.map(x => ({
-    user_name: x.user_name || x.userName || x.agent || "Unknown",
-    vendor: (x.vendor || x.source || "").trim(),
-    amountMonthly: Number(x.premium_amount || x.premium || x.amount || 0),
-    av: Number(x.premium_amount || x.premium || x.amount || 0) * 12,
-    sold_at: x.created_at || x.sold_at || x.date || null,
-    client: x.client_name || x.customer_name || null
-  }));
-}
-async function fetchRecordings(startDate, endDate) {
-  const body = new URLSearchParams({ apiKey: KEYS.CALL, startDate, endDate, limit: "5000" });
-  const json = await fetchJSON(RINGY.recordings, { method:"POST", headers:{ "Content-Type":"application/x-www-form-urlencoded" }, body });
-  if (!json || !Array.isArray(json.data)) return [];
-  return json.data.map(x => ({
-    user_name: x.user_name || x.userName || x.agent || "Unknown",
-    talk_seconds: Number(x.talk_time_seconds || x.duration || 0),
-    created_at: x.created_at || x.date || null
-  }));
+function avatarCell(a){
+  const src = a.photo ? `/headshots/${a.photo}` : "";
+  const img = src
+    ? `<img class="avatar" src="${src}" onerror="this.remove();this.insertAdjacentHTML('beforebegin','<div class=&quot;avatar-fallback&quot;>${initials(a.name)}</div>')">`
+    : `<div class="avatar-fallback">${initials(a.name)}</div>`;
+  return `<div class="agent">${img}<span>${a.name}</span></div>`;
 }
 
-// Overrides (fail-safe)
-async function fetchOverride(path) {
-  return await fetchJSON(`${DOMAIN}${path}`);
-}
-
-/* ---------- AGGREGATION ---------- */
-function aggregateAVByUser(sales=[]) {
-  const m = new Map();
-  for (const s of sales) {
-    const k = s.user_name || "Unknown";
-    const cur = m.get(k) || { user_name:k, av:0, deals:0 };
-    cur.av += Number(s.av||0);
-    cur.deals += 1;
-    m.set(k, cur);
-  }
-  return [...m.values()];
-}
-function aggregateCallsByUser(recs=[]) {
-  const m = new Map();
-  for (const r of recs) {
-    const k = r.user_name || "Unknown";
-    const cur = m.get(k) || { user_name:k, calls:0, talk_seconds:0 };
-    cur.calls += 1;
-    cur.talk_seconds += Number(r.talk_seconds||0);
-    m.set(k, cur);
-  }
-  return [...m.values()];
-}
-function joinMetrics(avRows, callRows) {
-  const m = new Map();
-  for (const a of avRows) m.set(a.user_name, { user_name:a.user_name, av:a.av, deals:a.deals, calls:0, talk_seconds:0 });
-  for (const c of callRows) {
-    const row = m.get(c.user_name) || { user_name:c.user_name, av:0, deals:0, calls:0, talk_seconds:0 };
-    row.calls += c.calls;
-    row.talk_seconds += c.talk_seconds;
-    m.set(c.user_name, row);
-  }
-  return [...m.values()];
-}
-function vendorCounts(sales=[], vendors=VENDORS) {
-  const counts = Object.fromEntries(vendors.map(v => [v, 0]));
-  for (const s of sales) {
-    if (counts.hasOwnProperty(s.vendor)) counts[s.vendor] += 1;
-  }
-  return counts;
-}
-
-/* ---------- RENDERERS ---------- */
-function renderTeamTotals(rows=[]) {
-  const totalAV = rows.reduce((a,x)=>a+Number(x.av||0),0);
-  const totalDeals = rows.reduce((a,x)=>a+Number(x.deals||0),0);
-  const totalCalls = rows.reduce((a,x)=>a+Number(x.calls||0),0);
-  const totalTalk  = rows.reduce((a,x)=>a+Number(x.talk_seconds||0),0);
-
-  $safe(els.totalAV, fmtMoney0(totalAV));
-  $safe(els.totalSales, fmtInt(totalDeals));
-  $safe(els.totalCalls, fmtInt(totalCalls));
-  $safe(els.totalTalk, fmtHMS(totalTalk));
-}
-
-function rowEmojiLowPerf(r) {
-  // Low-performer gag: 0 deals + (calls < 20 OR talk < 600s)
-  if ((r.deals||0) === 0 && ((r.calls||0) < 20 || (r.talk_seconds||0) < 600)) return " 💩";
-  return "";
-}
-
-function renderTable(view, rows) {
-  // view: "AV" | "Sales" | "Calls" | "Talk"
-  $safe(els.viewTitle, view);
-
-  const sorted = {
-    "AV":    [...rows].sort(byDesc("av")),
-    "Sales": [...rows].sort(byDesc("deals")),
-    "Calls": [...rows].sort(byDesc("calls")),
-    "Talk":  [...rows].sort(byDesc("talk_seconds"))
-  }[view];
-
-  const top3 = new Set(sorted.slice(0,3).map(r=>r.user_name));
-
-  const html = sorted.map(r => {
-    const img = headshotFor(r.user_name);
-    const klass = top3.has(r.user_name) ? 'class="top3"' : "";
-    const emoji = rowEmojiLowPerf(r);
-
-    const cells = {
-      "AV":    `<td>${fmtMoney0(r.av)}</td><td>${fmtInt(r.deals)}</td><td>${fmtInt(r.calls)}</td><td>${fmtHMS(r.talk_seconds)}</td>`,
-      "Sales": `<td>${fmtInt(r.deals)}</td><td>${fmtMoney0(r.av)}</td><td>${fmtInt(r.calls)}</td><td>${fmtHMS(r.talk_seconds)}</td>`,
-      "Calls": `<td>${fmtInt(r.calls)}</td><td>${fmtHMS(r.talk_seconds)}</td><td>${fmtMoney0(r.av)}</td><td>${fmtInt(r.deals)}</td>`,
-      "Talk":  `<td>${fmtHMS(r.talk_seconds)}</td><td>${fmtInt(r.calls)}</td><td>${fmtMoney0(r.av)}</td><td>${fmtInt(r.deals)}</td>`
-    }[view];
-
-    return `
-      <tr ${klass}>
-        <td class="agent">
-          <img src="${img}" alt="${r.user_name}" class="h-8 w-8 rounded-full object-cover" onerror="this.src='${HEADSHOT_URL("default.png")}'">
-          <span>${r.user_name}${emoji}</span>
-        </td>
-        ${cells}
-      </tr>`;
-  }).join("");
-
-  $html(els.dataTableBody, html || `<tr><td colspan="5">Loading…</td></tr>`);
-}
-
-function renderTicker(sales=[]) {
-  if (!els.salesTicker) return;
-  const items = sales
-    .slice()
-    .sort((a,b)=> new Date(b.sold_at||0) - new Date(a.sold_at||0))
-    .slice(0, 60)
-    .map(s => `<span class="mr-8"><strong>${s.user_name}</strong> • ${fmtMoney0(s.av)} • <em>${s.vendor || "—"}</em></span>`);
-  $html(els.salesTicker, items.join(""));
-}
-
-function renderVendorChart(counts) {
-  const labels = VENDORS;
-  const data = labels.map(l => counts[l] || 0);
-  if (els.vendorCanvas && window.Chart) {
-    if (els.vendorCanvas._chart) els.vendorCanvas._chart.destroy();
-    els.vendorCanvas._chart = new Chart(els.vendorCanvas.getContext("2d"), {
-      type: "bar",
-      data: { labels, datasets: [{ label: "Deals (Last 45 Days)", data }] },
-      options: {
-        responsive: true, maintainAspectRatio: false, indexAxis: "y",
-        plugins: { legend:{display:false}, tooltip:{enabled:true} },
-        scales: { x:{beginAtZero:true, ticks:{precision:0}}, y:{ticks:{autoSkip:false}} }
-      }
-    });
-    if (els.vendorFallback) $html(els.vendorFallback, "");
-  } else if (els.vendorFallback) {
-    const rows = labels.map((l,i)=>`<tr><td>${l}</td><td>${data[i]}</td></tr>`).join("");
-    $html(els.vendorFallback, `<table class="text-sm">${rows}</table>`);
-  }
-}
-
-function startPrincipleBanner() {
-  if (!els.principleBanner) return;
-  let idx = Math.floor(now().getTime()/PRINCIPLE_ROTATE_MS) % PRINCIPLES.length;
-  const set = () => $safe(els.principleBanner, `${PRINCIPLE_PREFIX} • ${PRINCIPLES[idx]}`);
-  set();
-  setInterval(()=>{ idx = (idx+1) % PRINCIPLES.length; set(); }, PRINCIPLE_ROTATE_MS);
-}
-
-function startOeCountdown() {
-  if (!els.oeCountdown) return;
-  const tick = () => {
-    const dms = OE_TARGET - new Date();
-    if (dms <= 0) { $safe(els.oeCountdown, "OPEN ENROLLMENT IS LIVE"); return; }
-    const d = Math.floor(dms / (24*3600e3));
-    const h = Math.floor((dms % (24*3600e3))/3600e3);
-    const m = Math.floor((dms % 3600e3)/60e3);
-    const s = Math.floor((dms % 60e3)/1e3);
-    $safe(els.oeCountdown, `${d}d ${String(h).padStart(2,"0")}h ${String(m).padStart(2,"0")}m ${String(s).padStart(2,"0")}s`);
-  };
-  tick();
-  setInterval(tick, 1000);
-}
-
-/* ---------- ROTATION ENGINE ---------- */
-const VIEWS = ["Calls","Talk","Sales","AV"];
-let viewIdx = 0;
-function startViewRotation(rows) {
-  const renderCurrent = () => renderTable(VIEWS[viewIdx], rows);
-  renderCurrent();
-  setInterval(() => { viewIdx = (viewIdx+1)%VIEWS.length; renderCurrent(); }, VIEW_ROTATE_MS);
-}
-
-/* ---------- MAIN LOAD ---------- */
-async function loadAll() {
-  // Roster
-  const rosterRaw = await fetchJSON(ROSTER_URL) || [];
-  ROSTER_IDX = buildRosterIndex(rosterRaw);
-
-  // Live pulls with fail-safe overrides
-  let [sold, recs] = await Promise.all([
-    fetchSold(RANGE.salesStartISO, RANGE.salesEndISO),
-    fetchRecordings(RANGE.callsStartISO, RANGE.callsEndISO)
+// ---------------- Loaders ----------------
+async function loadStatic(){
+  const [rosterRaw, rules, ytd] = await Promise.all([
+    getJSON("/headshots/roster.json").catch(()=>[]),
+    getJSON("/rules.json").catch(()=>[]),
+    getJSON("/ytd_av.json").catch(()=>[])
   ]);
+  setRuleText(rules);
 
-  // Fallbacks if API failed
-  if (!Array.isArray(sold) || !sold.length) {
-    const ov = await fetchOverride("/av_week_override.json");
-    sold = Array.isArray(ov) ? ov : [];
-  }
-  if (!Array.isArray(recs) || !recs.length) {
-    const ov = await fetchOverride("/calls_week_override.json");
-    recs = Array.isArray(ov) ? ov : [];
-  }
+  const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
+  STATE.roster = list.map(a => ({
+    name: a.name,
+    email: (a.email||"").trim().toLowerCase(),
+    photo: a.photo||"",
+    phones: Array.isArray(a.phones) ? a.phones : []
+  }));
 
-  // Compute week metrics
-  const avRows = aggregateAVByUser(sold);
-  const callRows = aggregateCallsByUser(recs);
-  const rows = joinMetrics(avRows, callRows);
+  STATE.ytd = Array.isArray(ytd) ? ytd : (Array.isArray(ytd?.rows) ? ytd.rows : []);
 
-  // Team totals (no $0 placeholders — calculated)
-  renderTeamTotals(rows);
-
-  // Start rotating table views
-  startViewRotation(rows);
-
-  // Vendor 45-day chart (filtered sales within last 45 days only)
-  const sales45 = sold.filter(s => {
-    if (!s.sold_at) return false;
-    const t = new Date(s.sold_at);
-    return t >= new Date(RANGE.vendorStartISO) && t <= new Date(RANGE.vendorEndISO);
-  });
-  // Ensure only permanent vendors counted
-  const clean45 = sales45.map(s => ({...s, vendor: VENDORS.includes(s.vendor) ? s.vendor : s.vendor }));
-  const counts = vendorCounts(clean45, VENDORS);
-  renderVendorChart(counts);
-
-  // Live ticker
-  renderTicker(sold);
-
-  // Single rule banner + OE countdown
-  startPrincipleBanner();
-  startOeCountdown();
-
-  // Stamp time
-  $safe(els.lastUpdated, new Date().toLocaleString("en-US",{hour12:true}));
+  // overrides (file names as in repo root /public)
+  try { STATE.overrides.calls = await getJSON("/calls_week_override.json"); } catch { STATE.overrides.calls = null; }
+  try { STATE.overrides.av    = await getJSON("/av_week_override.json");    } catch { STATE.overrides.av    = null; }
 }
 
-/* ---------- BOOT ---------- */
-document.addEventListener("DOMContentLoaded", () => {
-  // Enforce single principle banner in DOM
-  const banners = Array.from(document.querySelectorAll("#principleBanner"));
-  if (banners.length > 1) banners.slice(1).forEach(b => b.remove());
+async function refreshCalls(){
+  // We still pull Ringy for KPI safety; roster prefers overrides.
+  let teamCalls=0, teamTalk=0;
+  try{
+    const payload = await getJSON("/api/calls_diag?days=7&limit=5000");
+    const rows = (payload.records || payload.data || []).filter(Boolean);
+    const [start,end] = weekRangeET();
 
-  // Minimal “Loading…” placeholders
-  if (els.dataTableBody) $html(els.dataTableBody, `<tr><td colspan="5">Loading…</td></tr>`);
-  if (els.vendorFallback) $html(els.vendorFallback, `<div>Loading…</div>`);
-  if (els.salesTicker) $html(els.salesTicker, `<span>Loading…</span>`);
+    for (const r of rows){
+      const when = toET((r.callStartDate || r.dateRecorded || "").replace(" ","T")+"Z");
+      if (when >= start && when < end){
+        teamCalls += 1;
+        const sec = r.duration ?? r.callDuration ?? r.talk_time_seconds ?? 0;
+        teamTalk  += Number(sec)/60;
+      }
+    }
+  }catch(e){ log("calls pull error", e?.message||e); }
 
-  loadAll().catch(err => {
-    console.error("Dashboard load error", err);
-    if (els.dataTableBody) $html(els.dataTableBody, `<tr><td colspan="5">Data unavailable.</td></tr>`);
+  // Build per-agent map from overrides (preferred)
+  const byKey = new Map();
+  const hasOverride = !!STATE.overrides.calls && typeof STATE.overrides.calls === "object";
+  if (hasOverride){
+    let sumC=0, sumT=0, sumLeads=0, sumSold=0;
+    for (const a of STATE.roster){
+      const o = STATE.overrides.calls[a.email];
+      if (!o) continue;
+      const row = {
+        calls    : Number(o.calls||0),
+        talkMin  : Number(o.talkMin||0),
+        loggedMin: Number(o.loggedMin||0),
+        leads    : Number(o.leads||0),
+        sold     : Number(o.sold||0)
+      };
+      byKey.set(agentKey(a), row);
+      sumC     += row.calls;
+      sumT     += row.talkMin;
+      sumLeads += row.leads;
+      sumSold  += row.sold;
+    }
+    // Team tiles mirror override when present
+    STATE.team.calls = sumC;
+    STATE.team.talk  = sumT;
+    STATE.team.leads = sumLeads;
+    STATE.team.sold  = sumSold;
+  } else {
+    STATE.team.calls = teamCalls;
+    STATE.team.talk  = teamTalk;
+  }
+
+  STATE.callsWeekByKey = byKey;
+}
+
+// ---------- Pull TEAM sales (per agent) from Netlify function ----------
+async function refreshSales(){
+  try{
+    const payload = await getJSON("/.netlify/functions/team_sold");
+
+    // Build: agent name -> { salesAmt, av12x, sales }
+    const mapByName = new Map();
+    (payload.perAgent || []).forEach(a => {
+      mapByName.set(String(a.name || "").trim().toLowerCase(), {
+        salesAmt: Number(a.amount || 0),
+        av12x   : Number(a.av12x || 0),
+        sales   : Number(a.sales || 0),
+      });
+    });
+
+    // Project to roster keys (match by name)
+    const out = new Map();
+    for (const a of STATE.roster){
+      const nameKey = String(a.name || "").trim().toLowerCase();
+      const v = mapByName.get(nameKey) || { salesAmt:0, av12x:0, sales:0 };
+      out.set(agentKey(a), v);
+    }
+
+    // Weekly AV override (email -> amount) still wins if present
+    if (STATE.overrides.av && typeof STATE.overrides.av === "object"){
+      let sum = 0;
+      for (const a of STATE.roster){
+        const ov = Number(STATE.overrides.av[a.email] || 0);
+        if (ov >= 0){
+          const k   = agentKey(a);
+          const cur = out.get(k) || { salesAmt:0, av12x:0, sales:0 };
+          cur.av12x = ov;
+          out.set(k, cur);
+          sum += ov;
+        }
+      }
+      STATE.team.av = sum;
+    } else {
+      STATE.team.av = Number(payload.team?.totalAV12x || 0);
+    }
+
+    STATE.salesWeekByKey = out;
+
+    // sale pop (best-effort) from most recent item
+    const all = Array.isArray(payload.allSales) ? payload.allSales : [];
+    const last = all.length ? all[all.length - 1] : null;
+    if (last){
+      const h = `${last.leadId}|${last.soldProductId}|${last.dateSold}`;
+      if (!STATE.seenSaleHashes.has(h)){
+        STATE.seenSaleHashes.add(h);
+        showSalePop({
+          name: last.agent || "Team",
+          product: last.soldProductName || "Product",
+          amount: last.amount || 0
+        });
+      }
+    }
+  }catch(e){
+    log("team_sold error", e?.message || e);
+  }
+}
+
+// ---------------- Derived ----------------
+function bestOfWeek(){
+  // choose by AV first, then by sales count as tiebreaker, then by total sales amount
+  const entries = STATE.roster.map(a=>{
+    const k = agentKey(a);
+    const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
+    return { a, ...s };
   });
-});
+  entries.sort((x,y)=>{
+    if (y.av12x !== x.av12x) return y.av12x - x.av12x;
+    if ((y.sales||0) !== (x.sales||0)) return (y.sales||0) - (x.sales||0);
+    return (y.salesAmt||0) - (x.salesAmt||0);
+  });
+  return entries[0] || null;
+}
+
+function getAgentByNameCaseInsensitive(name){
+  const needle = String(name||"").trim().toLowerCase();
+  if (!needle) return null;
+  return STATE.roster.find(r => String(r.name||"").trim().toLowerCase() === needle) || null;
+}
+
+// ---------------- Renderers ----------------
+function renderKPIs(){
+  const { calls, talk, av } = STATE.team;
+  const elC = $("#kpi-calls"), elT = $("#kpi-talk"), elA = $("#kpi-av");
+  if (elC) elC.textContent = fmtInt(calls);
+  if (elT) elT.textContent = fmtInt(Math.round(talk));
+  if (elA) elA.textContent = fmtMoney(av);
+}
+
+function setHead(cols){
+  $("#thead").innerHTML = `<tr>${cols.map(c=>`<th>${c}</th>`).join("")}</tr>`;
+}
+function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
+function setRows(rows){
+  $("#tbody").innerHTML = rows.length
+    ? rows.map(r => `<tr>${r.map((c,i)=>`<td class="${i>0?"num":""}">${c}</td>`).join("")}</tr>`).join("")
+    : `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
+}
+
+// ---- Standard boards
+function renderRoster(){
+  showHero(false);
+  setLabel("This Week — Roster");
+  setHead(["Agent","Calls","Talk Time (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
+
+  const rows = STATE.roster.map(a=>{
+    const k = agentKey(a);
+    const c = STATE.callsWeekByKey.get(k) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
+    const s = STATE.salesWeekByKey.get(k) || { salesAmt:0, av12x:0, sales:0 };
+    const conv = c.leads > 0 ? (c.sold / c.leads) : null;
+    return [
+      avatarCell(a),
+      fmtInt(c.calls),
+      fmtInt(Math.round(c.talkMin)),
+      hmm(c.loggedMin),
+      fmtInt(c.leads),
+      fmtInt(c.sold),
+      fmtPct(conv),
+      fmtMoney(s.av12x)
+    ];
+  });
+  setRows(rows);
+}
+
+function renderWeekAV(){
+  showHero(false);
+  setLabel("This Week — Leaderboard (Submitted AV)");
+  setHead(["Agent","Submitted AV"]);
+
+  const ranked = STATE.roster
+    .map(a=>{
+      const k = agentKey(a);
+      const s = STATE.salesWeekByKey.get(k) || { av12x:0 };
+      return { a, val: Number(s.av12x||0) };
+    })
+    .sort((x,y)=> (y.val)-(x.val));
+
+  const tbody = $("#tbody");
+  if (!ranked.length){
+    tbody.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data</td></tr>`;
+    return;
+  }
+  let html = "";
+  ranked.forEach(({a,val}, i)=>{
+    const leader = (i === 0 && val > 0) ? ' class="leader"' : "";
+    html += `<tr${leader} data-agent="${a.name}">
+      <td>${avatarCell(a)}</td>
+      <td class="num">${fmtMoney(val)}</td>
+    </tr>`;
+  });
+  tbody.innerHTML = html;
+
+  // Click to open agent detail
+  $("#tbody").querySelectorAll("tr[data-agent]").forEach(tr=>{
+    tr.addEventListener("click", ()=>{
+      const n = tr.getAttribute("data-agent");
+      openAgentDetail(n);
+    });
+  });
+}
+
+function renderYTD(){
+  showHero(false);
+  setLabel("YTD — Leaderboard (AV)");
+  setHead(["Agent","YTD AV"]);
+  const byName  = new Map(STATE.roster.map(r=>[String(r.name||"").trim().toLowerCase(), r]));
+  const byEmail = new Map(STATE.roster.map(r=>[String(r.email||"").trim().toLowerCase(), r]));
+  const rows = STATE.ytd
+    .map(it=>{
+      const name  = String(it.name||"").trim();
+      const email = String(it.email||"").trim().toLowerCase();
+      const av    = Number(String(it.av||0).toString().replace(/[^\d.]/g,""))||0;
+      const match = (email && byEmail.get(email)) || byName.get(name.toLowerCase());
+      const a = match || { name, photo:"" };
+      return { a, val: av };
+    })
+    .sort((x,y)=> (y.val)-(x.val))
+    .map(({a,val})=> [avatarCell(a), fmtMoney(val)]);
+  setRows(rows);
+}
+
+function renderVendorBoard(){
+  showHero(false);
+  setLabel("% of Sales by Lead Vendor");
+  const thead = document.getElementById("thead");
+  if (thead) thead.innerHTML = "";
+  const tbody = document.getElementById("tbody");
+  tbody.innerHTML = `
+    <tr>
+      <td style="padding:16px" colspan="2">
+        <img
+          src="/boards/sales_by_vendor.png"
+          alt="% of Sales by Lead Vendor"
+          style="display:block;margin:0 auto;max-width:100%;height:auto;border-radius:12px;box-shadow:0 0 0 1px #24313f"
+        />
+      </td>
+    </tr>
+  `;
+}
+
+// ---- AOTW (Agent of the Week)
+function renderAOTW(){
+  const top = bestOfWeek();
+  if (!top){ setLabel("Agent of the Week"); setHead([]); setRows([]); showHero(false); return; }
+
+  const { a, av12x, sales, salesAmt } = top;
+  showHero(true, `
+    <div class="aotw">
+      <div class="aotw-badge">IN THE LEAD FOR AGENT OF THE WEEK</div>
+      <div class="aotw-card">
+        <div class="aotw-photo">${avatarBlock(a)}</div>
+        <div class="aotw-info">
+          <div class="aotw-name">${escapeHtml(a.name)}</div>
+          <div class="aotw-metrics">
+            <div class="m"><div class="k">Deals</div><div class="v">${fmtInt(sales||0)}</div></div>
+            <div class="m"><div class="k">Total Sales</div><div class="v">${fmtMoney(salesAmt||0)}</div></div>
+            <div class="m"><div class="k">Submitted AV</div><div class="v highlight">${fmtMoney(av12x||0)}</div></div>
+          </div>
+          <button class="aotw-btn" aria-label="Open agent profile" data-agent="${escapeHtml(a.name)}">View Profile →</button>
+        </div>
+      </div>
+    </div>
+  `);
+
+  // Hide table/header in hero view
+  setLabel("Agent of the Week");
+  setHead([]);
+  setRows([]);
+
+  const btn = $("#hero .aotw-btn");
+  if (btn){
+    btn.addEventListener("click",()=> openAgentDetail(a.name));
+  }
+}
+
+function avatarBlock(a){
+  const src = a.photo ? `/headshots/${a.photo}` : "";
+  return src
+    ? `<img class="hero-avatar" src="${src}" alt="${escapeHtml(a.name)}" onerror="this.remove();">`
+    : `<div class="hero-fallback">${initials(a.name)}</div>`;
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+function showHero(show, html=""){
+  const hero = $("#hero");
+  hero.style.display = show ? "block" : "none";
+  hero.innerHTML = show ? html : "";
+}
+
+// ---- Agent detail (weekly)
+function openAgentDetail(name){
+  const agent = getAgentByNameCaseInsensitive(name);
+  if (!agent){ alert("Agent not found."); return; }
+  const k = agentKey(agent);
+  const s = STATE.salesWeekByKey.get(k) || { av12x:0, sales:0, salesAmt:0 };
+
+  showHero(true, `
+    <div class="profile">
+      <div class="profile-photo">${avatarBlock(agent)}</div>
+      <div class="profile-body">
+        <div class="profile-name">${escapeHtml(agent.name)}</div>
+        <div class="profile-metrics">
+          <div><span class="k">Deals</span><span class="v">${fmtInt(s.sales||0)}</span></div>
+          <div><span class="k">Total Sales</span><span class="v">${fmtMoney(s.salesAmt||0)}</span></div>
+          <div><span class="k">Submitted AV</span><span class="v gold">${fmtMoney(s.av12x||0)}</span></div>
+        </div>
+        <button class="aotw-btn" onclick="history.back()">← Back</button>
+      </div>
+    </div>
+  `);
+  setLabel("Agent Profile — This Week");
+  setHead([]);
+  setRows([]);
+}
+
+// ---------------- Sale toast ----------------
+function showSalePop({ name, product, amount }){
+  const el = $("#salePop"); if (!el) return;
+  el.textContent = `🔥 ${name || "Team"} sold ${product || "Product"} — ${fmtMoney(amount)}`;
+  el.classList.add("show");
+  setTimeout(()=> el.classList.remove("show"), 7000);
+}
+
+// ---------------- Boot ----------------
+async function boot(){
+  ensureUI();
+  await loadStatic();
+  await Promise.all([refreshCalls(), refreshSales()]);
+  renderCurrent();
+
+  setInterval(async ()=>{
+    await Promise.all([refreshCalls(), refreshSales()]);
+    renderCurrent();
+  }, DATA_MS);
+
+  setInterval(()=>{
+    viewIdx = (viewIdx + 1) % VIEWS.length;
+    renderCurrent();
+  }, ROTATE_MS);
+}
+
+function renderCurrent(){
+  // URL overrides (no rotation if present)
+  if (VIEW_OVERRIDE === "aotw") return renderAOTW();
+  if (VIEW_OVERRIDE === "agent" && AGENT_QS_NAME) return openAgentDetail(AGENT_QS_NAME);
+
+  renderKPIs();
+  const v = VIEWS[viewIdx];
+  if (v === "av")     return renderWeekAV();
+  if (v === "ytd")    return renderYTD();
+  if (v === "vendor") return renderVendorBoard();
+  if (v === "aotw")   return renderAOTW();
+  return renderRoster();
+}
+
+window.addEventListener("DOMContentLoaded", boot);
+
+// ------------ styles (incl. black & gold hero) ------------
+const CSS = `
+.few-root{padding:12px}
+.title{margin:6px 0 2px;font-size:28px;text-align:center;color:#ffeaa7;text-shadow:0 0 12px #222}
+.sub{margin:0 0 12px;text-align:center;color:#9fb}
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0 10px}
+.kpi{background:#111a22;border:1px solid #24313f;border-radius:10px;padding:10px}
+.kpi .label{font-size:12px;color:#9fb}
+.kpi .value{font-size:22px;color:#ffeaa7}
+.label{margin:10px 0 6px;color:#9fb}
+.grid{width:100%;border-collapse:separate;border-spacing:0 6px}
+.grid th,.grid td{padding:10px;background:#0e1720;border-bottom:1px solid #1f2a36}
+.grid th{color:#9fb;text-align:left}
+.grid td.num{text-align:right;color:#eaeef5}
+.agent{display:flex;gap:8px;align-items:center}
+.avatar{width:28px;height:28px;border-radius:50%;object-fit:cover}
+.avatar-fallback{width:28px;height:28px;border-radius:50%;display:inline-grid;place-items:center;background:#223246;color:#bee}
+.ticker{font-size:12px;color:#9fb;margin-bottom:4px}
+.sale-pop{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;background:#072;color:#cfe;padding:10px 14px;border-radius:12px;opacity:0;pointer-events:none;transition:.3s}
+.sale-pop.show{opacity:1}
+
+/* Leader glow */
+.leader .agent{position:relative}
+.leader .agent span{ animation: leaderGlow 1.8s ease-in-out infinite alternate; text-shadow: 0 0 6px #ffd166, 0 0 12px #ffd166; }
+@keyframes leaderGlow{ from{ text-shadow:0 0 4px #ffe08a, 0 0 10px #ffd166; } to{ text-shadow:0 0 10px #ffe08a, 0 0 20px #ffd166; } }
+
+/* HERO (black & gold) */
+.hero{ margin-top:10px; }
+.aotw-badge{
+  display:inline-block; padding:6px 12px; border:1px solid #6b5b2b;
+  color:#e9d99a; background:linear-gradient(180deg,#1a1406,#0e0a03);
+  border-radius:999px; letter-spacing:.06em; font-weight:800; font-size:12px;
+  box-shadow:0 0 0 1px #2b230a inset, 0 6px 18px rgba(0,0,0,.35);
+}
+.aotw-card, .profile{
+  display:grid; grid-template-columns:160px 1fr; gap:16px;
+  background:radial-gradient(120% 140% at 60% 0%,#1b1709 0%,#0b0a06 55%,#090806 100%);
+  border:1px solid #3b2f10; border-radius:16px; padding:16px;
+  box-shadow:0 12px 30px rgba(0,0,0,.35), inset 0 0 0 1px #2a210a;
+}
+.hero-avatar, .hero-fallback{
+  width:160px; height:160px; border-radius:12px; object-fit:cover;
+  background:#1f2a3a; display:grid; place-items:center; font-size:38px; color:#d9e2ef;
+  border:1px solid #342a10; box-shadow:inset 0 0 0 1px #4b3a0f;
+}
+.hero-fallback{ font-weight:800; }
+.aotw-name, .profile-name{
+  font-size:34px; font-weight:900; color:#ffeaa7; letter-spacing:.02em; margin-bottom:8px;
+  text-shadow:0 0 18px rgba(255,210,90,.25);
+}
+.aotw-metrics, .profile-metrics{
+  display:grid; grid-template-columns:repeat(3, minmax(120px,1fr)); gap:12px; margin:10px 0 6px;
+}
+.m, .profile-metrics > div{
+  background:rgba(0,0,0,.35); border:1px solid #2d230e; border-radius:12px; padding:10px;
+}
+.k{ color:#a5976a; font-size:12px; }
+.v{ color:#e6d7a3; font-weight:900; font-size:22px; }
+.v.highlight, .gold{ color:#ffd66b; text-shadow:0 0 10px rgba(255,214,107,.25); }
+.aotw-btn{
+  margin-top:8px; padding:10px 14px; border-radius:10px; border:1px solid #4a3a12;
+  background:linear-gradient(180deg,#2c210a,#1a1407); color:#fce59c; font-weight:800; cursor:pointer;
+}
+.aotw-btn:hover{ filter:brightness(1.08); }
+`;
+(() => { const s = document.createElement("style"); s.textContent = CSS; document.head.appendChild(s); })();
