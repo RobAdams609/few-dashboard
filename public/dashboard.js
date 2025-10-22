@@ -459,3 +459,51 @@ async function boot(){
 }
 
 document.addEventListener("DOMContentLoaded", boot);
+(async function(){
+  console.log("Roster fallback: starting…");
+  const money = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
+  const tbody = document.getElementById("tbody");
+  const thead = document.getElementById("thead");
+  const sumSales = document.getElementById("sumSales");
+  const sumCalls = document.getElementById("sumCalls");
+  const sumTalk  = document.getElementById("sumTalk");
+
+  try {
+    const r = await fetch("/api/team_sold?v="+Date.now());
+    if (!r.ok) throw new Error("team_sold " + r.status);
+    const sold = await r.json();
+
+    // Summary cards
+    if (sumCalls) sumCalls.textContent = "0";
+    if (sumSales) sumSales.textContent = money(sold.team.totalAV12x);
+    if (sumTalk)  sumTalk.textContent  = String(sold.team.totalSales);
+
+    // Table header
+    thead.innerHTML = `
+      <tr>
+        <th>Agent</th>
+        <th style="text-align:right">Sold</th>
+        <th style="text-align:right">Submitted AV (12×)</th>
+      </tr>`;
+
+    // Rows
+    const rows = (sold.perAgent||[]).map(a => {
+      const initials = (a.name||"").split(" ").map(w=>w[0]||"").join("").slice(0,2).toUpperCase();
+      return `
+      <tr>
+        <td class="agent">
+          <span class="avatar-fallback">${initials}</span>
+          <span>${a.name||""}</span>
+        </td>
+        <td class="num">${(a.sales||0).toLocaleString("en-US")}</td>
+        <td class="num">${money((a.amount||0)*12)}</td>
+      </tr>`;
+    }).join("");
+
+    tbody.innerHTML = rows || `<tr><td style="padding:14px;color:#7b8aa3">No sales found.</td></tr>`;
+    console.log("Roster fallback: done.");
+  } catch (e) {
+    console.error(e);
+    tbody.innerHTML = `<tr><td style="padding:14px;color:#f66">Roster fallback error: ${e.message}</td></tr>`;
+  }
+})();
