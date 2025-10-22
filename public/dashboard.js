@@ -41,7 +41,16 @@ async function getJSONSmart(pathOrUrl, { api=false } = {}) {
   console.warn("getJSONSmart failed:", pathOrUrl, lastErr?.message || lastErr);
   return null;
 }
+/* ============== Fetch helpers (required for loadStatic) ============== */
+function bust(u){ return u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(); }
 
+async function getJSON(u){
+  // fetch JSON from same site (works for local Netlify paths)
+  const url = u;
+  const r = await fetch(bust(url), { cache: "no-store" });
+  if (!r.ok) throw new Error(`${url} ${r.status}`);
+  return r.json();
+}
 /* ---------------- Tiny DOM helpers ---------------- */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
