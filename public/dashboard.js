@@ -73,7 +73,7 @@ function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
   const idx  = (new Date().getUTCDate()) % list.length;
-  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
+  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");]
 
   // remove legacy banners if present
   ["ticker","principle","ruleBanner","rule-banner-css"].forEach(id=>{
