@@ -1,12 +1,13 @@
-/* ============== FEW Dashboard — ONE FILE (center rule, live AV, sale splash, vendors) ============== */
+/* ================= FEW Dashboard (Production, Self-Healing) ================= */
 "use strict";
 
 /* ---------------- Config ---------------- */
-const ET_TZ     = "America/New_York";
-const DATA_MS   = 30_000;            // refresh data every 30s
-const ROTATE_MS = 30_000;            // rotate views every 30s
-const VIEWS     = ["roster","av","aotw","vendors","ytd"];
-let   viewIdx   = 0;
+const BASE       = "https://few-dashboard-live.netlify.app"; // absolute paths only
+const ET_TZ      = "America/New_York";
+const DATA_MS    = 30_000;            // refresh data every 30s
+const ROTATE_MS  = 30_000;            // rotate views every 30s
+const VIEWS      = ["roster","av","aotw","vendors","ytd"];
+let   viewIdx    = 0;
 
 const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
@@ -15,6 +16,19 @@ const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const escapeHtml = s => String(s??"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+const bust = (u)=> u + (u.includes("?")?"&":"?") + "t=" + Date.now();
+
+async function getJSON(u){
+  const url = u.startsWith("http") ? u : (BASE + u);
+  try{
+    const r = await fetch(bust(url), { cache:"no-store" });
+    if (!r.ok) throw new Error(`${url} ${r.status}`);
+    return await r.json();
+  }catch(e){
+    console.warn("getJSON fail:", url, e.message);
+    return null;
+  }
+}
 
 /* ---------------- Format helpers ---------------- */
 const fmtInt    = n => Number(n||0).toLocaleString("en-US");
@@ -23,13 +37,6 @@ const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) +
 const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("").slice(0,2).toUpperCase();
 const hmm       = mins => { const mm=Math.max(0,Math.round(Number(mins||0))); const h=Math.floor(mm/60), m2=mm%60; return `${h}:${String(m2).padStart(2,"0")}`; };
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
-
-function bust(u){ return u + (u.includes("?")?"&":"?") + "t=" + Date.now(); }
-async function getJSON(u){
-  const r = await fetch(bust(u), { cache:"no-store" });
-  if (!r.ok) throw new Error(`${u} ${r.status}`);
-  return r.json();
-}
 
 /* ---------------- Weekly window (Fri→Fri ET) ---------------- */
 function weekRangeET(){
@@ -46,28 +53,27 @@ const STATE = {
   roster: [],                                // [{name,email,photo,phones}]
   callsWeekByKey: new Map(),                 // key -> {calls,talkMin,loggedMin,leads,sold}
   salesWeekByKey: new Map(),                 // key -> {sales,amount,av12x}
-  prevSalesByKey: new Map(),                 // previous refresh snapshot to detect deltas
+  prevSalesByKey: new Map(),
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
-  seenSaleHashes: new Set(),                 // to avoid duplicate splash from per-sale feed
-  lastDealsShown: 0,                         // fallback guard
+  seenSaleHashes: new Set(),
+  lastDealsShown: 0,
   vendors: { as_of:"", window_days:45, rows:[] }
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------------- ONE (and only one) centered Rule banner ---------------- */
+/* ---------------- ONE (and only one) centered Rule banner — rotates daily ---------------- */
 function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
-  const idx  = (new Date().getUTCDate()) % list.length;
+  const daysSinceEpoch = Math.floor(Date.now()/86400000);
+  const idx  = daysSinceEpoch % list.length;
   const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
 
-  // remove any legacy rule areas
-  ["ticker","principle","ruleBanner","rule-banner-css"].forEach(id=>{
-    const el = document.getElementById(id); if (el) el.remove();
-  });
+  // remove legacy dupes
+  $$("#ticker, #principle, #ruleBanner, #rule-banner-css").forEach(n=>n.remove());
 
-  if (!document.getElementById("rule-banner-css")){
+  if (!$("#rule-banner-css")){
     const el = document.createElement("style");
     el.id = "rule-banner-css";
     el.textContent = `
@@ -80,19 +86,17 @@ function setRuleText(rulesObj){
       #ruleBanner .ruleText{
         font-weight: 1000;
         letter-spacing:.6px;
-        color:#cfd6de;                /* gray lettering per request */
-        font-size: clamp(28px, 3.4vw, 48px);   /* larger & responsive */
+        color:#cfd6de;
+        font-size: clamp(28px, 3.4vw, 48px);
         line-height: 1.15;
-      }
-      .ruleBanner-host{ position:relative; z-index:2; }
-    `;
+      }`;
     document.head.appendChild(el);
   }
-  let host = document.querySelector(".ruleBanner-host");
+  let host = $(".ruleBanner-host");
   if (!host){
     host = document.createElement("div");
     host.className = "ruleBanner-host";
-    const target = document.querySelector("#app") || document.body;
+    const target = $("#app") || document.body;
     target.insertBefore(host, target.firstChild);
   }
   host.innerHTML = `<div id="ruleBanner"><div class="ruleText">${escapeHtml(text)}</div></div>`;
@@ -113,7 +117,7 @@ function setRows(rows){
 
 /* ---------------- Avatar helpers ---------------- */
 function avatarCell(a){
-  const src = a.photo ? `/headshots/${a.photo}` : "";
+  const src = a.photo ? `${BASE}/headshots/${a.photo}` : "";
   const img = src
     ? `<img class="avatar" src="${src}"
          onerror="this.remove();this.insertAdjacentHTML('beforebegin','<div class=&quot;avatar-fallback&quot;>${initials(a.name)}</div>')">`
@@ -121,7 +125,7 @@ function avatarCell(a){
   return `<div class="agent">${img}<span>${escapeHtml(a.name)}</span></div>`;
 }
 function avatarBlock(a){
-  const src = a.photo ? `/headshots/${a.photo}` : "";
+  const src = a.photo ? `${BASE}/headshots/${a.photo}` : "";
   if (src){
     return `<img class="avatar" style="width:84px;height:84px;border-radius:50%;object-fit:cover"
                  src="${src}"
@@ -134,7 +138,7 @@ function avatarBlock(a){
 (function initSaleSplash(){
   let queue = [];
   let showing = false;
-  const SOUND_URL = "/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3";
+  const SOUND_URL = `${BASE}/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3`;
 
   const baseAudio = new Audio(SOUND_URL);
   baseAudio.preload = "auto"; baseAudio.volume = 1.0;
@@ -151,7 +155,7 @@ function avatarBlock(a){
   function showNext(){
     if (showing || queue.length === 0) return;
     showing = true;
-    if (!document.getElementById("sale-splash-css")){
+    if (!$("#sale-splash-css")){
       const css = `
         .saleSplash-backdrop{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter: blur(4px);opacity:0;transition: opacity .28s ease;}
         .saleSplash-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:28px 40px;border-radius:28px;background:linear-gradient(170deg,#FFE79A 0%,#FFD86B 40%,#E1B64F 100%);box-shadow:0 18px 60px rgba(0,0,0,.45),0 0 0 3px rgba(255,215,128,.35) inset;transform:scale(.96) translateY(6px);opacity:.98;transition: transform .28s ease, opacity .28s ease;}
@@ -194,7 +198,7 @@ function avatarBlock(a){
 function updateSummary(){
   const callsEl = $("#sumCalls");
   const avEl    = $("#sumSales");
-  const dealsEl = $("#sumTalk");
+  const dealsEl = $("#sumTalk");            // your markup uses these IDs already
   if (callsEl) callsEl.textContent = fmtInt(STATE.team.calls);
   if (avEl)     avEl.textContent   = fmtMoney(STATE.team.av);
   if (dealsEl)  dealsEl.textContent= fmtInt(STATE.team.deals||0);
@@ -203,11 +207,13 @@ function updateSummary(){
 /* ---------------- Static assets & roster ---------------- */
 async function loadStatic(){
   const [rosterRaw, rules, vendorsRaw] = await Promise.all([
-    getJSON("/headshots/roster.json").catch(()=>[]),
-    getJSON("/rules.json").catch(()=>[]),
-    getJSON("/sales_by_vendor.json").catch(()=>null)
+    getJSON("/headshots/roster.json"),
+    getJSON("/rules.json"),
+    // try function first if you wire it; else json fallback
+    getJSON("/.netlify/functions/vendors_45") || getJSON("/sales_by_vendor.json")
   ]);
-  setRuleText(rules);
+
+  if (rules) setRuleText(rules);
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -217,24 +223,44 @@ async function loadStatic(){
     phones: Array.isArray(a.phones) ? a.phones : []
   }));
 
-  if (vendorsRaw && Array.isArray(vendorsRaw.vendors)){
+  if (vendorsRaw && (Array.isArray(vendorsRaw.vendors) || Array.isArray(vendorsRaw.rows))){
+    const rows = Array.isArray(vendorsRaw.vendors) ? vendorsRaw.vendors : vendorsRaw.rows;
     STATE.vendors = {
-      as_of: vendorsRaw.as_of || "",
-      window_days: Number(vendorsRaw.window_days || 45),
-      rows: vendorsRaw.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
+      as_of: vendorsRaw.as_of || vendorsRaw.asOf || "",
+      window_days: Number(vendorsRaw.window_days || vendorsRaw.windowDays || 45),
+      rows: rows.map(v=>({ name:String(v.name||v.vendor||""), deals:Number(v.deals||v.count||0) }))
     };
   }else{
     STATE.vendors = { as_of:"", window_days:45, rows:[] };
   }
 }
 
-/* ---------------- Calls / Leads / Sold ---------------- */
+/* ---------------- Calls / Leads / Sold (with hard fallbacks) ---------------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
 
+  // 1) function
+  let payload = await getJSON("/.netlify/functions/calls_by_agent");
+
+  // 2) fallback override
+  if (!payload){
+    const ov = await getJSON("/calls_week_override.json");
+    if (Array.isArray(ov)){
+      // shape to {perAgent:[{name,email,calls,talkMin,loggedMin,leads,sold}]}
+      payload = { perAgent: ov.map(x=>({
+        name: x.agent || x.name,
+        email: x.email || "",
+        calls: Number(x.calls||x.count||1),        // at least 1 so it shows
+        talkMin: Number(x.talkMin || (x.talkSec ? x.talkSec/60 : 0)),
+        loggedMin: Number(x.loggedMin||0),
+        leads: Number(x.leads||0),
+        sold: Number(x.sold||0)
+      }))};
+    }
+  }
+
   try{
-    const payload = await getJSON("/.netlify/functions/calls_by_agent");
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
 
     const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
@@ -243,9 +269,7 @@ async function refreshCalls(){
     for (const r of per){
       const e = String(r.email||"").trim().toLowerCase();
       const n = String(r.name ||"").trim().toLowerCase();
-      const k = emailToKey.get(e) || nameToKey.get(n);
-      if (!k) continue;
-
+      const k = emailToKey.get(e) || nameToKey.get(n) || n || e;
       const row = {
         calls    : Number(r.calls||0),
         talkMin  : Number(r.talkMin||0),
@@ -259,7 +283,7 @@ async function refreshCalls(){
       teamLeads += row.leads;
       teamSold  += row.sold;
     }
-  }catch(e){ console.warn("calls_by_agent error", e?.message||e); }
+  }catch(e){ console.warn("calls_by_agent parse error", e?.message||e); }
 
   STATE.callsWeekByKey = byKey;
   STATE.team.calls = Math.max(0, Math.round(teamCalls));
@@ -271,17 +295,31 @@ async function refreshCalls(){
 /* ---------------- Sales / AV(12×) + robust splash trigger ---------------- */
 async function refreshSales(){
   const prevDeals = Number(STATE.team.deals||0);
-  const prevByKey = new Map(STATE.salesWeekByKey); // snapshot
+  const prevByKey = new Map(STATE.salesWeekByKey);
 
-  let perByName = new Map();
+  // 1) function
+  let payload = await getJSON("/.netlify/functions/team_sold");
+
+  // 2) fallback override (rollup by agent)
+  if (!payload){
+    const ov = await getJSON("/av_week_override.json");
+    if (Array.isArray(ov)){
+      payload = { perAgent: ov.map(x=>({
+        name: x.name || x.agent,
+        sales: Number(x.sales||x.deals||1),
+        amount: Number(x.amount || (x.av ? x.av/12 : 0))
+      }))};
+    }
+  }
+
+  const perByName = new Map();
   let totalDeals = 0;
   let totalAV    = 0;
 
   try{
-    const payload = await getJSON("/.netlify/functions/team_sold");
     const [WSTART, WEND] = weekRangeET();
-
     const rawPerSale = Array.isArray(payload?.allSales) ? payload.allSales : null;
+
     if (rawPerSale && rawPerSale.length){
       for (const s of rawPerSale){
         const when = s.dateSold ? toET(s.dateSold) : null;
@@ -298,7 +336,6 @@ async function refreshSales(){
         totalDeals += 1;
         totalAV    += amount*12;
 
-        // anti-dup splash by unique hash
         const hash = `${s.leadId||""}|${s.soldProductId||""}|${s.dateSold||""}`;
         if (!STATE.seenSaleHashes.has(hash)){
           STATE.seenSaleHashes.add(hash);
@@ -306,7 +343,6 @@ async function refreshSales(){
         }
       }
     }else{
-      // rollup path (no per-sale rows)
       const pa = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
       for (const a of pa){
         const key    = String(a.name||"").trim().toLowerCase();
@@ -319,8 +355,6 @@ async function refreshSales(){
     }
   }catch(e){
     console.warn("team_sold error", e?.message||e);
-    perByName = new Map();
-    totalDeals = 0; totalAV = 0;
   }
 
   // Map to roster keys
@@ -331,13 +365,12 @@ async function refreshSales(){
     out.set(agentKey(a), s);
   }
 
-  // Update state
   STATE.prevSalesByKey = prevByKey;
   STATE.salesWeekByKey = out;
   STATE.team.av        = Math.max(0, Math.round(totalAV));
   STATE.team.deals     = Math.max(0, Math.round(totalDeals));
 
-  // Fallback splash for rollup-only feeds: detect any agent whose sales count increased
+  // Fallback splash for rollup-only feeds
   if (STATE.team.deals > prevDeals){
     let winner = null;
     for (const a of STATE.roster){
@@ -352,28 +385,23 @@ async function refreshSales(){
       }
     }
     if (winner) window.showSalePop({ name:winner.name, amount:winner.amount||0, ms:60_000 });
-    STATE.lastDealsShown = STATE.team.deals; // guard
+    STATE.lastDealsShown = STATE.team.deals;
   }
 }
 
 /* ---------------- YTD ---------------- */
 async function loadYTD(){
-  try {
-    const list = await getJSON("/ytd_av.json");
-    const totalObj = await getJSON("/ytd_total.json").catch(()=>({ytd_av_total:0}));
-    const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
-    const rows = Array.isArray(list) ? list : [];
-    const withAvatars = rows.map(r=>{
-      const a = rosterByName.get(String(r.name||"").toLowerCase());
-      return { name:r.name, email:r.email, av:Number(r.av||0), photo:a?.photo||"" };
-    });
-    withAvatars.sort((x,y)=> (y.av)-(x.av));
-    STATE.ytd.list  = withAvatars;
-    STATE.ytd.total = Number(totalObj?.ytd_av_total||0);
-  } catch(e){
-    console.warn("ytd load error", e?.message||e);
-    STATE.ytd = { list:[], total:0 };
-  }
+  const list = await getJSON("/ytd_av.json");
+  const totalObj = await getJSON("/ytd_total.json");
+  const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
+  const rows = Array.isArray(list) ? list : [];
+  const withAvatars = rows.map(r=>{
+    const a = rosterByName.get(String(r.name||"").toLowerCase());
+    return { name:r.name, email:r.email, av:Number(r.av||0), photo:a?.photo||"" };
+  });
+  withAvatars.sort((x,y)=> (y.av)-(x.av));
+  STATE.ytd.list  = withAvatars;
+  STATE.ytd.total = Number(totalObj?.ytd_av_total||0);
 }
 
 /* ---------------- Derived + Renderers ---------------- */
@@ -444,16 +472,14 @@ function renderVendors(){
   setHead([]); // graphic layout
 
   const rows = STATE.vendors.rows || [];
-  // fallback: image or small note
   if (!rows.length){
     const imgHtml = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
-      <img src="/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
+      <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
     </div>
     <div style="text-align:center;color:#9fb0c8;font-size:13px;margin-top:6px;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
     setRows([[imgHtml]]); return;
   }
 
-  // canvas container (pie scaled down)
   const chartId  = `vendorChart_${Date.now()}`;
   const container= `<div style="display:flex;align-items:flex-start;justify-content:center;gap:16px;">
       <canvas id="${chartId}" width="520" height="520" style="max-width:520px;max-height:520px;"></canvas>
@@ -461,14 +487,11 @@ function renderVendors(){
     <div style="margin-top:8px;color:#9fb0c8;font-size:12px;text-align:center;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
   setRows([[container]]);
 
-  // draw if Chart.js present; else PNG fallback
   if (window.Chart){
     const ctx = document.getElementById(chartId).getContext("2d");
-    const labels = rows.map(r=>r.name);
-    const data   = rows.map(r=>r.deals);
     new Chart(ctx, {
       type: "pie",
-      data:{ labels, datasets:[{ data, borderWidth:0 }] },
+      data:{ labels: rows.map(r=>r.name), datasets:[{ data: rows.map(r=>r.deals), borderWidth:0 }] },
       options:{
         responsive:true,
         maintainAspectRatio:true,
@@ -479,9 +502,8 @@ function renderVendors(){
       }
     });
   }else{
-    // swap content for PNG fallback if Chart isn’t loaded
     const png = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
-      <img src="/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
+      <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
     </div>`;
     setRows([[png]]);
   }
@@ -536,4 +558,4 @@ async function boot(){
 }
 
 document.addEventListener("DOMContentLoaded", () => { boot(); });
-/* ================================= End ================================= */
+/* =============================== End =============================== */
