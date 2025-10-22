@@ -227,34 +227,39 @@ function updateSummary(){
   if (dealsEl)  dealsEl.textContent= fmtInt(STATE.team.deals||0);
 }
 
-/* ---------------- Static assets & roster ---------------- */
+// ---------------- Static assets & roster ----------------
 async function loadStatic(){
-  const [rosterRaw, rules, vendorsRaw] = await Promise.all([
-    getJSONSmart("/headshots/roster.json").catch(()=>[]),
-    getJSONSmart("/rules.json").catch(()=>[]),
-    getJSONSmart("/sales_by_vendor.json").catch(()=>null)
-  ]);
+  // Always prefer absolute paths from your own origin
+  const rosterRaw  = await getJSON("/headshots/roster.json").catch(()=>[]);
+  const rules      = await getJSON("/rules.json").catch(()=>({ rules: [] }));
+  const vendorsRaw = await getJSON("/sales_by_vendor.json").catch(()=>null);
+
+  // one (and only one) rule banner
   setRuleText(rules);
 
-  const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
+  // Accept both shapes: [ ... ]  OR  { agents: [ ... ] }
+  const list = Array.isArray(rosterRaw) ? rosterRaw
+              : Array.isArray(rosterRaw?.agents) ? rosterRaw.agents
+              : [];
+  // Normalize into STATE.roster
   STATE.roster = list.map(a => ({
-    name: a.name,
-    email: (a.email||"").trim().toLowerCase(),
-    photo: a.photo||"",
-    phones: Array.isArray(a.phones) ? a.phones : []
+    name:  a.name || "Unknown",
+    email: String(a.email||"").trim().toLowerCase(),
+    photo: a.photo ? String(a.photo) : "",          // filename only
+    phones: Array.isArray(a.phones) ? a.phones : [],
   }));
 
+  // Optional vendor JSON (45-day chart); safe default if missing
   if (vendorsRaw && Array.isArray(vendorsRaw.vendors)){
     STATE.vendors = {
       as_of: vendorsRaw.as_of || "",
       window_days: Number(vendorsRaw.window_days || 45),
       rows: vendorsRaw.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
     };
-  }else{
+  } else {
     STATE.vendors = { as_of:"", window_days:45, rows:[] };
   }
 }
-
 /* ---------------- Calls / Leads / Sold ---------------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
