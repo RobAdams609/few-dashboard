@@ -1,62 +1,30 @@
-/* ============== FEW Dashboard — ONE FILE (production, self-healing) ============== */
+/* ========================= FEW Dashboard — single file =========================
+   - One centered Rule banner (rotates daily from /rules.json)
+   - 4 rotating boards: Roster, Weekly AV, Agent of the Week, Vendors, plus YTD
+   - Uses Netlify Functions you already have:
+       /api/team_sold (authoritative sales + per-sale rows)
+       /api/calls_by_agent (weekly calls/leads/sold aggregation; OK if empty)
+   - Pulls static:
+       /headshots/roster.json    (array OR {agents:[]})
+       /ytd_av.json + /ytd_total.json
+       /sales_by_vendor.json OR falls back to /sales_by_vendor.png
+   - Safe against missing/empty endpoints (renders what’s available)
+=============================================================================== */
 "use strict";
 
-/* ---------------- Absolute origin + resilient fetch ---------------- */
-const ORIGIN   = window.location.origin;  // locks everything to the live domain you’re on
-const BASE     = ORIGIN;                  // “no relative paths” rule: all requests use absolute origin
-const ET_TZ    = "America/New_York";
-const DATA_MS  = 30_000;                  // refresh data every 30s
-const ROTATE_MS= 30_000;                  // rotate views every 30s
-const VIEWS    = ["roster","av","aotw","vendors","ytd"];
-let   viewIdx  = 0;
+/* ---------- Config ---------- */
+const ET_TZ     = "America/New_York";
+const DATA_MS   = 30_000;                      // refresh data every 30s
+const ROTATE_MS = 30_000;                      // rotate boards every 30s
+const BOARDS    = ["roster","av","aotw","vendors","ytd"];
+const PINNED    = (new URLSearchParams(location.search).get("view")||"").toLowerCase();
 
-const QS = new URLSearchParams(location.search);
-const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
-
-/* API path resolver: prefer /api/*, auto-retry /.netlify/functions/*, and bust cache */
-const apiUrl = (path) => `${BASE}/api/${path.replace(/^\/+/, "")}`;
-const fnUrl  = (path) => `${BASE}/.netlify/functions/${path.replace(/^\/+/, "")}`;
-const abs    = (path) => `${BASE}${path.startsWith("/") ? path : `/${path}`}`;
-const bust   = (u) => u + (u.includes("?") ? "&" : "?") + "t=" + Date.now();
-
-async function getJSONSmart(pathOrUrl, { api=false } = {}) {
-  const tries = [];
-  if (/^https?:\/\//i.test(pathOrUrl)) {
-    tries.push(pathOrUrl);                          // literal absolute url
-  } else if (api) {
-    tries.push(apiUrl(pathOrUrl));                  // /api/...
-    tries.push(fnUrl(pathOrUrl));                   // /.netlify/functions/...
-  } else {
-    tries.push(abs(pathOrUrl));                     // absolute static
-  }
-
-  let lastErr;
-  for (const u of tries) {
-    try {
-      const r = await fetch(bust(u), { cache: "no-store" });
-      if (!r.ok) throw new Error(`${r.status} ${u}`);
-      return await r.json();
-    } catch (e) { lastErr = e; }
-  }
-  console.warn("getJSONSmart failed:", pathOrUrl, lastErr?.message || lastErr);
-  return null;
-}
-/* ============== Fetch helpers (required for loadStatic) ============== */
-function bust(u){ return u + (u.includes("?") ? "&" : "?") + "t=" + Date.now(); }
-
-async function getJSON(u){
-  // fetch JSON from same site (works for local Netlify paths)
-  const url = u;
-  const r = await fetch(bust(url), { cache: "no-store" });
-  if (!r.ok) throw new Error(`${url} ${r.status}`);
-  return r.json();
-}
-/* ---------------- Tiny DOM helpers ---------------- */
+/* ---------- Tiny DOM helpers ---------- */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const escapeHtml = s => String(s??"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
 
-/* ---------------- Format helpers ---------------- */
+/* ---------- Format helpers ---------- */
 const fmtInt    = n => Number(n||0).toLocaleString("en-US");
 const fmtMoney  = n => "$" + Math.round(Number(n||0)).toLocaleString("en-US");
 const fmtPct    = n => (n == null ? "—" : (Math.round(n*1000)/10).toFixed(1) + "%");
@@ -64,7 +32,20 @@ const initials  = n => String(n||"").trim().split(/\s+/).map(s=>s[0]||"").join("
 const hmm       = mins => { const mm=Math.max(0,Math.round(Number(mins||0))); const h=Math.floor(mm/60), m2=mm%60; return `${h}:${String(m2).padStart(2,"0")}`; };
 const toET      = d => new Date(new Date(d).toLocaleString("en-US",{ timeZone: ET_TZ }));
 
-/* ---------------- Weekly window (Fri→Fri ET) ---------------- */
+/* ---------- Generic JSON fetch (same-origin safe) ---------- */
+async function getJSON(u){
+  const url = /^https?:\/\//i.test(u) ? u : (u.startsWith("/") ? u : "/" + u);
+  try{
+    const r = await fetch(url + (url.includes("?")?"&":"?") + "t=" + Date.now(), { cache:"no-store" });
+    if (!r.ok) throw new Error(`${url} ${r.status}`);
+    return r.json();
+  }catch(e){
+    console.warn("getJSON failed:", url, e?.message||e);
+    return null;
+  }
+}
+
+/* ---------- Weekly window (Fri→Fri ET) ---------- */
 function weekRangeET(){
   const now = toET(new Date());
   const day = now.getDay();                 // Sun=0 … Sat=6
@@ -74,31 +55,27 @@ function weekRangeET(){
   return [start, end];                       // [inclusive, exclusive)
 }
 
-/* ---------------- State ---------------- */
+/* ---------- State ---------- */
 const STATE = {
   roster: [],                                // [{name,email,photo,phones}]
   callsWeekByKey: new Map(),                 // key -> {calls,talkMin,loggedMin,leads,sold}
   salesWeekByKey: new Map(),                 // key -> {sales,amount,av12x}
-  prevSalesByKey: new Map(),                 // for sale splash delta
+  prevSalesByKey: new Map(),                 // snapshot for splash heuristic
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
+  vendors: { as_of:"", window_days:45, rows:[] },
   seenSaleHashes: new Set(),
-  vendors: { as_of:"", window_days:45, rows:[] }
 };
-const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
+const keyOf = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------------- ONE centered Rule banner (rotates daily) ---------------- */
+/* ---------- One centered rule banner ---------- */
 function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
+  const idx  = (new Date().getUTCDate()) % list.length;
+  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
 
-  // pick one per calendar day — “Rule of the Day”
-  const now = toET(new Date());
-  const dayIndex = Math.floor((now - new Date(now.getFullYear(),0,0)) / 86400000); // day of year
-  const idx  = dayIndex % list.length;
-  const pick = String(list[idx]||"");
-
-  // clear any legacy banners
+  // remove legacy banners if present
   ["ticker","principle","ruleBanner","rule-banner-css"].forEach(id=>{
     const el = document.getElementById(id); if (el) el.remove();
   });
@@ -107,19 +84,12 @@ function setRuleText(rulesObj){
     const el = document.createElement("style");
     el.id = "rule-banner-css";
     el.textContent = `
-      #ruleBanner{
-        display:flex; align-items:center; justify-content:center; text-align:center;
+      #ruleBanner{ display:flex; align-items:center; justify-content:center; text-align:center;
         padding:18px 24px; margin:10px auto; max-width:1280px; border-radius:18px;
         background: rgba(255,255,255,0.03);
-        box-shadow: 0 8px 26px rgba(0,0,0,.35), inset 0 0 0 2px rgba(255,255,255,.06);
-      }
-      #ruleBanner .ruleText{
-        font-weight: 1000;
-        letter-spacing:.6px;
-        color:#cfd6de;
-        font-size: clamp(28px, 3.4vw, 48px);
-        line-height: 1.15;
-      }
+        box-shadow: 0 8px 26px rgba(0,0,0,.35), inset 0 0 0 2px rgba(255,255,255,.06); }
+      #ruleBanner .ruleText{ font-weight: 1000; letter-spacing:.6px; color:#cfd6de;
+        font-size: clamp(28px, 3.4vw, 48px); line-height: 1.15; }
       .ruleBanner-host{ position:relative; z-index:2; }
     `;
     document.head.appendChild(el);
@@ -131,10 +101,10 @@ function setRuleText(rulesObj){
     const target = document.querySelector("#app") || document.body;
     target.insertBefore(host, target.firstChild);
   }
-  host.innerHTML = `<div id="ruleBanner"><div class="ruleText">${escapeHtml(pick)}</div></div>`;
+  host.innerHTML = `<div id="ruleBanner"><div class="ruleText">${escapeHtml(text)}</div></div>`;
 }
 
-/* ---------------- Table helpers ---------------- */
+/* ---------- Summary + table helpers ---------- */
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
 function setHead(cols){
   const thead=$("#thead"); if (!thead) return;
@@ -146,10 +116,16 @@ function setRows(rows){
     ? rows.map(r => `<tr>${r.map((c,i)=>`<td class="${i>0?"num":""}">${c}</td>`).join("")}</tr>`).join("")
     : `<tr><td style="padding:18px;color:#5c6c82;">Loading...</td></tr>`;
 }
+function updateSummary(){
+  const callsEl=$("#sumCalls"), avEl=$("#sumSales"), dealsEl=$("#sumTalk");
+  if (callsEl) callsEl.textContent = fmtInt(STATE.team.calls);
+  if (avEl)     avEl.textContent   = fmtMoney(STATE.team.av);
+  if (dealsEl)  dealsEl.textContent= fmtInt(STATE.team.deals||0);
+}
 
-/* ---------------- Avatars ---------------- */
+/* ---------- Avatar helpers ---------- */
 function avatarCell(a){
-  const src = a.photo ? `${BASE}/headshots/${a.photo}` : "";
+  const src = a.photo ? `/headshots/${a.photo}` : "";
   const img = src
     ? `<img class="avatar" src="${src}"
          onerror="this.remove();this.insertAdjacentHTML('beforebegin','<div class=&quot;avatar-fallback&quot;>${initials(a.name)}</div>')">`
@@ -157,7 +133,7 @@ function avatarCell(a){
   return `<div class="agent">${img}<span>${escapeHtml(a.name)}</span></div>`;
 }
 function avatarBlock(a){
-  const src = a.photo ? `${BASE}/headshots/${a.photo}` : "";
+  const src = a.photo ? `/headshots/${a.photo}` : "";
   if (src){
     return `<img class="avatar" style="width:84px;height:84px;border-radius:50%;object-fit:cover"
                  src="${src}"
@@ -166,120 +142,55 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------------- Sale splash (queued, with sound) ---------------- */
-(function initSaleSplash(){
-  let queue = [];
-  let showing = false;
-  const SOUND_URL = `${BASE}/100-bank-notes-counted-on-loose-note-counter-no-errors-327647.mp3`;
-
-  const baseAudio = new Audio(SOUND_URL);
-  baseAudio.preload = "auto"; baseAudio.volume = 1.0;
-
-  function playSound(){
-    try{ const a = baseAudio.cloneNode(true); a.currentTime = 0; a.play().catch(()=>{}); a.addEventListener("ended", ()=> a.remove()); }catch{}
-  }
-  ["click","keydown","touchstart"].forEach(evt=>{
-    window.addEventListener(evt, ()=>{
-      baseAudio.play().then(()=>{ baseAudio.pause(); baseAudio.currentTime = 0; }).catch(()=>{});
-    }, { once:true, passive:true });
-  });
-
-  function showNext(){
-    if (showing || queue.length === 0) return;
-    showing = true;
-    if (!document.getElementById("sale-splash-css")){
-      const css = `
-        .saleSplash-backdrop{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter: blur(4px);opacity:0;transition: opacity .28s ease;}
-        .saleSplash-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:28px 40px;border-radius:28px;background:linear-gradient(170deg,#FFE79A 0%,#FFD86B 40%,#E1B64F 100%);box-shadow:0 18px 60px rgba(0,0,0,.45),0 0 0 3px rgba(255,215,128,.35) inset;transform:scale(.96) translateY(6px);opacity:.98;transition: transform .28s ease, opacity .28s ease;}
-        .saleSplash-title{font-size: clamp(28px, 5vw, 56px);font-weight:900;color:#1a1a1a}
-        .saleSplash-sub{font-size: clamp(14px, 2.4vw, 20px);font-weight:800;color:#2a2a2a;opacity:.8}
-        .saleSplash-amount{font-size: clamp(36px, 7.2vw, 88px);font-weight:1000;color:#111}
-        .saleSplash-show .saleSplash-backdrop{opacity:1}
-        .saleSplash-show .saleSplash-card{transform:scale(1) translateY(0)}
-      `;
-      const el = document.createElement("style"); el.id="sale-splash-css"; el.textContent = css; document.head.appendChild(el);
-    }
-
-    const { name, amount, ms = 60_000 } = queue.shift();
-    const av12 = Math.round(Number(amount || 0) * 12).toLocaleString("en-US");
-
-    const host = document.createElement("div");
-    host.className = "saleSplash-host";
-    host.innerHTML = `
-      <div class="saleSplash-backdrop">
-        <div class="saleSplash-card" role="status" aria-live="polite">
-          <div class="saleSplash-title">${(name||"").toUpperCase()}</div>
-          <div class="saleSplash-sub">SUBMITTED</div>
-          <div class="saleSplash-amount">$${av12} AV</div>
-        </div>
-      </div>`;
-    document.body.appendChild(host);
-
-    requestAnimationFrame(()=> host.classList.add("saleSplash-show"));
-    playSound();
-
-    const done = () => { host.classList.remove("saleSplash-show"); setTimeout(()=>{ host.remove(); showing = false; showNext(); }, 400); };
-    const t = setTimeout(done, Math.max(3000, ms));
-    host.addEventListener("click", ()=>{ clearTimeout(t); done(); }, { once:true });
-  }
-
-  window.showSalePop = ({name, amount, ms}) => { queue.push({name, amount, ms}); showNext(); };
-})();
-
-/* ---------------- Summary cards ---------------- */
-function updateSummary(){
-  const callsEl = $("#sumCalls");
-  const avEl    = $("#sumSales");
-  const dealsEl = $("#sumTalk");
-  if (callsEl) callsEl.textContent = fmtInt(STATE.team.calls);
-  if (avEl)     avEl.textContent   = fmtMoney(STATE.team.av);
-  if (dealsEl)  dealsEl.textContent= fmtInt(STATE.team.deals||0);
-}
-
-// ---------------- Static assets & roster ----------------
+/* ---------- Static assets ---------- */
 async function loadStatic(){
-  // Always prefer absolute paths from your own origin
-  const rosterRaw  = await getJSON("/headshots/roster.json").catch(()=>[]);
-  const rules      = await getJSON("/rules.json").catch(()=>({ rules: [] }));
-  const vendorsRaw = await getJSON("/sales_by_vendor.json").catch(()=>null);
+  // Rules
+  const rulesRaw = await getJSON("/rules.json");
+  const ruleList = Array.isArray(rulesRaw) ? rulesRaw
+                  : (Array.isArray(rulesRaw?.rules) ? rulesRaw.rules : []);
+  if (ruleList.length) setRuleText({ rules: ruleList });
 
-  // one (and only one) rule banner
-  setRuleText(rules);
-
-  // Accept both shapes: [ ... ]  OR  { agents: [ ... ] }
+  // Roster (array OR {agents:[]})
+  const rosterRaw = await getJSON("/headshots/roster.json");
   const list = Array.isArray(rosterRaw) ? rosterRaw
-              : Array.isArray(rosterRaw?.agents) ? rosterRaw.agents
-              : [];
-  // Normalize into STATE.roster
+             : (Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : []);
   STATE.roster = list.map(a => ({
-    name:  a.name || "Unknown",
-    email: String(a.email||"").trim().toLowerCase(),
-    photo: a.photo ? String(a.photo) : "",          // filename only
-    phones: Array.isArray(a.phones) ? a.phones : [],
+    name  : a.name || "",
+    email : String(a.email||"").trim().toLowerCase(),
+    photo : a.photo || "",
+    phones: Array.isArray(a.phones) ? a.phones : []
   }));
 
-  // Optional vendor JSON (45-day chart); safe default if missing
-  if (vendorsRaw && Array.isArray(vendorsRaw.vendors)){
+  // Vendors
+  const vRaw = await getJSON("/sales_by_vendor.json");
+  if (vRaw){
+    const rowsRaw = Array.isArray(vRaw?.vendors) ? vRaw.vendors
+                 : (Array.isArray(vRaw) ? vRaw : []);
+    const rows = rowsRaw.map(v => ({
+      name  : String(v.name||""),
+      deals : Number(v.deals != null ? v.deals :
+                     v.percent != null ? Math.round(Number(v.percent)*10) : 0)
+    })).filter(r=>r.name);
     STATE.vendors = {
-      as_of: vendorsRaw.as_of || "",
-      window_days: Number(vendorsRaw.window_days || 45),
-      rows: vendorsRaw.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
+      as_of: vRaw.as_of || "",
+      window_days: Number(vRaw.window_days || 45),
+      rows
     };
-  } else {
+  }else{
     STATE.vendors = { as_of:"", window_days:45, rows:[] };
   }
 }
-/* ---------------- Calls / Leads / Sold ---------------- */
+
+/* ---------- Calls (best effort; may be empty) ---------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
 
   try{
-    const payload = await getJSONSmart("calls_by_agent", { api:true });
+    const payload = await getJSON("/api/calls_by_agent");
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
-
-    const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
-    const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
+    const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), keyOf(a)]));
+    const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  keyOf(a)]));
 
     for (const r of per){
       const e = String(r.email||"").trim().toLowerCase();
@@ -309,17 +220,17 @@ async function refreshCalls(){
   STATE.team.sold  = Math.max(0, Math.round(teamSold));
 }
 
-/* ---------------- Sales / AV(12×) + robust splash trigger ---------------- */
+/* ---------- Sales / AV (authoritative from /api/team_sold) ---------- */
 async function refreshSales(){
   const prevDeals = Number(STATE.team.deals||0);
-  const prevByKey = new Map(STATE.salesWeekByKey); // snapshot
+  const prevByKey = new Map(STATE.salesWeekByKey);
 
   let perByName = new Map();
   let totalDeals = 0;
   let totalAV    = 0;
 
   try{
-    const payload = await getJSONSmart("team_sold", { api:true });
+    const payload = await getJSON("/api/team_sold");
     const [WSTART, WEND] = weekRangeET();
 
     const rawPerSale = Array.isArray(payload?.allSales) ? payload.allSales : null;
@@ -333,16 +244,17 @@ async function refreshSales(){
         const cur = perByName.get(key) || { sales:0, amount:0, av12x:0 };
         cur.sales  += 1;
         cur.amount += amount;
-        cur.av12x   = cur.amount*12;
+        cur.av12x   = cur.amount * 12;
         perByName.set(key, cur);
 
         totalDeals += 1;
         totalAV    += amount*12;
 
+        // splash de-duped by a minimal hash
         const hash = `${s.leadId||""}|${s.soldProductId||""}|${s.dateSold||""}`;
         if (!STATE.seenSaleHashes.has(hash)){
           STATE.seenSaleHashes.add(hash);
-          window.showSalePop({ name:s.agent||"Team", amount:s.amount||0, ms:60_000 });
+          // (no audible splash in this build; can wire one later)
         }
       }
     }else{
@@ -358,44 +270,26 @@ async function refreshSales(){
     }
   }catch(e){
     console.warn("team_sold error", e?.message||e);
-    perByName = new Map();
-    totalDeals = 0; totalAV = 0;
   }
 
   const out = new Map();
   for (const a of STATE.roster){
     const nk = String(a.name||"").toLowerCase();
     const s  = perByName.get(nk) || { sales:0, amount:0, av12x:0 };
-    out.set(agentKey(a), s);
+    out.set(keyOf(a), s);
   }
 
   STATE.prevSalesByKey = prevByKey;
   STATE.salesWeekByKey = out;
   STATE.team.av        = Math.max(0, Math.round(totalAV));
   STATE.team.deals     = Math.max(0, Math.round(totalDeals));
-
-  if (STATE.team.deals > prevDeals){
-    let winner = null;
-    for (const a of STATE.roster){
-      const k  = agentKey(a);
-      const now = STATE.salesWeekByKey.get(k) || { sales:0, amount:0 };
-      const then= STATE.prevSalesByKey.get(k)  || { sales:0, amount:0 };
-      if (now.sales > then.sales){
-        const deltaDeals = now.sales - then.sales;
-        const estAmount  = (now.amount - then.amount) / Math.max(1, deltaDeals);
-        winner = { name:a.name, amount: estAmount || now.amount };
-        break;
-      }
-    }
-    if (winner) window.showSalePop({ name:winner.name, amount:winner.amount||0, ms:60_000 });
-  }
 }
 
-/* ---------------- YTD ---------------- */
+/* ---------- YTD list ---------- */
 async function loadYTD(){
-  try {
-    const list = await getJSONSmart("/ytd_av.json");
-    const totalObj = await getJSONSmart("/ytd_total.json").catch(()=>({ytd_av_total:0}));
+  try{
+    const list = await getJSON("/ytd_av.json");
+    const totalObj = await getJSON("/ytd_total.json").catch(()=>({ytd_av_total:0}));
     const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
     const rows = Array.isArray(list) ? list : [];
     const withAvatars = rows.map(r=>{
@@ -405,16 +299,16 @@ async function loadYTD(){
     withAvatars.sort((x,y)=> (y.av)-(x.av));
     STATE.ytd.list  = withAvatars;
     STATE.ytd.total = Number(totalObj?.ytd_av_total||0);
-  } catch(e){
+  }catch(e){
     console.warn("ytd load error", e?.message||e);
     STATE.ytd = { list:[], total:0 };
   }
 }
 
-/* ---------------- Derived + Renderers ---------------- */
+/* ---------- Derived + renderers ---------- */
 function bestOfWeek(){
   const entries = STATE.roster.map(a=>{
-    const s = STATE.salesWeekByKey.get(agentKey(a)) || { av12x:0, sales:0, amount:0 };
+    const s = STATE.salesWeekByKey.get(keyOf(a)) || { av12x:0, sales:0, amount:0 };
     return { a, av12x:Number(s.av12x||0), sales:Number(s.sales||0), salesAmt:Number(s.amount||0) };
   }).sort((x,y)=>{
     if (y.av12x !== x.av12x) return y.av12x - x.av12x;
@@ -428,8 +322,8 @@ function renderRoster(){
   setLabel("This Week — Roster");
   setHead(["Agent","Calls","Talk (min)","Logged (h:mm)","Leads","Sold","Conv %","Submitted AV"]);
   const rows = STATE.roster.map(a=>{
-    const c = STATE.callsWeekByKey.get(agentKey(a)) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
-    const s = STATE.salesWeekByKey.get(agentKey(a)) || { av12x:0, sales:0, amount:0 };
+    const c = STATE.callsWeekByKey.get(keyOf(a)) || { calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 };
+    const s = STATE.salesWeekByKey.get(keyOf(a)) || { av12x:0, sales:0, amount:0 };
     const conv = c.leads > 0 ? (Number(s.sales||0) / c.leads) : null;
     return [
       avatarCell(a),
@@ -449,7 +343,7 @@ function renderWeekAV(){
   setLabel("This Week — Leaderboard (Submitted AV)");
   setHead(["Agent","Submitted AV"]);
   const ranked = STATE.roster
-    .map(a=>({ a, val: Number((STATE.salesWeekByKey.get(agentKey(a))||{}).av12x||0) }))
+    .map(a=>({ a, val: Number((STATE.salesWeekByKey.get(keyOf(a))||{}).av12x||0) }))
     .sort((x,y)=> (y.val)-(x.val));
   setRows(ranked.map(({a,val})=> [avatarCell(a), fmtMoney(val)]));
 }
@@ -481,7 +375,7 @@ function renderVendors(){
   const rows = STATE.vendors.rows || [];
   if (!rows.length){
     const imgHtml = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
-      <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
+      <img src="/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
     </div>
     <div style="text-align:center;color:#9fb0c8;font-size:13px;margin-top:6px;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
     setRows([[imgHtml]]); return;
@@ -502,8 +396,7 @@ function renderVendors(){
       type: "pie",
       data:{ labels, datasets:[{ data, borderWidth:0 }] },
       options:{
-        responsive:true,
-        maintainAspectRatio:true,
+        responsive:true, maintainAspectRatio:true,
         plugins:{
           legend:{ position:"right", labels:{ color:"#cfd7e3", boxWidth:14, padding:10 } },
           tooltip:{ callbacks:{ label:(c)=> `${c.label}: ${fmtInt(c.raw)} deals` } }
@@ -512,7 +405,7 @@ function renderVendors(){
     });
   }else{
     const png = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
-      <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
+      <img src="/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
     </div>`;
     setRows([[png]]);
   }
@@ -528,10 +421,11 @@ function renderYTD(){
   setRows(rows);
 }
 
-/* ---------------- Router ---------------- */
-function renderCurrentView(){
+/* ---------- Router ---------- */
+let boardIdx = 0;
+function renderBoard(){
   updateSummary();
-  const v = VIEW_OVERRIDE || VIEWS[viewIdx % VIEWS.length];
+  const v = PINNED || BOARDS[boardIdx % BOARDS.length];
   if (v === "roster")      renderRoster();
   else if (v === "av")     renderWeekAV();
   else if (v === "aotw")   renderAOTW();
@@ -540,24 +434,22 @@ function renderCurrentView(){
   else                     renderRoster();
 }
 
-/* ---------------- Boot ---------------- */
+/* ---------- Boot ---------- */
 async function boot(){
   try{
     await loadStatic();
     await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
-    renderCurrentView();
+    renderBoard();
 
-    // periodic refresh
     setInterval(async ()=>{
       try{
         await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
-        renderCurrentView();
+        renderBoard();
       }catch(e){ console.warn("refresh tick error", e?.message||e); }
     }, DATA_MS);
 
-    // rotation (unless pinned with ?view=…)
-    if (!VIEW_OVERRIDE){
-      setInterval(()=>{ viewIdx = (viewIdx + 1) % VIEWS.length; renderCurrentView(); }, ROTATE_MS);
+    if (!PINNED){
+      setInterval(()=>{ boardIdx = (boardIdx + 1) % BOARDS.length; renderBoard(); }, ROTATE_MS);
     }
   }catch(e){
     console.error("Dashboard boot error:", e);
@@ -566,5 +458,4 @@ async function boot(){
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => { boot(); });
-/* ================================= End ================================= */
+document.addEventListener("DOMContentLoaded", boot);
