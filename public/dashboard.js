@@ -48,6 +48,43 @@ function weekRangeET(){
   return [start, end];                       // [inclusive, exclusive)
 }
 
+/* ---------------- Permanent vendor list + normalization ---------------- */
+const VENDOR_CANON = [
+  "$7.50","George Region Shared","Red Media","Blast/Bulk","Exclusive JUMBO","ABC",
+  "Shared Jumbo","VS Default","RKA Website","Redrip/Give up Purchased",
+  "Lamy Dynasty Specials","JUMBO Splits","Exclusive 30s","Positive Intent/Argos",
+  "HotLine Bling","Referral","CG Exclusive"
+];
+
+function normVendor(raw){
+  const s = String(raw||"").trim().toLowerCase();
+  const map = [
+    [/^\$?\s*7\.?50$/, "$7.50"],
+    [/red\s*media/, "Red Media"],
+    [/blast|bulk/, "Blast/Bulk"],
+    [/exclusive\s*j(umbo)?/,"Exclusive JUMBO"],
+    [/shared\s*j(umbo)?/,"Shared Jumbo"],
+    [/vs\s*default/,"VS Default"],
+    [/rka.*web/, "RKA Website"],
+    /(redrip|give.*up)/, "Redrip/Give up Purchased",
+    /lamy.*dynasty/, "Lamy Dynasty Specials"],
+    /jumbo.*split/, "JUMBO Splits"],
+    /exclusive.*30/, "Exclusive 30s"],
+    /(positive.*intent|argos)/, "Positive Intent/Argos"],
+    /hot.?line.?bling/, "HotLine Bling"],
+    /referr?al/, "Referral"],
+    /cg.*exclusive/, "CG Exclusive"],
+    [/abc/, "ABC"],
+    [/george.*region.*shared/,"George Region Shared"]
+  ];
+  for (const [re, val] of map){
+    if (re.test(s)) return val;
+  }
+  // default: keep as-is if it’s one of the canon names after case-fix
+  const idx = VENDOR_CANON.findIndex(v => v.toLowerCase() === s);
+  return idx >= 0 ? VENDOR_CANON[idx] : "Referral"; // safe bucket
+}
+
 /* ---------------- State ---------------- */
 const STATE = {
   roster: [],                                // [{name,email,photo,phones}]
@@ -92,11 +129,11 @@ function setRuleText(rulesObj){
       }`;
     document.head.appendChild(el);
   }
-  let host = $(".ruleBanner-host");
+  let host = document.querySelector(".ruleBanner-host");
   if (!host){
     host = document.createElement("div");
     host.className = "ruleBanner-host";
-    const target = $("#app") || document.body;
+    const target = document.body;
     target.insertBefore(host, target.firstChild);
   }
   host.innerHTML = `<div id="ruleBanner"><div class="ruleText">${escapeHtml(text)}</div></div>`;
@@ -134,7 +171,7 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------------- Full-screen sale splash (queue + audio) ---------------- */
+/* ---------------- Sale splash (with audio) ---------------- */
 (function initSaleSplash(){
   let queue = [];
   let showing = false;
@@ -194,11 +231,11 @@ function avatarBlock(a){
   window.showSalePop = ({name, amount, ms}) => { queue.push({name, amount, ms}); showNext(); };
 })();
 
-/* ---------------- Summary cards ---------------- */
+/* ---------------- Summary tiles ---------------- */
 function updateSummary(){
   const callsEl = $("#sumCalls");
   const avEl    = $("#sumSales");
-  const dealsEl = $("#sumTalk");            // your markup uses these IDs already
+  const dealsEl = $("#sumTalk");
   if (callsEl) callsEl.textContent = fmtInt(STATE.team.calls);
   if (avEl)     avEl.textContent   = fmtMoney(STATE.team.av);
   if (dealsEl)  dealsEl.textContent= fmtInt(STATE.team.deals||0);
@@ -206,11 +243,10 @@ function updateSummary(){
 
 /* ---------------- Static assets & roster ---------------- */
 async function loadStatic(){
-  const [rosterRaw, rules, vendorsRaw] = await Promise.all([
+  const [rosterRaw, rules, vendorsFallback] = await Promise.all([
     getJSON("/headshots/roster.json"),
     getJSON("/rules.json"),
-    // try function first if you wire it; else json fallback
-    getJSON("/.netlify/functions/vendors_45") || getJSON("/sales_by_vendor.json")
+    getJSON("/sales_by_vendor.json")
   ]);
 
   if (rules) setRuleText(rules);
@@ -223,12 +259,11 @@ async function loadStatic(){
     phones: Array.isArray(a.phones) ? a.phones : []
   }));
 
-  if (vendorsRaw && (Array.isArray(vendorsRaw.vendors) || Array.isArray(vendorsRaw.rows))){
-    const rows = Array.isArray(vendorsRaw.vendors) ? vendorsRaw.vendors : vendorsRaw.rows;
+  if (vendorsFallback && Array.isArray(vendorsFallback.vendors)){
     STATE.vendors = {
-      as_of: vendorsRaw.as_of || vendorsRaw.asOf || "",
-      window_days: Number(vendorsRaw.window_days || vendorsRaw.windowDays || 45),
-      rows: rows.map(v=>({ name:String(v.name||v.vendor||""), deals:Number(v.deals||v.count||0) }))
+      as_of: vendorsFallback.as_of || "",
+      window_days: Number(vendorsFallback.window_days || 45),
+      rows: vendorsFallback.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
     };
   }else{
     STATE.vendors = { as_of:"", window_days:45, rows:[] };
@@ -240,18 +275,17 @@ async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
 
-  // 1) function
-  let payload = await getJSON("/.netlify/functions/calls_by_agent");
+  // 1) primary function
+  let payload = await getJSON("/api/calls_by_agent");
 
   // 2) fallback override
   if (!payload){
     const ov = await getJSON("/calls_week_override.json");
     if (Array.isArray(ov)){
-      // shape to {perAgent:[{name,email,calls,talkMin,loggedMin,leads,sold}]}
       payload = { perAgent: ov.map(x=>({
-        name: x.agent || x.name,
+        name: x.name || x.agent,
         email: x.email || "",
-        calls: Number(x.calls||x.count||1),        // at least 1 so it shows
+        calls: Number(x.calls||x.count||1),
         talkMin: Number(x.talkMin || (x.talkSec ? x.talkSec/60 : 0)),
         loggedMin: Number(x.loggedMin||0),
         leads: Number(x.leads||0),
@@ -262,7 +296,6 @@ async function refreshCalls(){
 
   try{
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
-
     const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
     const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
 
@@ -297,8 +330,8 @@ async function refreshSales(){
   const prevDeals = Number(STATE.team.deals||0);
   const prevByKey = new Map(STATE.salesWeekByKey);
 
-  // 1) function
-  let payload = await getJSON("/.netlify/functions/team_sold");
+  // 1) primary function
+  let payload = await getJSON("/api/team_sold");
 
   // 2) fallback override (rollup by agent)
   if (!payload){
@@ -369,23 +402,40 @@ async function refreshSales(){
   STATE.salesWeekByKey = out;
   STATE.team.av        = Math.max(0, Math.round(totalAV));
   STATE.team.deals     = Math.max(0, Math.round(totalDeals));
+}
 
-  // Fallback splash for rollup-only feeds
-  if (STATE.team.deals > prevDeals){
-    let winner = null;
-    for (const a of STATE.roster){
-      const k  = agentKey(a);
-      const now = STATE.salesWeekByKey.get(k) || { sales:0, amount:0 };
-      const then= STATE.prevSalesByKey.get(k)  || { sales:0, amount:0 };
-      if (now.sales > then.sales){
-        const deltaDeals = now.sales - then.sales;
-        const estAmount  = (now.amount - then.amount) / Math.max(1, deltaDeals);
-        winner = { name:a.name, amount: estAmount || now.amount };
-        break;
-      }
+/* ---------------- 45-day Vendors (compute from sales feed; fallback to JSON) ---------------- */
+async function refreshVendors45(){
+  // Try to compute from team_sold (better accuracy)
+  const sales = await getJSON("/api/team_sold");
+  const rows = [];
+  const since = new Date(); since.setDate(since.getDate() - 45);
+
+  if (sales && Array.isArray(sales.allSales) && sales.allSales.length){
+    const counts = new Map(VENDOR_CANON.map(v=>[v,0]));
+    for (const s of sales.allSales){
+      const d = s.dateSold ? new Date(s.dateSold) : null;
+      if (!d || d < since) continue;
+      const vendorRaw = s.product || s.vendor || s.source || s.campaign || s.soldProduct || s.soldProductName || "";
+      const v = normVendor(vendorRaw);
+      counts.set(v, (counts.get(v)||0) + 1);
     }
-    if (winner) window.showSalePop({ name:winner.name, amount:winner.amount||0, ms:60_000 });
-    STATE.lastDealsShown = STATE.team.deals;
+    for (const v of VENDOR_CANON){
+      const n = counts.get(v)||0;
+      if (n>0) rows.push({ name:v, deals:n });
+    }
+    STATE.vendors = { as_of: new Date().toISOString().slice(0,10), window_days:45, rows };
+    return;
+  }
+
+  // Fallback to static JSON
+  const j = await getJSON("/sales_by_vendor.json");
+  if (j && Array.isArray(j.vendors)){
+    STATE.vendors = {
+      as_of: j.as_of || "",
+      window_days: Number(j.window_days || 45),
+      rows: j.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
+    };
   }
 }
 
@@ -415,6 +465,10 @@ function bestOfWeek(){
     return y.salesAmt - x.salesAmt;
   });
   return entries[0] || null;
+}
+
+function avatarCellFromNamePhoto(name, photo){
+  return avatarCell({ name, photo });
 }
 
 function renderRoster(){
@@ -469,53 +523,31 @@ function renderAOTW(){
 
 function renderVendors(){
   setLabel(`Lead Vendors — % of Sales (Last ${STATE.vendors.window_days || 45} days)`);
-  setHead([]); // graphic layout
+  setHead(["Vendor","Deals","Share"]);
 
   const rows = STATE.vendors.rows || [];
-  if (!rows.length){
-    const imgHtml = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
-      <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
-    </div>
-    <div style="text-align:center;color:#9fb0c8;font-size:13px;margin-top:6px;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
-    setRows([[imgHtml]]); return;
-  }
+  const total = rows.reduce((a,b)=>a + Number(b.deals||0), 0) || 1;
+  const tbl = rows
+    .sort((a,b)=> (b.deals||0)-(a.deals||0))
+    .map(r => [escapeHtml(r.name), fmtInt(r.deals), fmtPct(r.deals/total)]);
 
-  const chartId  = `vendorChart_${Date.now()}`;
-  const container= `<div style="display:flex;align-items:flex-start;justify-content:center;gap:16px;">
-      <canvas id="${chartId}" width="520" height="520" style="max-width:520px;max-height:520px;"></canvas>
-    </div>
-    <div style="margin-top:8px;color:#9fb0c8;font-size:12px;text-align:center;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
-  setRows([[container]]);
-
-  if (window.Chart){
-    const ctx = document.getElementById(chartId).getContext("2d");
-    new Chart(ctx, {
-      type: "pie",
-      data:{ labels: rows.map(r=>r.name), datasets:[{ data: rows.map(r=>r.deals), borderWidth:0 }] },
-      options:{
-        responsive:true,
-        maintainAspectRatio:true,
-        plugins:{
-          legend:{ position:"right", labels:{ color:"#cfd7e3", boxWidth:14, padding:10 } },
-          tooltip:{ callbacks:{ label:(c)=> `${c.label}: ${fmtInt(c.raw)} deals` } }
-        }
-      }
-    });
-  }else{
-    const png = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
+  setRows(tbl.length ? tbl : []);
+  if (!tbl.length){
+    setRows([[`<div style="padding:8px 0;color:#9fb0c8">No vendor data yet (showing fallback image)</div>`]]);
+    const img = `<tr><td colspan="3"><div style="display:flex;justify-content:center;padding:8px 0 16px">
       <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
-    </div>`;
-    setRows([[png]]);
+    </div></td></tr>`;
+    $("#tbody").insertAdjacentHTML("beforeend", img);
   }
 }
 
 function renderYTD(){
   setLabel("YTD — Leaders");
   setHead(["Agent","YTD AV (12×)"]);
-  const rows = (STATE.ytd.list||[]).map(r=>{
-    const a = { name:r.name, photo:r.photo };
-    return [avatarCell(a), fmtMoney(r.av)];
-  });
+  const rows = (STATE.ytd.list||[]).map(r=>[
+    avatarCellFromNamePhoto(r.name, r.photo),
+    fmtMoney(r.av)
+  ]);
   setRows(rows);
 }
 
@@ -535,13 +567,13 @@ function renderCurrentView(){
 async function boot(){
   try{
     await loadStatic();
-    await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
+    await Promise.all([refreshCalls(), refreshSales(), refreshVendors45(), loadYTD()]);
     renderCurrentView();
 
     // periodic refresh
     setInterval(async ()=>{
       try{
-        await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
+        await Promise.all([refreshCalls(), refreshSales(), refreshVendors45(), loadYTD()]);
         renderCurrentView();
       }catch(e){ console.warn("refresh tick error", e?.message||e); }
     }, DATA_MS);
