@@ -1,34 +1,51 @@
-/* ================= FEW Dashboard (Production, Self-Healing) ================= */
+/* ============== FEW Dashboard — ONE FILE (production, self-healing) ============== */
 "use strict";
 
-/* ---------------- Config ---------------- */
-const BASE       = "https://few-dashboard-live.netlify.app"; // absolute paths only
-const ET_TZ      = "America/New_York";
-const DATA_MS    = 30_000;            // refresh data every 30s
-const ROTATE_MS  = 30_000;            // rotate views every 30s
-const VIEWS      = ["roster","av","aotw","vendors","ytd"];
-let   viewIdx    = 0;
+/* ---------------- Absolute origin + resilient fetch ---------------- */
+const ORIGIN   = window.location.origin;  // locks everything to the live domain you’re on
+const BASE     = ORIGIN;                  // “no relative paths” rule: all requests use absolute origin
+const ET_TZ    = "America/New_York";
+const DATA_MS  = 30_000;                  // refresh data every 30s
+const ROTATE_MS= 30_000;                  // rotate views every 30s
+const VIEWS    = ["roster","av","aotw","vendors","ytd"];
+let   viewIdx  = 0;
 
 const QS = new URLSearchParams(location.search);
 const VIEW_OVERRIDE = (QS.get("view") || "").toLowerCase();
 
-/* ---------------- DOM utils ---------------- */
+/* API path resolver: prefer /api/*, auto-retry /.netlify/functions/*, and bust cache */
+const apiUrl = (path) => `${BASE}/api/${path.replace(/^\/+/, "")}`;
+const fnUrl  = (path) => `${BASE}/.netlify/functions/${path.replace(/^\/+/, "")}`;
+const abs    = (path) => `${BASE}${path.startsWith("/") ? path : `/${path}`}`;
+const bust   = (u) => u + (u.includes("?") ? "&" : "?") + "t=" + Date.now();
+
+async function getJSONSmart(pathOrUrl, { api=false } = {}) {
+  const tries = [];
+  if (/^https?:\/\//i.test(pathOrUrl)) {
+    tries.push(pathOrUrl);                          // literal absolute url
+  } else if (api) {
+    tries.push(apiUrl(pathOrUrl));                  // /api/...
+    tries.push(fnUrl(pathOrUrl));                   // /.netlify/functions/...
+  } else {
+    tries.push(abs(pathOrUrl));                     // absolute static
+  }
+
+  let lastErr;
+  for (const u of tries) {
+    try {
+      const r = await fetch(bust(u), { cache: "no-store" });
+      if (!r.ok) throw new Error(`${r.status} ${u}`);
+      return await r.json();
+    } catch (e) { lastErr = e; }
+  }
+  console.warn("getJSONSmart failed:", pathOrUrl, lastErr?.message || lastErr);
+  return null;
+}
+
+/* ---------------- Tiny DOM helpers ---------------- */
 const $  = s => document.querySelector(s);
 const $$ = s => Array.from(document.querySelectorAll(s));
 const escapeHtml = s => String(s??"").replace(/[&<>"']/g, c=>({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
-const bust = (u)=> u + (u.includes("?")?"&":"?") + "t=" + Date.now();
-
-async function getJSON(u){
-  const url = u.startsWith("http") ? u : (BASE + u);
-  try{
-    const r = await fetch(bust(url), { cache:"no-store" });
-    if (!r.ok) throw new Error(`${url} ${r.status}`);
-    return await r.json();
-  }catch(e){
-    console.warn("getJSON fail:", url, e.message);
-    return null;
-  }
-}
 
 /* ---------------- Format helpers ---------------- */
 const fmtInt    = n => Number(n||0).toLocaleString("en-US");
@@ -48,69 +65,36 @@ function weekRangeET(){
   return [start, end];                       // [inclusive, exclusive)
 }
 
-/* ---------------- Permanent vendor list + normalization ---------------- */
-const VENDOR_CANON = [
-  "$7.50","George Region Shared","Red Media","Blast/Bulk","Exclusive JUMBO","ABC",
-  "Shared Jumbo","VS Default","RKA Website","Redrip/Give up Purchased",
-  "Lamy Dynasty Specials","JUMBO Splits","Exclusive 30s","Positive Intent/Argos",
-  "HotLine Bling","Referral","CG Exclusive"
-];
-
-function normVendor(raw){
-  const s = String(raw||"").trim().toLowerCase();
-  const map = [
-    [/^\$?\s*7\.?50$/, "$7.50"],
-    [/red\s*media/, "Red Media"],
-    [/blast|bulk/, "Blast/Bulk"],
-    [/exclusive\s*j(umbo)?/,"Exclusive JUMBO"],
-    [/shared\s*j(umbo)?/,"Shared Jumbo"],
-    [/vs\s*default/,"VS Default"],
-    [/rka.*web/, "RKA Website"],
-    /(redrip|give.*up)/, "Redrip/Give up Purchased",
-    /lamy.*dynasty/, "Lamy Dynasty Specials"],
-    /jumbo.*split/, "JUMBO Splits"],
-    /exclusive.*30/, "Exclusive 30s"],
-    /(positive.*intent|argos)/, "Positive Intent/Argos"],
-    /hot.?line.?bling/, "HotLine Bling"],
-    /referr?al/, "Referral"],
-    /cg.*exclusive/, "CG Exclusive"],
-    [/abc/, "ABC"],
-    [/george.*region.*shared/,"George Region Shared"]
-  ];
-  for (const [re, val] of map){
-    if (re.test(s)) return val;
-  }
-  // default: keep as-is if it’s one of the canon names after case-fix
-  const idx = VENDOR_CANON.findIndex(v => v.toLowerCase() === s);
-  return idx >= 0 ? VENDOR_CANON[idx] : "Referral"; // safe bucket
-}
-
 /* ---------------- State ---------------- */
 const STATE = {
   roster: [],                                // [{name,email,photo,phones}]
   callsWeekByKey: new Map(),                 // key -> {calls,talkMin,loggedMin,leads,sold}
   salesWeekByKey: new Map(),                 // key -> {sales,amount,av12x}
-  prevSalesByKey: new Map(),
+  prevSalesByKey: new Map(),                 // for sale splash delta
   team: { calls:0, talk:0, av:0, deals:0, leads:0, sold:0 },
   ytd: { list:[], total:0 },
   seenSaleHashes: new Set(),
-  lastDealsShown: 0,
   vendors: { as_of:"", window_days:45, rows:[] }
 };
 const agentKey = a => (a.email || a.name || "").trim().toLowerCase();
 
-/* ---------------- ONE (and only one) centered Rule banner — rotates daily ---------------- */
+/* ---------------- ONE centered Rule banner (rotates daily) ---------------- */
 function setRuleText(rulesObj){
   const list = Array.isArray(rulesObj?.rules) ? rulesObj.rules : (Array.isArray(rulesObj) ? rulesObj : []);
   if (!list.length) return;
-  const daysSinceEpoch = Math.floor(Date.now()/86400000);
-  const idx  = daysSinceEpoch % list.length;
-  const text = String(list[idx]||"").replace(/Bonus\)\s*/,"Bonus: ");
 
-  // remove legacy dupes
-  $$("#ticker, #principle, #ruleBanner, #rule-banner-css").forEach(n=>n.remove());
+  // pick one per calendar day — “Rule of the Day”
+  const now = toET(new Date());
+  const dayIndex = Math.floor((now - new Date(now.getFullYear(),0,0)) / 86400000); // day of year
+  const idx  = dayIndex % list.length;
+  const pick = String(list[idx]||"");
 
-  if (!$("#rule-banner-css")){
+  // clear any legacy banners
+  ["ticker","principle","ruleBanner","rule-banner-css"].forEach(id=>{
+    const el = document.getElementById(id); if (el) el.remove();
+  });
+
+  if (!document.getElementById("rule-banner-css")){
     const el = document.createElement("style");
     el.id = "rule-banner-css";
     el.textContent = `
@@ -126,20 +110,22 @@ function setRuleText(rulesObj){
         color:#cfd6de;
         font-size: clamp(28px, 3.4vw, 48px);
         line-height: 1.15;
-      }`;
+      }
+      .ruleBanner-host{ position:relative; z-index:2; }
+    `;
     document.head.appendChild(el);
   }
   let host = document.querySelector(".ruleBanner-host");
   if (!host){
     host = document.createElement("div");
     host.className = "ruleBanner-host";
-    const target = document.body;
+    const target = document.querySelector("#app") || document.body;
     target.insertBefore(host, target.firstChild);
   }
-  host.innerHTML = `<div id="ruleBanner"><div class="ruleText">${escapeHtml(text)}</div></div>`;
+  host.innerHTML = `<div id="ruleBanner"><div class="ruleText">${escapeHtml(pick)}</div></div>`;
 }
 
-/* ---------------- Simple table helpers ---------------- */
+/* ---------------- Table helpers ---------------- */
 function setLabel(txt){ const el = $("#viewLabel"); if (el) el.textContent = txt; }
 function setHead(cols){
   const thead=$("#thead"); if (!thead) return;
@@ -152,7 +138,7 @@ function setRows(rows){
     : `<tr><td style="padding:18px;color:#5c6c82;">Loading...</td></tr>`;
 }
 
-/* ---------------- Avatar helpers ---------------- */
+/* ---------------- Avatars ---------------- */
 function avatarCell(a){
   const src = a.photo ? `${BASE}/headshots/${a.photo}` : "";
   const img = src
@@ -171,7 +157,7 @@ function avatarBlock(a){
   return `<div class="avatar-fallback" style="width:84px;height:84px;font-size:28px">${initials(a.name)}</div>`;
 }
 
-/* ---------------- Sale splash (with audio) ---------------- */
+/* ---------------- Sale splash (queued, with sound) ---------------- */
 (function initSaleSplash(){
   let queue = [];
   let showing = false;
@@ -192,7 +178,7 @@ function avatarBlock(a){
   function showNext(){
     if (showing || queue.length === 0) return;
     showing = true;
-    if (!$("#sale-splash-css")){
+    if (!document.getElementById("sale-splash-css")){
       const css = `
         .saleSplash-backdrop{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);backdrop-filter: blur(4px);opacity:0;transition: opacity .28s ease;}
         .saleSplash-card{display:flex;flex-direction:column;align-items:center;gap:10px;padding:28px 40px;border-radius:28px;background:linear-gradient(170deg,#FFE79A 0%,#FFD86B 40%,#E1B64F 100%);box-shadow:0 18px 60px rgba(0,0,0,.45),0 0 0 3px rgba(255,215,128,.35) inset;transform:scale(.96) translateY(6px);opacity:.98;transition: transform .28s ease, opacity .28s ease;}
@@ -231,7 +217,7 @@ function avatarBlock(a){
   window.showSalePop = ({name, amount, ms}) => { queue.push({name, amount, ms}); showNext(); };
 })();
 
-/* ---------------- Summary tiles ---------------- */
+/* ---------------- Summary cards ---------------- */
 function updateSummary(){
   const callsEl = $("#sumCalls");
   const avEl    = $("#sumSales");
@@ -243,13 +229,12 @@ function updateSummary(){
 
 /* ---------------- Static assets & roster ---------------- */
 async function loadStatic(){
-  const [rosterRaw, rules, vendorsFallback] = await Promise.all([
-    getJSON("/headshots/roster.json"),
-    getJSON("/rules.json"),
-    getJSON("/sales_by_vendor.json")
+  const [rosterRaw, rules, vendorsRaw] = await Promise.all([
+    getJSONSmart("/headshots/roster.json").catch(()=>[]),
+    getJSONSmart("/rules.json").catch(()=>[]),
+    getJSONSmart("/sales_by_vendor.json").catch(()=>null)
   ]);
-
-  if (rules) setRuleText(rules);
+  setRuleText(rules);
 
   const list = Array.isArray(rosterRaw?.agents) ? rosterRaw.agents : (Array.isArray(rosterRaw) ? rosterRaw : []);
   STATE.roster = list.map(a => ({
@@ -259,50 +244,35 @@ async function loadStatic(){
     phones: Array.isArray(a.phones) ? a.phones : []
   }));
 
-  if (vendorsFallback && Array.isArray(vendorsFallback.vendors)){
+  if (vendorsRaw && Array.isArray(vendorsRaw.vendors)){
     STATE.vendors = {
-      as_of: vendorsFallback.as_of || "",
-      window_days: Number(vendorsFallback.window_days || 45),
-      rows: vendorsFallback.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
+      as_of: vendorsRaw.as_of || "",
+      window_days: Number(vendorsRaw.window_days || 45),
+      rows: vendorsRaw.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
     };
   }else{
     STATE.vendors = { as_of:"", window_days:45, rows:[] };
   }
 }
 
-/* ---------------- Calls / Leads / Sold (with hard fallbacks) ---------------- */
+/* ---------------- Calls / Leads / Sold ---------------- */
 async function refreshCalls(){
   let teamCalls = 0, teamTalk = 0, teamLeads = 0, teamSold = 0;
   const byKey = new Map();
 
-  // 1) primary function
-  let payload = await getJSON("/api/calls_by_agent");
-
-  // 2) fallback override
-  if (!payload){
-    const ov = await getJSON("/calls_week_override.json");
-    if (Array.isArray(ov)){
-      payload = { perAgent: ov.map(x=>({
-        name: x.name || x.agent,
-        email: x.email || "",
-        calls: Number(x.calls||x.count||1),
-        talkMin: Number(x.talkMin || (x.talkSec ? x.talkSec/60 : 0)),
-        loggedMin: Number(x.loggedMin||0),
-        leads: Number(x.leads||0),
-        sold: Number(x.sold||0)
-      }))};
-    }
-  }
-
   try{
+    const payload = await getJSONSmart("calls_by_agent", { api:true });
     const per = Array.isArray(payload?.perAgent) ? payload.perAgent : [];
+
     const emailToKey = new Map(STATE.roster.map(a => [String(a.email||"").trim().toLowerCase(), agentKey(a)]));
     const nameToKey  = new Map(STATE.roster.map(a => [String(a.name ||"").trim().toLowerCase(),  agentKey(a)]));
 
     for (const r of per){
       const e = String(r.email||"").trim().toLowerCase();
       const n = String(r.name ||"").trim().toLowerCase();
-      const k = emailToKey.get(e) || nameToKey.get(n) || n || e;
+      const k = emailToKey.get(e) || nameToKey.get(n);
+      if (!k) continue;
+
       const row = {
         calls    : Number(r.calls||0),
         talkMin  : Number(r.talkMin||0),
@@ -316,7 +286,7 @@ async function refreshCalls(){
       teamLeads += row.leads;
       teamSold  += row.sold;
     }
-  }catch(e){ console.warn("calls_by_agent parse error", e?.message||e); }
+  }catch(e){ console.warn("calls_by_agent error", e?.message||e); }
 
   STATE.callsWeekByKey = byKey;
   STATE.team.calls = Math.max(0, Math.round(teamCalls));
@@ -328,31 +298,17 @@ async function refreshCalls(){
 /* ---------------- Sales / AV(12×) + robust splash trigger ---------------- */
 async function refreshSales(){
   const prevDeals = Number(STATE.team.deals||0);
-  const prevByKey = new Map(STATE.salesWeekByKey);
+  const prevByKey = new Map(STATE.salesWeekByKey); // snapshot
 
-  // 1) primary function
-  let payload = await getJSON("/api/team_sold");
-
-  // 2) fallback override (rollup by agent)
-  if (!payload){
-    const ov = await getJSON("/av_week_override.json");
-    if (Array.isArray(ov)){
-      payload = { perAgent: ov.map(x=>({
-        name: x.name || x.agent,
-        sales: Number(x.sales||x.deals||1),
-        amount: Number(x.amount || (x.av ? x.av/12 : 0))
-      }))};
-    }
-  }
-
-  const perByName = new Map();
+  let perByName = new Map();
   let totalDeals = 0;
   let totalAV    = 0;
 
   try{
+    const payload = await getJSONSmart("team_sold", { api:true });
     const [WSTART, WEND] = weekRangeET();
-    const rawPerSale = Array.isArray(payload?.allSales) ? payload.allSales : null;
 
+    const rawPerSale = Array.isArray(payload?.allSales) ? payload.allSales : null;
     if (rawPerSale && rawPerSale.length){
       for (const s of rawPerSale){
         const when = s.dateSold ? toET(s.dateSold) : null;
@@ -388,9 +344,10 @@ async function refreshSales(){
     }
   }catch(e){
     console.warn("team_sold error", e?.message||e);
+    perByName = new Map();
+    totalDeals = 0; totalAV = 0;
   }
 
-  // Map to roster keys
   const out = new Map();
   for (const a of STATE.roster){
     const nk = String(a.name||"").toLowerCase();
@@ -402,56 +359,42 @@ async function refreshSales(){
   STATE.salesWeekByKey = out;
   STATE.team.av        = Math.max(0, Math.round(totalAV));
   STATE.team.deals     = Math.max(0, Math.round(totalDeals));
-}
 
-/* ---------------- 45-day Vendors (compute from sales feed; fallback to JSON) ---------------- */
-async function refreshVendors45(){
-  // Try to compute from team_sold (better accuracy)
-  const sales = await getJSON("/api/team_sold");
-  const rows = [];
-  const since = new Date(); since.setDate(since.getDate() - 45);
-
-  if (sales && Array.isArray(sales.allSales) && sales.allSales.length){
-    const counts = new Map(VENDOR_CANON.map(v=>[v,0]));
-    for (const s of sales.allSales){
-      const d = s.dateSold ? new Date(s.dateSold) : null;
-      if (!d || d < since) continue;
-      const vendorRaw = s.product || s.vendor || s.source || s.campaign || s.soldProduct || s.soldProductName || "";
-      const v = normVendor(vendorRaw);
-      counts.set(v, (counts.get(v)||0) + 1);
+  if (STATE.team.deals > prevDeals){
+    let winner = null;
+    for (const a of STATE.roster){
+      const k  = agentKey(a);
+      const now = STATE.salesWeekByKey.get(k) || { sales:0, amount:0 };
+      const then= STATE.prevSalesByKey.get(k)  || { sales:0, amount:0 };
+      if (now.sales > then.sales){
+        const deltaDeals = now.sales - then.sales;
+        const estAmount  = (now.amount - then.amount) / Math.max(1, deltaDeals);
+        winner = { name:a.name, amount: estAmount || now.amount };
+        break;
+      }
     }
-    for (const v of VENDOR_CANON){
-      const n = counts.get(v)||0;
-      if (n>0) rows.push({ name:v, deals:n });
-    }
-    STATE.vendors = { as_of: new Date().toISOString().slice(0,10), window_days:45, rows };
-    return;
-  }
-
-  // Fallback to static JSON
-  const j = await getJSON("/sales_by_vendor.json");
-  if (j && Array.isArray(j.vendors)){
-    STATE.vendors = {
-      as_of: j.as_of || "",
-      window_days: Number(j.window_days || 45),
-      rows: j.vendors.map(v=>({ name:String(v.name||""), deals:Number(v.deals||0) }))
-    };
+    if (winner) window.showSalePop({ name:winner.name, amount:winner.amount||0, ms:60_000 });
   }
 }
 
 /* ---------------- YTD ---------------- */
 async function loadYTD(){
-  const list = await getJSON("/ytd_av.json");
-  const totalObj = await getJSON("/ytd_total.json");
-  const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
-  const rows = Array.isArray(list) ? list : [];
-  const withAvatars = rows.map(r=>{
-    const a = rosterByName.get(String(r.name||"").toLowerCase());
-    return { name:r.name, email:r.email, av:Number(r.av||0), photo:a?.photo||"" };
-  });
-  withAvatars.sort((x,y)=> (y.av)-(x.av));
-  STATE.ytd.list  = withAvatars;
-  STATE.ytd.total = Number(totalObj?.ytd_av_total||0);
+  try {
+    const list = await getJSONSmart("/ytd_av.json");
+    const totalObj = await getJSONSmart("/ytd_total.json").catch(()=>({ytd_av_total:0}));
+    const rosterByName = new Map(STATE.roster.map(a => [String(a.name||"").toLowerCase(), a]));
+    const rows = Array.isArray(list) ? list : [];
+    const withAvatars = rows.map(r=>{
+      const a = rosterByName.get(String(r.name||"").toLowerCase());
+      return { name:r.name, email:r.email, av:Number(r.av||0), photo:a?.photo||"" };
+    });
+    withAvatars.sort((x,y)=> (y.av)-(x.av));
+    STATE.ytd.list  = withAvatars;
+    STATE.ytd.total = Number(totalObj?.ytd_av_total||0);
+  } catch(e){
+    console.warn("ytd load error", e?.message||e);
+    STATE.ytd = { list:[], total:0 };
+  }
 }
 
 /* ---------------- Derived + Renderers ---------------- */
@@ -465,10 +408,6 @@ function bestOfWeek(){
     return y.salesAmt - x.salesAmt;
   });
   return entries[0] || null;
-}
-
-function avatarCellFromNamePhoto(name, photo){
-  return avatarCell({ name, photo });
 }
 
 function renderRoster(){
@@ -523,31 +462,55 @@ function renderAOTW(){
 
 function renderVendors(){
   setLabel(`Lead Vendors — % of Sales (Last ${STATE.vendors.window_days || 45} days)`);
-  setHead(["Vendor","Deals","Share"]);
+  setHead([]);
 
   const rows = STATE.vendors.rows || [];
-  const total = rows.reduce((a,b)=>a + Number(b.deals||0), 0) || 1;
-  const tbl = rows
-    .sort((a,b)=> (b.deals||0)-(a.deals||0))
-    .map(r => [escapeHtml(r.name), fmtInt(r.deals), fmtPct(r.deals/total)]);
-
-  setRows(tbl.length ? tbl : []);
-  if (!tbl.length){
-    setRows([[`<div style="padding:8px 0;color:#9fb0c8">No vendor data yet (showing fallback image)</div>`]]);
-    const img = `<tr><td colspan="3"><div style="display:flex;justify-content:center;padding:8px 0 16px">
+  if (!rows.length){
+    const imgHtml = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
       <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
-    </div></td></tr>`;
-    $("#tbody").insertAdjacentHTML("beforeend", img);
+    </div>
+    <div style="text-align:center;color:#9fb0c8;font-size:13px;margin-top:6px;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
+    setRows([[imgHtml]]); return;
+  }
+
+  const chartId  = `vendorChart_${Date.now()}`;
+  const container= `<div style="display:flex;align-items:flex-start;justify-content:center;gap:16px;">
+      <canvas id="${chartId}" width="520" height="520" style="max-width:520px;max-height:520px;"></canvas>
+    </div>
+    <div style="margin-top:8px;color:#9fb0c8;font-size:12px;text-align:center;">Last ${STATE.vendors.window_days||45} days as of ${STATE.vendors.as_of||"—"}</div>`;
+  setRows([[container]]);
+
+  if (window.Chart){
+    const ctx = document.getElementById(chartId).getContext("2d");
+    const labels = rows.map(r=>r.name);
+    const data   = rows.map(r=>r.deals);
+    new Chart(ctx, {
+      type: "pie",
+      data:{ labels, datasets:[{ data, borderWidth:0 }] },
+      options:{
+        responsive:true,
+        maintainAspectRatio:true,
+        plugins:{
+          legend:{ position:"right", labels:{ color:"#cfd7e3", boxWidth:14, padding:10 } },
+          tooltip:{ callbacks:{ label:(c)=> `${c.label}: ${fmtInt(c.raw)} deals` } }
+        }
+      }
+    });
+  }else{
+    const png = `<div style="display:flex;justify-content:center;padding:8px 0 16px">
+      <img src="${BASE}/sales_by_vendor.png" alt="Lead Vendor Breakdown" style="max-width:72%;height:auto;opacity:.95"/>
+    </div>`;
+    setRows([[png]]);
   }
 }
 
 function renderYTD(){
   setLabel("YTD — Leaders");
   setHead(["Agent","YTD AV (12×)"]);
-  const rows = (STATE.ytd.list||[]).map(r=>[
-    avatarCellFromNamePhoto(r.name, r.photo),
-    fmtMoney(r.av)
-  ]);
+  const rows = (STATE.ytd.list||[]).map(r=>{
+    const a = { name:r.name, photo:r.photo };
+    return [avatarCell(a), fmtMoney(r.av)];
+  });
   setRows(rows);
 }
 
@@ -567,13 +530,13 @@ function renderCurrentView(){
 async function boot(){
   try{
     await loadStatic();
-    await Promise.all([refreshCalls(), refreshSales(), refreshVendors45(), loadYTD()]);
+    await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
     renderCurrentView();
 
     // periodic refresh
     setInterval(async ()=>{
       try{
-        await Promise.all([refreshCalls(), refreshSales(), refreshVendors45(), loadYTD()]);
+        await Promise.all([refreshCalls(), refreshSales(), loadYTD()]);
         renderCurrentView();
       }catch(e){ console.warn("refresh tick error", e?.message||e); }
     }, DATA_MS);
@@ -590,4 +553,4 @@ async function boot(){
 }
 
 document.addEventListener("DOMContentLoaded", () => { boot(); });
-/* =============================== End =============================== */
+/* ================================= End ================================= */
