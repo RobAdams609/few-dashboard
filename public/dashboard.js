@@ -169,8 +169,8 @@ async function viewVendors(){
   thead.innerHTML = `<tr><th>Vendor</th><th style="text-align:right">Deals</th><th style="text-align:right">% of total</th></tr>`;
   tbody.innerHTML = `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">Loading…</td></tr>`;
 
-  const data = await loadStatic("/public/sales_by_vendor.json"); // static JSON you maintain
-  const list = Array.isArray(data?.vendors) ? data.vendors : [];
+  const data = await getJSONSmart(`/api/sales_by_vendor?v=${Date.now()}`); // live API version
+const list = Array.isArray(data?.vendors) ? data.vendors : [];
   const total = list.reduce((s,v)=>s+(v.deals||0),0)||0;
 
   if (!total){
