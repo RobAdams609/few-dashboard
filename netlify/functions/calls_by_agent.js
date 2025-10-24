@@ -123,10 +123,20 @@ exports.handler = async function(){
         });
       }catch(_){ /* ignore a bad call */ }
 
-      // duration (seconds) -> talkMin, loggedMin (we use same for now; refine if Ringy returns separate fields)
-      const durSec = Math.max(0, Number(detail && detail.duration || 0));
-      const talkMin = durSec / 60;
-      const loggedMin = talkMin;
+     // duration (seconds) -> talkMin, loggedMin (we use same for now; refine if Ringy returns separate fields)
+const durSec =
+  Number(detail?.duration) ||
+  Number(detail?.callDuration) ||
+  Number(detail?.talkDuration) ||
+  Number(detail?.totalDuration) ||
+  0;
+
+if (!durSec && detail) {
+  console.log("⚠️ No duration in call detail for callId:", callId, "-> keys:", Object.keys(detail || {}));
+}
+
+const talkMin = durSec / 60;
+const loggedMin = talkMin;
 
       // team totals (always include)
       team.calls += 1;
