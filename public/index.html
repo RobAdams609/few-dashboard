@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>FEW — Dashboard</title>
-    <link rel="stylesheet" href="dashboard.css" />
+    <link rel="stylesheet" href="/dashboard.css" />
     <style>
       :root{
         --bg:#10151c; --panel:#0b0f15; --line:#253041; --muted:#9fb0c8;
@@ -16,11 +16,11 @@
         font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
       }
 
-      /* Ticker */
+      /* Rule ticker (single) */
       .ticker{
         position:sticky; top:0; z-index:20;
         background:var(--panel); border-bottom:1px solid var(--line);
-        padding:6px 10px; font-size:12px; color:#f0c060;
+        padding:6px 10px; font-size:12px; color:#f0c060; letter-spacing:.02em;
       }
 
       /* Banner */
@@ -33,7 +33,7 @@
 
       .section-label{ text-align:center; margin:14px 0 8px; color:var(--accent); font-weight:700; }
 
-      /* Summary cards */
+      /* Summary cards (3) */
       .summary{
         display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
         gap:10px; padding:8px 10px 0;
@@ -45,7 +45,7 @@
       .card .k{ font-size:12px; color:var(--muted); }
       .card .v{ font-size:20px; font-weight:800; margin-top:4px; color:var(--glow); }
 
-      /* Table */
+      /* Board table */
       table{ width:100%; border-collapse:collapse; background:#0f141c; margin-top:8px; }
       thead th{
         background:var(--panel); color:var(--muted); font-size:13px; text-align:left;
@@ -53,7 +53,6 @@
       }
       tbody td{ padding:10px; border-bottom:1px solid #1b2534; }
       td.num{ text-align:right; font-variant-numeric:tabular-nums; }
-
       .agent{ display:flex; align-items:center; gap:10px; }
       .avatar,.avatar-fallback{
         width:28px; height:28px; border-radius:50%; background:#1f2a3a;
@@ -61,7 +60,7 @@
         font-size:12px; font-weight:700; color:#89a2c6;
       }
 
-      /* Sale toast */
+      /* New-sale splash */
       .sale-pop{
         position:fixed; left:50%; transform:translateX(-50%); bottom:-80px;
         padding:10px 16px; border-radius:999px; background:#0b5d2a; color:#e7ffe7; font-weight:700;
@@ -105,14 +104,12 @@
         font-size:20px; padding:10px 14px; border-radius:50%;
         cursor:pointer; box-shadow:0 0 10px rgba(0,0,0,.4);
       }
-      #musicDock iframe{
-        width:260px; height:120px; border:0; background:transparent;
-      }
+      #musicDock iframe{ width:260px; height:120px; border:0; background:transparent; }
     </style>
   </head>
 
   <body>
-    <!-- Rule ticker -->
+    <!-- SINGLE rule ticker -->
     <div id="ticker" class="ticker">RULE OF THE DAY — …</div>
 
     <!-- Banner -->
@@ -121,24 +118,25 @@
       <div id="principle" class="subtitle">Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.</div>
     </header>
 
+    <!-- Current view label -->
     <div id="viewLabel" class="section-label">This Week — Roster</div>
 
-    <!-- Summary (EXACTLY THREE CARDS) -->
+    <!-- Summary cards (exactly three, with stable IDs used by JS) -->
     <div id="summary" class="summary">
       <div class="card"><div class="k">This Week — Team Calls</div><div id="sumCalls" class="v">0</div></div>
       <div class="card"><div class="k">This Week — Total Submitted AV</div><div id="sumSales" class="v">$0</div></div>
       <div class="card"><div class="k">This Week — Deals Submitted</div><div id="sumTalk" class="v">0</div></div>
     </div>
 
-    <!-- Board -->
-    <table id="board">
+    <!-- Rotating board area -->
+    <table id="board" aria-live="polite">
       <thead id="thead"></thead>
       <tbody id="tbody"><tr><td style="padding:18px;color:#5c6c82;">Loading…</td></tr></tbody>
     </table>
 
     <div class="footer-spacer"></div>
 
-    <!-- Sale toast -->
+    <!-- New-sale toast -->
     <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
 
     <!-- Apple Music dock (starts minimized; click 🎵 to expand) -->
@@ -158,8 +156,8 @@
       </div>
     </div>
 
-    <!-- App JS -->
-    <script src="dashboard.js?v=9" defer></script>
+    <!-- App JS (cache-busted) -->
+    <script src="/dashboard.js?v=1003" defer></script>
 
     <!-- OE countdown + music dock logic -->
     <script>
@@ -180,15 +178,13 @@
         tick();
       })();
 
-      // Apple Music dock: toggle + remember state + auto-minimize after 8s
+      // Apple Music dock — toggle & remember state
       (function(){
         const dock = document.getElementById('musicDock');
         if (!dock) return;
-
         const saved = localStorage.getItem('few.music.minimized');
         if (saved === 'false') dock.classList.remove('minimized');
         else dock.classList.add('minimized');
-
         document.addEventListener('click', (e)=>{
           if (dock.contains(e.target)){
             if (dock.classList.contains('minimized')) {
@@ -200,7 +196,6 @@
             localStorage.setItem('few.music.minimized', 'true');
           }
         });
-
         if (!dock.classList.contains('minimized')) {
           setTimeout(()=>{
             dock.classList.add('minimized');
