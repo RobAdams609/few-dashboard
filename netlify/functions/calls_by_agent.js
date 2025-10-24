@@ -10,7 +10,6 @@
 // RINGY_LEAD_URL           -> https://app.ringy.com/api/public/external/get-lead
 // RINGY_API_KEY_LEADS      -> your "leads" API key
 
-const fetch = require("node-fetch");
 
 // Eastern Time for weekly window (Fri→Fri)
 const ET_TZ = "America/New_York";
