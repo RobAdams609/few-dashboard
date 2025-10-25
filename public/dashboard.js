@@ -1,479 +1,480 @@
-/* public/dashboard.js
-   FEW Dashboard — single-file app
-   Boards:
-    1) Weekly Submitted AV (Roster)
-    2) Agent of the Week
-    3) Lead Vendors — % of Sales (last 45 days)
-    4) Agent Activity (this week)
-    5) YTD AV (override files)
-    6) PAR
+/* public/dashboard.js  — ONE FILE DROP-IN
+   Rotates 4+ boards, pulls APIs, shows rule-of-day, headshots, sale splash.
+   Requires no HTML changes beyond index.html already pointing at this file.
 */
 
-/* ---------- helpers ---------- */
+/* =============== CONFIG =============== */
+const ROTATE_MS = 20000;                    // time each board is on screen
+const SALE_SPLASH_MS = 60000;               // sale splash hold time (60s)
+const TIMEZONE = "America/New_York";        // for date windows
+const HEADSHOTS_PATHS = ["jpg", "png"];     // file extensions to try
+const HEADSHOT_OVERRIDES = {
+  // Add special-case filename overrides here if needed:
+  // "fabricio navarrete": "fabricio-navarrete-cervantes",
+};
+const VENDOR_COLORS = [
+  "#ffd36a","#8bd3dd","#f28b82","#a7d28d","#c58af9","#7ac6ff",
+  "#ffad69","#7bdcb5","#d2a7ff","#ff7aa2","#9ad47a","#7aa6ff"
+];
 
+/* =============== DOM HOOKS =============== */
 const $ = sel => document.querySelector(sel);
 const $$ = sel => Array.from(document.querySelectorAll(sel));
 
-const fmtInt  = n => Number(n||0).toLocaleString("en-US");
-const fmtMoney= n => "$" + Number(n||0).toLocaleString("en-US");
-const pad2    = n => String(n).padStart(2,"0");
+const elTicker   = $("#ticker");
+const elTitle    = $(".title");
+const elSub      = $("#principle");
+const elView     = $("#viewLabel");
+const elThead    = $("#thead");
+const elTbody    = $("#tbody");
+const elSumCalls = $("#sumCalls");
+const elSumSales = $("#sumSales");
+const elSumTalk  = $("#sumTalk");
+const salePop    = $("#salePop");
 
-/* request with gentle fallback */
-async function getJSON(url){
-  const r = await fetch(url, {cache:"no-store"});
-  if (!r.ok) throw new Error(`${url} -> ${r.status}`);
+/* =============== HELPERS =============== */
+const pad2 = n => String(n).padStart(2,"0");
+const money = (n) => {
+  const v = Math.round(Number(n||0));
+  return v.toLocaleString("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0});
+};
+const fmtInt = n => Number(n||0).toLocaleString("en-US");
+const fmtPct = n => `${Math.round(n*100)}%`;
+
+function utcDateRangeThisWeek() {
+  // week window Sun 00:00 -> next Sun 00:00 in ET
+  const now = new Date();
+  // build ET now
+  const et = new Date(now.toLocaleString("en-US", { timeZone: TIMEZONE }));
+  const day = et.getDay(); // 0 = Sun
+  const start = new Date(et); start.setHours(0,0,0,0); start.setDate(start.getDate()-day);
+  const end = new Date(start); end.setDate(start.getDate()+7);
+  // Return as UTC strings "YYYY-MM-DD HH:mm:ss"
+  const toUtcStr = d => {
+    const utc = new Date(d.getTime() - (new Date().getTimezoneOffset()*60000)); // local->UTC baseline
+    // But start/end are built already in ET; convert to UTC string
+    const s = new Date(d.toLocaleString("en-US",{timeZone:"UTC"}));
+    const Y=s.getUTCFullYear(), M=pad2(s.getUTCMonth()+1), D=pad2(s.getUTCDate());
+    const h=pad2(s.getUTCHours()), m=pad2(s.getUTCMinutes()), sec=pad2(s.getUTCSeconds());
+    return `${Y}-${M}-${D} ${h}:${m}:${sec}`;
+  };
+  return { start: toUtcStr(start), end: toUtcStr(end) };
+}
+
+async function getJSON(url, opt) {
+  const r = await fetch(url, opt);
+  if (!r.ok) throw new Error(`${url} ${r.status}`);
   return r.json();
 }
-async function tryGetJSON(primary, fallback){
-  try{ return await getJSON(primary); }
-  catch(_){ if (fallback) return getJSON(fallback); throw _; }
+async function tryJSON(url, opt){
+  try { return await getJSON(url,opt); } catch { return null; }
 }
 
-/* load static repo files */
-const loadStatic = path => getJSON(path + (path.includes("?")?"":"?v="+Date.now()));
+function setCards({calls=0, totalSales=0, deals=0}) {
+  elSumCalls.textContent = fmtInt(calls);
+  elSumSales.textContent = money(totalSales);
+  elSumTalk.textContent  = fmtInt(deals);
+}
 
-/* today’s ET (used for windows) */
-const ET_TZ = "America/New_York";
-function weekWindowET(){
+function slugName(name){
+  if (!name) return "";
+  const base = name.trim().toLowerCase();
+  const over = HEADSHOT_OVERRIDES[base];
+  const s = (over || base)
+    .replace(/[^\p{L}\p{N}\s.-]/gu,"")
+    .replace(/\s+/g,"-")
+    .replace(/-+/g,"-");
+  return s;
+}
+function avatarCell(name){
+  const slug = slugName(name);
+  const span = document.createElement("span");
+  span.className = "avatar-fallback";
+  span.textContent = name.split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase();
+
+  const wrap = document.createElement("span");
+  wrap.className = "agent";
+  if (slug){
+    const img = document.createElement("img");
+    img.className = "avatar";
+    img.alt = `${name} headshot`;
+    let tried = 0;
+    function setNext(){
+      if (tried >= HEADSHOTS_PATHS.length){ wrap.prepend(span); return; }
+      img.src = `./headshots/${slug}.${HEADSHOTS_PATHS[tried++]}`;
+    }
+    img.onerror = setNext;
+    img.onload  = ()=> {};
+    setNext();
+    wrap.append(img);
+  } else {
+    wrap.append(span);
+  }
+  const nm = document.createElement("span");
+  nm.textContent = name || "—";
+  wrap.append(nm);
+  return wrap.outerHTML;
+}
+
+function setTitle(label){ elView.textContent = label; }
+
+/* =============== DATA FETCH =============== */
+let cacheSold = null;
+let cacheCalls = null;
+let cacheVendors = null;
+let cacheYTD = null;
+let cacheYTDTotal = null;
+let cachePAR = null;
+
+async function loadSold() {
+  const {start,end} = utcDateRangeThisWeek();
+  const u = `/api/team_sold?d=${Date.now()}`;
+  const j = await getJSON(u);
+  // expect: { team:{ totalSales, totalAmount, totalAV12x }, perAgent:[{name,sales,amount,av12x}], allSales:[{agent, amount, dateSold, soldProductName}] }
+  cacheSold = j || {team:{totalSales:0,totalAmount:0,totalAV12x:0}, perAgent:[], allSales:[]};
+  return cacheSold;
+}
+
+async function loadCalls() {
+  const u = `/api/calls_by_agent?d=${Date.now()}`;
+  cacheCalls = await tryJSON(u) || {team:{calls:0,talkMin:0,loggedMin:0,leads:0,sold:0}, perAgent:[]};
+  return cacheCalls;
+}
+
+async function loadVendors() {
+  // Try API route; if missing envs, fallback to static JSON
+  cacheVendors = await tryJSON(`/api/sales_by_vendor?d=${Date.now()}`);
+  if (!cacheVendors) cacheVendors = await tryJSON(`/public/sales_by_vendor.json`);
+  return cacheVendors||{vendors:[],window_days:45};
+}
+
+async function loadYTD() {
+  cacheYTD = await tryJSON(`/public/ytd_av.json`) || { agents:[] };
+  cacheYTDTotal = await tryJSON(`/public/ytd_total.json`) || { total: 0 };
+  return { cacheYTD, cacheYTDTotal };
+}
+
+async function loadPAR() {
+  // optional; only if you add /public/par.json: { people:[{name, amount}, ...] }
+  cachePAR = await tryJSON(`/public/par.json`) || null;
+  return cachePAR;
+}
+
+/* =============== RULE OF THE DAY =============== */
+async function setRuleOfDay(){
+  const rules = await tryJSON(`/public/rules.json`) || { rules: [] };
+  if (!rules.rules || !rules.rules.length){
+    elTicker.textContent = "RULE OF THE DAY — …";
+    return;
+  }
+  // rotate every 12 hours in ET
   const now = new Date();
-  const nowET = new Intl.DateTimeFormat('en-US',{timeZone:ET_TZ, hour12:false,
-    year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'
-  }).formatToParts(now).reduce((a,p)=>{a[p.type]=p.value;return a;},{});
-  // Start: previous Friday 8pm ET? Your API already handles the correct window; we keep it simple.
-  return { start: null, end: null };
+  const etNow = new Date(now.toLocaleString("en-US",{timeZone:TIMEZONE}));
+  const index = Math.floor(etNow.getTime()/(12*60*60*1000)) % rules.rules.length;
+  const text = String(rules.rules[index]||"").trim();
+  elTicker.textContent = `RULE OF THE DAY — ${text||"…"}`;
 }
 
-/* initials helper */
-function initialsFromName(name=""){
-  return name.split(/\s+/).filter(Boolean).map(w=>w[0]).slice(0,2).join("").toUpperCase() || "??";
+/* =============== SALE SPLASH (centered) =============== */
+let lastSeenSaleIds = new Set();
+function primeSeenSales(allSales){
+  allSales.forEach(s => lastSeenSaleIds.add(s.leadId||`${s.agent}|${s.amount}|${s.dateSold}`));
 }
-
-/* mount points (already in index.html) */
-const thead = $("#thead");
-const tbody = $("#tbody");
-const viewLabel = $("#viewLabel");
-const sumCalls = $("#sumCalls");
-const sumSales = $("#sumSales");
-const sumTalk  = $("#sumTalk");
-const salePop  = $("#salePop");
-const ticker   = $("#ticker");
-
-/* global caches */
-let ROSTER = [];      // [{ name,email,photo,phones[] }]
-let HEADSHOT_URL = (fn) => `headshots/${fn}`;
-let RULES = [];       // [ "text", ... ]
-let RULE_TIMER = null;
-
-/* ---------- Rule of the Day (rotates every 12 hours) ---------- */
-async function startRules(){
-  try{
-    RULES = await loadStatic("/public/rules.json");
-  }catch(_){
-    RULES = [
-      "Be early. Be prepared. Be relentless.",
-      "No zero days.",
-      "Win the morning to win the day."
-    ];
+function showSaleSplash(agent, amount12x){
+  // Repurpose #salePop as big centered pill
+  Object.assign(salePop.style, {
+    position: "fixed",
+    left:"50%", top:"50%",
+    transform:"translate(-50%,-50%)",
+    borderRadius:"20px",
+    padding:"22px 28px",
+    fontSize:"22px", fontWeight:"800",
+    color:"#ffeab5", background:"rgba(23,26,7,.95)",
+    border:"2px solid #ffd36a",
+    boxShadow:"0 20px 60px rgba(0,0,0,.55)",
+    zIndex:"9999", opacity:"1", display:"block", textAlign:"center"
+  });
+  salePop.innerHTML = `
+    <div style="font-size:14px; letter-spacing:.12em; color:#9b8a4b; margin-bottom:6px;">NEW SALE</div>
+    <div style="font-size:28px; color:#fff6d2; margin-bottom:8px;">${agent}</div>
+    <div style="font-size:24px; color:#ffd36a;">${money(amount12x)}</div>
+  `;
+  setTimeout(()=>{ salePop.style.display="none"; }, SALE_SPLASH_MS);
+}
+function diffAndSplash(allSales){
+  for (const s of allSales||[]){
+    const id = s.leadId || `${s.agent}|${s.amount}|${s.dateSold}`;
+    if (!lastSeenSaleIds.has(id)){
+      lastSeenSaleIds.add(id);
+      const av12 = Number(s.amount||0)*12;    // display AV 12× but do NOT show “×12” text
+      showSaleSplash(s.agent||"New Sale", av12);
+    }
   }
-  function selectRule(){
-    // 12-hour slot index
-    const now = new Date();
-    const slot = Math.floor(now.getTime() / (12*60*60*1000));
-    const rule = RULES[slot % RULES.length] || "...";
-    ticker.textContent = `RULE OF THE DAY — ${rule}`;
-  }
-  clearInterval(RULE_TIMER);
-  selectRule();
-  RULE_TIMER = setInterval(selectRule, 60_000); // check once a minute; slot math handles the 12h cadence
 }
 
-/* ---------- headshots ---------- */
-async function loadRoster(){
-  try{
-    ROSTER = await loadStatic("/public/headshots/roster.json");
-  }catch(_){ ROSTER = []; }
-}
-function findPersonByName(name=""){
-  const n = (name||"").trim().toLowerCase();
-  return ROSTER.find(r => (r.name||"").trim().toLowerCase() === n);
-}
-function avatarHTML(name, size=28){
-  const person = findPersonByName(name);
-  const style = `width:${size}px;height:${size}px;border-radius:50%;display:inline-block;vertical-align:middle;`;
-  if (person && person.photo){
-    return `<img src="${HEADSHOT_URL(person.photo)}" alt="" style="${style};object-fit:cover;background:#1b2433;border:1px solid #28344a">`;
-  }
-  return `<span class="avatar-fallback" style="${style};background:#1f2a3a;color:#89a2c6;font-weight:800;display:inline-flex;align-items:center;justify-content:center;font-size:${Math.max(12,Math.floor(size*0.42))}px;">${initialsFromName(name)}</span>`;
-}
-
-/* ---------- summary cards ---------- */
-function setSummary({calls=0, av12x=0, deals=0}={}){
-  sumCalls.textContent = fmtInt(calls);
-  sumSales.textContent = fmtMoney(av12x);
-  sumTalk.textContent  = fmtInt(deals);
-}
-
-/* ---------- new-sale splash (60s) ---------- */
-let splashTimer = null;
-function showSaleSplash(name, amount){
-  const html = `
-    <div style="
-      position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;
-      background:rgba(8,10,14,.65);backdrop-filter:blur(3px);
-    ">
-      <div style="
-        background:#2a250b;border:2px solid #ffd36a;box-shadow:0 10px 50px rgba(0,0,0,.6);
-        padding:24px 36px;border-radius:16px;text-align:center;max-width:90vw;
-      ">
-        <div style="color:#ffd36a;font-size:14px;font-weight:800;letter-spacing:.08em;">NEW SALE</div>
-        <div style="margin-top:8px;color:#fff5d6;font-size:34px;font-weight:900">${name}</div>
-        <div style="margin-top:6px;color:#ffd36a;font-size:22px;font-weight:800">${fmtMoney(amount)}</div>
-      </div>
-    </div>`;
-  salePop.innerHTML = html;
-  salePop.classList.add("show");
-  clearTimeout(splashTimer);
-  splashTimer = setTimeout(()=>{ salePop.classList.remove("show"); salePop.innerHTML=""; }, 60_000);
-}
-
-/* ---------- API pulls ---------- */
-// Weekly sold (this week)
-async function fetchTeamSold(){
-  // returns { team:{ totalSales, totalAmount, totalAV12x }, perAgent:[ {name,sales,amount,av12x} ], allSales:[{agent,amount,dateSold}] }
-  return getJSON("/api/team_sold");
-}
-// Weekly calls/leads/etc
-async function fetchCallsByAgent(){
-  // returns { team:{calls,talkMin,loggedMin,leads,sold}, perAgent:[{name,email,calls,talkMin,loggedMin,leads,sold}] }
-  return getJSON("/api/calls_by_agent");
-}
-// Vendors last 45d
-async function fetchVendors(){
-  // primary API, fallback to static
-  return tryGetJSON("/api/sales_by_vendor", "/public/sales_by_vendor.json");
-}
-// YTD overrides
-async function fetchYTD(){
-  const av = await loadStatic("/public/ytd_av.json");
-  const total = await loadStatic("/public/ytd_total.json");
-  return { list: av, total };
-}
-// PAR board data
-async function fetchPAR(){
-  // You maintain file: [{ name: "Robert Adams", value: 597236 }, ...]
-  return loadStatic("/public/par.json");
-}
-
-/* ---------- Board 1: Weekly Submitted AV (Roster) ---------- */
-async function viewRoster(){
+/* =============== RENDERERS =============== */
+function renderRoster(sold){
   setTitle("This Week — Roster");
-  setTableHeader(["Agent","Sold","Submitted AV"]);
-  tbody.innerHTML = rowLoading();
-
-  const [sold, calls] = await Promise.all([
-    fetchTeamSold().catch(_=>({team:{totalSales:0,totalAV12x:0}, perAgent:[], allSales:[]})),
-    fetchCallsByAgent().catch(_=>({team:{calls:0}, perAgent:[]})),
-  ]);
-
-  setSummary({
-    calls: (calls.team && calls.team.calls) || 0,
-    av12x: (sold.team && sold.team.totalAV12x) || 0,
-    deals: (sold.team && sold.team.totalSales) || 0
-  });
-
-  const per = (sold.perAgent||[]).slice().sort((a,b)=>(b.av12x||0)-(a.av12x||0));
-  if (!per.length){
-    tbody.innerHTML = rowEmpty("Loading roster or no sales yet.");
+  elThead.innerHTML = `
+    <tr>
+      <th>Agent</th>
+      <th style="text-align:right">Sold</th>
+      <th style="text-align:right">Submitted AV (12×)</th>
+    </tr>`;
+  if (!sold.perAgent?.length){
+    elTbody.innerHTML = `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">Loading roster or no sales yet.</td></tr>`;
     return;
   }
-  const rows = per.map(a => `
-    <tr>
-      <td>
-        <div class="agent">
-          ${avatarHTML(a.name, 22)}
-          <span style="margin-left:10px">${esc(a.name||"")}</span>
-        </div>
-      </td>
-      <td class="num">${fmtInt(a.sales||0)}</td>
-      <td class="num">${fmtMoney(a.av12x||0)}</td>
-    </tr>
-  `).join("");
-  tbody.innerHTML = rows;
-
-  // show new-sale splash for the most recent sale (if provided)
-  const last = (sold.allSales||[]).slice().sort((a,b)=>new Date(b.dateSold)-new Date(a.dateSold))[0];
-  if (last) showSaleSplash(last.agent||"New Sale", Number(last.amount||0)*12);
-}
-
-/* ---------- Board 2: Agent of the Week ---------- */
-async function viewAOTW(){
-  setTitle("Agent of the Week");
-  setTableHeader(["Leading for Agent of the Week","Sold","Submitted AV"]);
-
-  tbody.innerHTML = rowLoading();
-
-  const sold = await fetchTeamSold().catch(_=>({team:{}, perAgent:[]}));
-  const per = (sold.perAgent||[]).slice().sort((a,b)=>(b.av12x||0)-(a.av12x||0));
-  setSummary({
-    calls:  ((await fetchCallsByAgent().catch(_=>({team:{}}))).team||{}).calls || 0,
-    av12x:  (sold.team && sold.team.totalAV12x) || 0,
-    deals:  (sold.team && sold.team.totalSales) || 0
-  });
-
-  if (!per.length){ tbody.innerHTML = rowEmpty("No leader yet."); return; }
-  const lead = per[0];
-
-  const row = `
-    <tr>
-      <td>
-        <div class="agent" style="align-items:center;">
-          ${avatarHTML(lead.name, 56)}
-          <span style="margin-left:14px;font-size:22px;font-weight:800">${esc(lead.name||"")}</span>
-        </div>
-      </td>
-      <td class="num" style="font-size:20px">${fmtInt(lead.sales||0)}</td>
-      <td class="num" style="font-size:20px">${fmtMoney(lead.av12x||0)}</td>
-    </tr>
-  `;
-  tbody.innerHTML = row;
-
-  // Add YTD override line under the table
-  try{
-    const ytd = await fetchYTD();
-    const hit = (ytd.list||[]).find(x => (x.name||"").toLowerCase() === (lead.name||"").toLowerCase());
-    if (hit){
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td style="color:#9fb0c8">YTD AV</td>
-        <td></td>
-        <td class="num">${fmtMoney(hit.av||0)}</td>
-      `;
-      tbody.appendChild(tr);
-    }
-  }catch(_){}
-}
-
-/* ---------- Board 3: Lead Vendors (last 45 days) ---------- */
-async function viewVendors(){
-  setTitle("Lead Vendors — % of Sales (Last 45 days)");
-  setTableHeader(["Vendor","Deals","% of total"]);
-  tbody.innerHTML = rowLoading();
-
-  const data = await fetchVendors().catch(_=>({ vendors:[] }));
-  const list = Array.isArray(data.vendors) ? data.vendors : [];
-  const total = list.reduce((s,v)=>s + (v.deals||0), 0);
-
-  if (!total){
-    tbody.innerHTML = rowEmpty("No vendor chart available.");
-    renderDonut([]); // clears if present
-    return;
-  }
-
-  // sort desc
-  list.sort((a,b)=>(b.deals||0)-(a.deals||0));
-
-  const rows = list.map((v,i)=>`
-    <tr>
-      <td>${esc(v.name||"Unknown")}</td>
-      <td class="num">${fmtInt(v.deals||0)}</td>
-      <td class="num">${fmtPct((v.deals||0)/total)}</td>
-    </tr>
-  `).join("");
-  tbody.innerHTML = rows;
-
-  // donut
-  renderDonut(list.map(v => ({ label: v.name||"Unknown", value: v.deals||0 })));
-}
-
-/* ---------- Board 4: Agent Activity (this week) ---------- */
-async function viewActivity(){
-  setTitle("Agent Activity — (This week)");
-  setTableHeader(["Agent","Calls","Talk (min)","Logged (h:mm)","Leads","Sold","Conv %"]);
-  tbody.innerHTML = rowLoading();
-
-  const act = await fetchCallsByAgent().catch(_=>({team:{}, perAgent:[]}));
-  const per = (act.perAgent||[]).slice();
-
-  // ensure roster names exist even if zeros
-  const names = new Set(per.map(a => (a.name||"").toLowerCase()));
-  ROSTER.forEach(r=>{
-    if (!names.has((r.name||"").toLowerCase())){
-      per.push({ name:r.name, calls:0, talkMin:0, loggedMin:0, leads:0, sold:0 });
-    }
-  });
-
-  per.sort((a,b)=>(b.calls||0)-(a.calls||0));
-
-  if (!per.length){ tbody.innerHTML = rowEmpty("No activity reported yet."); return; }
-
-  const rows = per.map(a=>{
-    const logged = a.loggedMin||0;
-    const h = Math.floor(logged/60), m = Math.floor(logged%60);
-    const conv = (a.leads ? (a.sold||0)/a.leads : 0);
-    return `
+  const rows = sold.perAgent
+    .slice()
+    .sort((a,b)=> (b.av12x||0)-(a.av12x||0))
+    .map(a=>`
       <tr>
-        <td><div class="agent">${avatarHTML(a.name,22)}<span style="margin-left:10px">${esc(a.name||"")}</span></div></td>
-        <td class="num">${fmtInt(a.calls||0)}</td>
-        <td class="num">${fmtInt(a.talkMin||0)}</td>
-        <td class="num">${h}:${pad2(m)}</td>
-        <td class="num">${fmtInt(a.leads||0)}</td>
-        <td class="num">${fmtInt(a.sold||0)}</td>
-        <td class="num">${fmtPct(conv)}</td>
+        <td class="agent">${avatarCell(a.name||"")}</td>
+        <td class="num">${fmtInt(a.sales||0)}</td>
+        <td class="num">${money(Math.round((a.amount||0)*12))}</td>
       </tr>
-    `;
-  }).join("");
-  tbody.innerHTML = rows;
-
-  // team totals row
-  const t = act.team||{};
-  const logged = t.loggedMin||0; const h=Math.floor(logged/60), m=Math.floor(logged%60);
-  const tr = document.createElement("tr");
-  tr.innerHTML = `
-    <td style="color:#9fb0c8">Team totals:</td>
-    <td class="num">${fmtInt(t.calls||0)}</td>
-    <td class="num">${fmtInt(t.talkMin||0)}</td>
-    <td class="num">${h}:${pad2(m)}</td>
-    <td class="num">${fmtInt(t.leads||0)}</td>
-    <td class="num">${fmtInt(t.sold||0)}</td>
-    <td class="num">${fmtPct((t.leads? (t.sold||0)/t.leads : 0))}</td>
-  `;
-  tbody.appendChild(tr);
+    `).join("");
+  elTbody.innerHTML = rows || `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">No sales found.</td></tr>`;
 }
 
-/* ---------- Board 5: YTD AV (override) ---------- */
-async function viewYTD(){
-  setTitle("Year-to-Date AV");
-  setTableHeader(["Agent","YTD AV"]);
-  tbody.innerHTML = rowLoading();
-
-  const { list, total } = await fetchYTD().catch(_=>({list:[], total:{}}));
-  const rows = (list||[]).slice().sort((a,b)=>(b.av||0)-(a.av||0)).map(a=>`
+function renderAotW(sold, ytd){
+  setTitle("Agent of the Week");
+  const leader = (sold.perAgent||[]).slice().sort((a,b)=> (b.amount||0)-(a.amount||0))[0];
+  elThead.innerHTML = `
     <tr>
-      <td><div class="agent">${avatarHTML(a.name,22)}<span style="margin-left:10px">${esc(a.name||"")}</span></div></td>
-      <td class="num">${fmtMoney(a.av||0)}</td>
-    </tr>
-  `).join("");
-  tbody.innerHTML = rows || rowEmpty("No YTD data.");
-
-  // total row
-  if (total && typeof total.total === "number"){
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td style="color:#9fb0c8">Team total</td><td class="num">${fmtMoney(total.total)}</td>`;
-    tbody.appendChild(tr);
+      <th>Leading for Agent of the Week</th>
+      <th style="text-align:right">Sold</th>
+      <th style="text-align:right">Submitted AV (12×)</th>
+    </tr>`;
+  if (!leader){
+    elTbody.innerHTML = `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">No leader yet.</td></tr>`;
+    return;
   }
-}
-
-/* ---------- Board 6: PAR ---------- */
-async function viewPAR(){
-  setTitle("PAR — Performance & Retention Bonus");
-  setTableHeader(["Agent","Issued AV"]);
-  tbody.innerHTML = rowLoading();
-
-  const list = await fetchPAR().catch(_=>[]);
-  if (!list.length){ tbody.innerHTML = rowEmpty("No PAR data."); return; }
-  list.sort((a,b)=>(b.value||0)-(a.value||0));
-  tbody.innerHTML = list.map(p=>`
-    <tr>
-      <td><div class="agent">${avatarHTML(p.name,22)}<span style="margin-left:10px">${esc(p.name||"")}</span></div></td>
-      <td class="num">${fmtMoney(p.value||0)}</td>
-    </tr>
-  `).join("");
-}
-
-/* ---------- DOM helpers ---------- */
-function setTitle(text){
-  viewLabel.textContent = text;
-}
-function setTableHeader(cols){
-  thead.innerHTML = `<tr>${cols.map((c,i)=>`<th${i>0?' style="text-align:right"':''}>${esc(c)}</th>`).join("")}</tr>`;
-}
-function rowLoading(){
-  return `<tr><td colspan="7" style="padding:14px;color:#7b8aa3">Loading…</td></tr>`;
-}
-function rowEmpty(msg){
-  return `<tr><td colspan="7" style="padding:14px;color:#7b8aa3">${esc(msg)}</td></tr>`;
-}
-function esc(s){ return String(s).replace(/[&<>"]/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[m])); }
-function fmtPct(x){ return (x*100||0).toFixed(0)+"%"; }
-
-/* ---------- Donut renderer (tiny, no libs) ---------- */
-function renderDonut(pairs){
-  // remove old chart if exists
-  let old = $("#vendorDonutWrap");
-  if (old) old.remove();
-
-  const wrap = document.createElement("div");
-  wrap.id = "vendorDonutWrap";
-  wrap.style.cssText = "padding:10px 10px 0;";
-  thead.parentElement.insertAdjacentElement("afterend", wrap);
-
-  if (!pairs.length) return;
-
-  const total = pairs.reduce((s,p)=>s+p.value,0);
-  const size = 180, r = 70, cx= size/2, cy=size/2;
-  let acc = 0;
-  const colors = [
-    "#ffb703","#8ecae6","#ffd166","#90be6d","#f4978e","#bdb2ff","#80ed99","#e9c46a","#f4a261","#48cae4"
-  ];
-  const arcs = pairs.map((p,i)=>{
-    const val = p.value/total;
-    const a0 = acc*2*Math.PI, a1 = (acc+val)*2*Math.PI; acc+=val;
-    const x0 = cx + r*Math.sin(a0), y0 = cy - r*Math.cos(a0);
-    const x1 = cx + r*Math.sin(a1), y1 = cy - r*Math.cos(a1);
-    const large = (a1-a0) > Math.PI ? 1 : 0;
-    const d = `M ${cx} ${cy} L ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1} Z`;
-    return `<path d="${d}" fill="${colors[i%colors.length]}" opacity=".9" />`;
-  }).join("");
-
-  const svg = `
-    <div style="display:flex; gap:24px; align-items:center; padding:6px 0 14px;">
-      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="background:#0f141c;border-radius:12px;border:1px solid #253041">
-        ${arcs}
-        <circle cx="${cx}" cy="${cy}" r="40" fill="#0f141c"></circle>
-        <text x="${cx}" y="${cy-4}" text-anchor="middle" fill="#cfd7e3" font-size="14" font-weight="700">Total</text>
-        <text x="${cx}" y="${cy+16}" text-anchor="middle" fill="#ffd36a" font-size="16" font-weight="900">${fmtInt(total)}</text>
-      </svg>
-      <div style="flex:1; min-width:260px;">
-        ${pairs.map((p,i)=>`
-          <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1b2534;padding:6px 8px;">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${colors[i%colors.length]}"></span>
-              <span>${esc(p.label)}</span>
-            </div>
-            <div style="color:#9fb0c8">${fmtInt(p.value)}  •  ${fmtPct(p.value/total)}</div>
-          </div>
-        `).join("")}
-      </div>
+  const name = leader.name||"";
+  const big = `
+    <div class="agent" style="gap:14px">
+      <span class="avatar-fallback" style="width:56px;height:56px;font-size:18px;line-height:56px">${name.split(/\s+/).map(w=>w[0]).join("").slice(0,2).toUpperCase()}</span>
+      <span style="font-size:22px;font-weight:800">${name}</span>
     </div>
   `;
-  wrap.innerHTML = svg;
-}
-
-/* ---------- Rotation ---------- */
-const VIEWS = [
-  { id:"roster",  fn: viewRoster },
-  { id:"aotw",    fn: viewAOTW },
-  { id:"vendors", fn: viewVendors },
-  { id:"activity",fn: viewActivity },
-  { id:"ytd",     fn: viewYTD },
-  { id:"par",     fn: viewPAR },
-];
-let viewIdx = 0, rotTimer = null;
-function startRotation(){
-  async function step(){
-    try{ await VIEWS[viewIdx].fn(); } catch(e){ tbody.innerHTML = rowEmpty(`Error: ${e.message}`); }
-    viewIdx = (viewIdx+1) % VIEWS.length;
-    rotTimer = setTimeout(step, 20_000); // 20s per board; adjust as you like
+  // Try real headshot by replacing the span in HTML string
+  const tmp = document.createElement("div"); tmp.innerHTML = big;
+  const af = tmp.querySelector(".avatar-fallback");
+  const slug = slugName(name);
+  if (slug){
+    const img = document.createElement("img");
+    img.className="avatar"; img.style.width="56px"; img.style.height="56px";
+    let i=0; img.onerror = ()=>{ if (++i<HEADSHOTS_PATHS.length) img.src=`./headshots/${slug}.${HEADSHOTS_PATHS[i]}`; };
+    img.src = `./headshots/${slug}.${HEADSHOTS_PATHS[i]}`;
+    af.replaceWith(img);
   }
-  clearTimeout(rotTimer);
-  step();
+  // YTD add-on (if you provided ytd_av.json)
+  let ytdLine = "";
+  if (ytd?.agents?.length){
+    const hit = ytd.agents.find(a => (a.name||"").toLowerCase() === name.toLowerCase());
+    if (hit){ ytdLine = `<div style="margin-top:8px;color:#9fb0c8">YTD AV: <b>${money(hit.amount || 0)}</b></div>`; }
+  }
+  elTbody.innerHTML = `
+    <tr>
+      <td>${tmp.innerHTML}${ytdLine}</td>
+      <td class="num">${fmtInt(leader.sales||0)}</td>
+      <td class="num">${money(Math.round((leader.amount||0)*12))}</td>
+    </tr>
+  `;
 }
 
-/* ---------- boot ---------- */
+function donutSVG(parts){
+  const total = parts.reduce((s,p)=>s+p.value,0) || 1;
+  let angle = -90;
+  const r=80, c=100, w=18;
+  const arcs = parts.map((p,i)=>{
+    const frac = p.value/total;
+    const a2 = angle + frac*360;
+    const large = (a2-angle)>180 ? 1:0;
+    const x1 = c + r*Math.cos(angle*Math.PI/180);
+    const y1 = c + r*Math.sin(angle*Math.PI/180);
+    const x2 = c + r*Math.cos(a2*Math.PI/180);
+    const y2 = c + r*Math.sin(a2*Math.PI/180);
+    angle = a2;
+    return `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}" stroke="${VENDOR_COLORS[i%VENDOR_COLORS.length]}" stroke-width="${w}" fill="none"/>`;
+  }).join("");
+  return `<svg width="220" height="220" viewBox="0 0 200 200" style="display:block;margin:14px auto">
+    <circle cx="100" cy="100" r="${r}" stroke="#1e2838" stroke-width="${w}" fill="none"/>
+    ${arcs}
+    <circle cx="100" cy="100" r="${r- w/2}" fill="transparent"/>
+  </svg>`;
+}
+
+function renderVendors(vendors){
+  setTitle(`Lead Vendors — % of Sales (Last ${vendors.window_days||45} days)`);
+  elThead.innerHTML = `
+    <tr>
+      <th>Vendor</th>
+      <th style="text-align:right">Deals</th>
+      <th style="text-align:right">% of total</th>
+    </tr>`;
+  const list = (vendors.vendors||[]).slice().sort((a,b)=> (b.deals||0)-(a.deals||0));
+  const total = list.reduce((s,v)=>s+(v.deals||0),0);
+  if (!list.length){
+    elTbody.innerHTML = `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">No vendor chart available.</td></tr>`;
+    return;
+  }
+  const rows = list.map((v,i)=>`
+    <tr>
+      <td><span style="display:inline-block;width:10px;height:10px;background:${VENDOR_COLORS[i%VENDOR_COLORS.length]};border-radius:2px;margin-right:8px"></span>${v.name||"Unknown"}</td>
+      <td class="num">${fmtInt(v.deals||0)}</td>
+      <td class="num">${fmtPct((v.deals||0)/(total||1))}</td>
+    </tr>
+  `).join("");
+  const donut = donutSVG(list.map((v,i)=>({ label:v.name, value:Number(v.deals||0) })));
+  elTbody.innerHTML = `<tr><td colspan="3">${donut}</td></tr>${rows}`;
+}
+
+function renderActivity(calls, sold){
+  setTitle("Agent Activity — (This week)");
+  elThead.innerHTML = `
+    <tr>
+      <th>Agent</th>
+      <th style="text-align:right">Calls</th>
+      <th style="text-align:right">Talk (min)</th>
+      <th style="text-align:right">Logged (h:mm)</th>
+      <th style="text-align:right">Leads</th>
+      <th style="text-align:right">Sold</th>
+      <th style="text-align:right">Conv %</th>
+    </tr>`;
+  // Build a name->row map from calls, then merge sellers from sold
+  const map = new Map();
+  (calls.perAgent||[]).forEach(a=>{
+    map.set(a.name||"", {
+      name:a.name||"",
+      calls: a.calls||0,
+      talkMin: a.talkMin||0,
+      loggedMin: a.loggedMin||0,
+      leads: a.leads||0,
+      sold: a.sold||0
+    });
+  });
+  (sold.perAgent||[]).forEach(s=>{
+    const r = map.get(s.name||"") || {name:s.name||"",calls:0,talkMin:0,loggedMin:0,leads:0,sold:0};
+    r.sold = Number(r.sold||0) + Number(s.sales||0);
+    map.set(r.name, r);
+  });
+  const rows = Array.from(map.values())
+    .sort((a,b)=> (b.calls||0)-(a.calls||0))
+    .map(a=>{
+      const conv = (a.leads>0) ? (a.sold/a.leads) : 0;
+      const h = Math.floor((a.loggedMin||0)/60), m = Math.round((a.loggedMin||0)%60);
+      return `
+        <tr>
+          <td class="agent">${avatarCell(a.name||"")}</td>
+          <td class="num">${fmtInt(a.calls||0)}</td>
+          <td class="num">${fmtInt(a.talkMin||0)}</td>
+          <td class="num">${h}:${pad2(m)}</td>
+          <td class="num">${fmtInt(a.leads||0)}</td>
+          <td class="num">${fmtInt(a.sold||0)}</td>
+          <td class="num">${fmtPct(isFinite(conv)?conv:0)}</td>
+        </tr>`;
+    }).join("");
+
+  elTbody.innerHTML = rows || `<tr><td colspan="7" style="padding:14px;color:#7b8aa3">No activity reported yet.</td></tr>`;
+}
+
+function renderYTD(ytd, total){
+  setTitle("YTD AV (override)");
+  elThead.innerHTML = `
+    <tr>
+      <th>Agent</th>
+      <th style="text-align:right">YTD AV</th>
+    </tr>`;
+  const list = (ytd.agents||[]).slice().sort((a,b)=> (b.amount||0)-(a.amount||0));
+  if (!list.length){
+    elTbody.innerHTML = `<tr><td colspan="2" style="padding:14px;color:#7b8aa3">No YTD data provided.</td></tr>`;
+    return;
+  }
+  const rows = list.map(a=>`
+    <tr>
+      <td class="agent">${avatarCell(a.name||"")}</td>
+      <td class="num">${money(a.amount||0)}</td>
+    </tr>`).join("");
+  const tot = money((total&&total.total)||list.reduce((s,a)=>s+(a.amount||0),0));
+  elTbody.innerHTML = `${rows}<tr><td style="text-align:right;font-weight:800">Team Total:</td><td class="num" style="font-weight:800">${tot}</td></tr>`;
+}
+
+function renderPAR(par){
+  setTitle("PAR — Qualifiers");
+  elThead.innerHTML = `
+    <tr><th>Agent</th><th style="text-align:right">Potential Bonus</th></tr>`;
+  if (!par?.people?.length){
+    elTbody.innerHTML = `<tr><td colspan="2" style="padding:14px;color:#7b8aa3">No PAR data available.</td></tr>`;
+    return;
+  }
+  const rows = par.people.map(p=>`
+    <tr>
+      <td class="agent">${avatarCell(p.name||"")}</td>
+      <td class="num">${money(p.amount||0)}</td>
+    </tr>`).join("");
+  elTbody.innerHTML = rows;
+}
+
+/* =============== ROTATION =============== */
+let boards = [];  // filled in after first load
+let boardIdx = 0;
+let rotateTimer = null;
+
+function rotate(){
+  clearTimeout(rotateTimer);
+  if (!boards.length){ rotateTimer = setTimeout(rotate, ROTATE_MS); return; }
+  const b = boards[boardIdx % boards.length]; boardIdx++;
+  try { b.render(); } catch(e){ console.error(e); }
+  rotateTimer = setTimeout(rotate, ROTATE_MS);
+}
+
+/* =============== BOOT =============== */
 async function boot(){
-  await Promise.all([loadRoster(), startRules()]);
-  startRotation();
+  // Banner stays constant
+  elTitle.textContent = "THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT";
+  elSub.textContent   = "Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.";
+
+  // Rule of day now + every 10 minutes
+  await setRuleOfDay(); setInterval(setRuleOfDay, 10*60*1000);
+
+  // Load everything we can
+  const [sold, calls, vendors, _ytd, _par] = await Promise.all([
+    loadSold(), loadCalls(), loadVendors(), loadYTD(), loadPAR()
+  ]);
+  setCards({
+    calls: calls?.team?.calls || 0,
+    totalSales: sold?.team?.totalAV12x || 0,
+    deals: sold?.team?.totalSales || 0
+  });
+
+  primeSeenSales(sold?.allSales||[]);
+  // After boot, poll sales every 30s to catch new submissions and splash
+  setInterval(async ()=>{
+    try{
+      const s = await loadSold();
+      setCards({
+        calls: cacheCalls?.team?.calls || 0,
+        totalSales: s?.team?.totalAV12x || 0,
+        deals: s?.team?.totalSales || 0
+      });
+      diffAndSplash(s?.allSales||[]);
+    }catch(e){}
+  }, 30000);
+
+  // Build boards list (optional boards included only if data exists)
+  boards = [
+    { key:"roster", render: ()=> renderRoster(cacheSold) },
+    { key:"aotw",   render: ()=> renderAotW(cacheSold, cacheYTD) },
+    { key:"vendors",render: ()=> renderVendors(cacheVendors||{vendors:[],window_days:45}) },
+    { key:"activity",render: ()=> renderActivity(cacheCalls||{team:{},perAgent:[]}, cacheSold||{perAgent:[]}) },
+  ];
+  if (cacheYTD?.agents?.length) boards.push({ key:"ytd", render: ()=> renderYTD(cacheYTD, cacheYTDTotal) });
+  if (cachePAR?.people?.length) boards.push({ key:"par", render: ()=> renderPAR(cachePAR) });
+
+  // Start rotation
+  rotate();
 }
 
-/* go */
-boot();
+document.addEventListener("DOMContentLoaded", boot);
