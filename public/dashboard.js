@@ -6,25 +6,35 @@
    =========================== */
 
 (() => {
-  const ENDPOINTS = {
-    teamSold: '/api/team_sold',
-    callsByAgent: '/api/calls_by_agent',
-    salesByVendor: '/api/sales_by_vendor',
-    ytdAv: '/boards/ytd_av.json',
-    rules: '/rules.json',
-    roster: '/headshots/roster.json'
-  };
+const ENDPOINTS = {
+  teamSold: '/api/team_sold',
+  callsByAgent: '/api/calls_by_agent',
+
+  // TEMP fallback while vendor API missing env vars
+  salesByVendor: '/sales_by_vendor.json',
+
+  // FIX: YTD override files are at root, not /boards/
+  ytdAv: '/ytd_av.json',
+  rules: '/rules.json',
+  roster: '/headshots/roster.json'
+};
 
   // ---- tiny utils
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const fmtMoney = (n) => `$${(+n || 0).toLocaleString()}`;
 
-  const fetchJSON = async (url) => {
+  // replace lines 27–31 with this:
+const fetchJSON = async (url) => {
+  try {
     const r = await fetch(url, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`${url} → ${r.status}`);
-    return r.json();
-  };
+    if (!r.ok) return null;         // don't blow up the page on a bad endpoint
+    return await r.json();
+  } catch (e) {
+    console.warn('fetchJSON failed:', url, e);
+    return null;                    // keep rendering the rest of the dashboard
+  }
+};
 
   // ---------- Headshots: build dynamic resolver from roster.json
   function buildHeadshotResolver(roster) {
