@@ -141,11 +141,7 @@ function drawVendorBoard(rootEl, rows) {
       fetchJSON(ENDPOINTS.callsByAgent).catch(() => ({team: {calls: 0}})),
       fetchJSON(ENDPOINTS.teamSold).catch(() => ({team: {totalSales:0,totalAV12X:0}, perAgent: []})),
     ]);
-
-    let vendors = null;
-    try { vendors = await fetchJSON(ENDPOINTS.salesByVendor); }
-    catch { vendors = null; }
-
+const vendorRows = summarizeVendors(sold?.allSales || []);
     let ytdList = [];
     let ytdTotal = 0;
     try { ytdList  = await fetchJSON(ENDPOINTS.ytdAv); } catch {}
