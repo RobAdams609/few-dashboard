@@ -1,497 +1,382 @@
-/* public/dashboard.js  — FULL REPLACEMENT
-   FEW Dashboard
-   - Board rotation (4 boards)
-   - 12h Rule-of-the-day ticker
-   - Headshots
-   - Centered sale splash (60s), no "x12" text anywhere
-   - YTD & PAR optional overrides
-   - Vendor API with static fallback
-*/
+/* ===== THE FEW — FULL DASHBOARD (single file, no placeholders) ===== */
 
-/* =========================
-   ---- Config & Globals ----
-   ========================= */
-const HEADSHOTS_EXTS = ["jpg", "png", "webp"];
-const ROTATE_MS = 25000;          // board dwell time
-const SALES_POLL_MS = 20000;      // poll new sales
-const SALE_SPLASH_MS = 60000;     // 60 seconds
-const ET_TZ = "America/New_York"; // display context
-const MONEY_LOCALE = "en-US";
+(() => {
+  // ---------- Config ----------
+  const ROTATE_MS = 15000;           // time per board
+  const SALE_HOLD_MS = 60000;        // sale splash hold
+  const RULE_ROTATE_HOURS = 12;      // rule change cadence
 
-const ENDPOINTS = {
-  sold: "/api/team_sold",
-  calls: "/api/calls_by_agent",
-  salesByVendorApi: "/api/sales_by_vendor",
-  salesByVendorStatic: "/public/sales_by_vendor.json",
-  ytdAv: "/public/ytd_av.json",
-  ytdTotal: "/public/ytd_total.json",
-  par: "/public/par.json"
-};
-
-// DOM refs (per index.html you supplied)
-const elTicker   = document.getElementById("ticker");
-const elView     = document.getElementById("viewLabel");
-const elSumCalls = document.getElementById("sumCalls");
-const elSumSales = document.getElementById("sumSales");
-const elSumTalk  = document.getElementById("sumTalk");
-const elThead    = document.getElementById("thead");
-const elTbody    = document.getElementById("tbody");
-const elSalePop  = document.getElementById("salePop");
-
-// State
-let _lastSoldSeenIds = new Set(); // to detect new sales for splash
-let _boardIdx = 0;
-let _rotateTimer = null;
-let _saleTimer = null;
-
-/* =========================
-   ---- Utilities / fmt  ----
-   ========================= */
-const pad = (n) => String(n).padStart(2, "0");
-const money = (n) =>
-  "$" + Number(Math.round(n)).toLocaleString(MONEY_LOCALE);
-const fmtInt = (n) => Number(n || 0).toLocaleString(MONEY_LOCALE);
-
-function nowUTC() { return new Date(); }
-
-function weekWindowET(){
-  // start: last Fri 8pm ET → per your previous behavior (you can tweak)
-  const now = new Date();
-  const dd = new Date(now.toLocaleString("en-US", { timeZone: ET_TZ }));
-  // Normalize to start of today ET, then back to Fri 20:00
-  const day = dd.getDay(); // 0 Sun .. 6 Sat
-  // Aim for Fri 20:00 of current week (or last)
-  const target = new Date(dd);
-  // set to Fri
-  const diff = (day + 1) % 7; // days since Fri
-  target.setDate(dd.getDate() - diff);
-  target.setHours(20,0,0,0);
-  const start = target;
-
-  const end = new Date(start); end.setDate(start.getDate() + 7);
-  // emit "YYYY-MM-DD HH:mm:ss"
-  const f = (d)=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  return { startDate: f(start), endDate: f(end) };
-}
-
-// Cache-busting + no-store
-async function loadJSON(url){
-  const bust = url.includes("?") ? "&" : "?";
-  const r = await fetch(`${url}${bust}_=${Date.now()}`, {
-    cache: "no-store",
-    headers: { "Cache-Control":"no-store" }
-  });
-  if (!r.ok) throw new Error(`${url} ${r.status}`);
-  return r.json();
-}
-
-// HEADSHOT helpers
-const slugName = (s) =>
-  (s||"").toLowerCase().trim()
-    .replace(/[^a-z0-9\s\-]/g,"")
-    .replace(/\s+/g,"-");
-
-function avatarHTML(name, size=28){
-  const initials = (name||"").split(/\s+/).map(w=>w[0]||"").join("").slice(0,2).toUpperCase();
-  const slug = slugName(name||"");
-  let imgs = "";
-  for (const ext of HEADSHOTS_EXTS){
-    imgs += `<picture>
-               <source srcset="./headshots/${slug}.${ext}">
-               <img class="avatar" width="${size}" height="${size}" style="width:${size}px;height:${size}px;border-radius:50%;object-fit:cover;display:none" alt="${name}">
-             </picture>`;
-  }
-  // fallback bubble always visible initially; JS will attempt to swap the first loaded <img> visible
-  return `
-    <span class="avatar-fallback" style="width:${size}px;height:${size}px;border-radius:50%;background:#1f2a3a;color:#89a2c6;display:inline-flex;align-items:center;justify-content:center;font-weight:800">${initials}</span>
-    ${imgs}
-  `;
-}
-
-// After injecting avatarHTML into a cell, call to activate first successful <img>
-function activateAvatar(container){
-  const pic = container.querySelector("picture img");
-  if (!pic) return;
-  const all = container.querySelectorAll("picture img");
-  let idx = 0;
-  const tryShow = ()=>{
-    if (idx >= all.length) return;
-    const img = all[idx++];
-    img.onload = ()=> {
-      container.querySelector(".avatar-fallback")?.remove();
-      img.style.display = "inline-block";
-      // Remove other pictures
-      container.querySelectorAll("picture").forEach(p=>{
-        const im = p.querySelector("img");
-        if (im !== img) p.remove();
-      });
-    };
-    img.onerror = tryShow;
-    img.src = img.src; // trigger
+  const ENDPOINTS = {
+    team:  '/api/team_sold',
+    calls: '/api/calls_by_agent',
+    vendor:'/api/sales_by_vendor'
   };
-  tryShow();
-}
 
-// Section header + summary cards
-function setTitle(label){
-  elView.textContent = label;
-}
-function setSummary({calls=0, submittedAV=0, deals=0}){
-  elSumCalls.textContent = fmtInt(calls);
-  elSumSales.textContent = money(submittedAV);
-  elSumTalk.textContent  = fmtInt(deals);
-}
+  const OVERRIDES = {
+    ytdList:  '/public/ytd_av.json',
+    ytdTotal: '/public/ytd_total.json',
+    par:      '/public/par_override.json',   // optional; if missing, PAR board is skipped
+    rules:    '/public/rules.json',          // array of rule strings
+    vendorStatic: '/public/sales_by_vendor.json' // fallback if API empty
+  };
 
-/* =========================
-   ------ Rule Ticker  ------
-   ========================= */
-async function loadRules(){
-  // expects public/rules.json: { "rules":[ "...", "...", ... ] }
-  try{
-    const j = await loadJSON("/public/rules.json");
-    const rules = Array.isArray(j?.rules) ? j.rules : [];
-    if (!rules.length) return;
-    // rotate every 12 hours: pick rule index from half-days since epoch
-    const slot = Math.floor(Date.now() / (12*60*60*1000));
-    const rule = rules[slot % rules.length];
-    elTicker.textContent = `RULE OF THE DAY — ${rule}`;
-  }catch(_){
-    elTicker.textContent = "RULE OF THE DAY — …";
-  }
-}
+  // ---------- State ----------
+  let dataTeam = null;          // { team, perAgent[], allSales[] }
+  let dataCalls = null;         // { team, perAgent[] }
+  let dataVendors = null;       // { as_of, window_days, vendors[] }
+  let ytd = null;               // { list:[], total:number } from overrides
+  let parList = null;           // optional
+  let lastSaleId = null;
 
-/* =========================
-   -------- Data IO --------
-   ========================= */
-async function fetchAll(){
-  const win = weekWindowET();
-  const [sold, calls, ytdAv, ytdTotal] = await Promise.all([
-    loadJSON(`${ENDPOINTS.sold}?_=${Date.now()}`),
-    loadJSON(`${ENDPOINTS.calls}?_=${Date.now()}`),
-    safeLoad(ENDPOINTS.ytdAv),
-    safeLoad(ENDPOINTS.ytdTotal)
-  ]);
-  // vendor: prefer API, fallback to static
-  let vendors;
-  try {
-    vendors = await loadJSON(`${ENDPOINTS.salesByVendorApi}?_=${Date.now()}`);
-  } catch {
-    vendors = await safeLoad(ENDPOINTS.salesByVendorStatic);
-  }
-  const par = await safeLoad(ENDPOINTS.par);
+  const boards = [
+    drawRoster, drawAgentOfWeek, drawVendors, drawActivity, drawYTD, drawPAR
+  ];
 
-  return { sold, calls, vendors, ytdAv, ytdTotal, par, win };
-}
+  // ---------- DOM helpers ----------
+  const $ = sel => document.querySelector(sel);
+  const thead = $('#thead'), tbody = $('#tbody');
 
-async function safeLoad(url){
-  try{ return await loadJSON(url); }
-  catch(_){ return null; }
-}
+  const fmtInt = n => (n||0).toLocaleString();
+  const fmtUSD = n => {
+    const num = Number(n||0);
+    return num.toLocaleString(undefined, {style:'currency', currency:'USD', maximumFractionDigits:0});
+  };
+  const slug = name => (name||'').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
 
-/* =========================
-   -------- Boards ----------
-   ========================= */
+  const setSummary = () => {
+    // Calls (week) from calls API, AV & deals from team API
+    const calls = dataCalls?.team?.calls ?? 0;
+    const deals = dataTeam?.team?.totalSales ?? 0;
+    const av = dataTeam?.team?.totalAV12x ?? dataTeam?.team?.totalAV12X ?? dataTeam?.team?.totalAV12x ?? 0;
+    $('#sumCalls').textContent = fmtInt(calls);
+    $('#sumDeals').textContent = fmtInt(deals);
+    $('#sumSales').textContent = fmtUSD(av);
+  };
 
-// --- 1) Roster (weekly submitted AV) ---
-function renderRoster(sold){
-  setTitle("This Week — Roster");
-  elThead.innerHTML = `
-    <tr>
-      <th>Agent</th>
-      <th style="text-align:right">Sold</th>
-      <th style="text-align:right">Submitted AV</th>
-    </tr>`;
-  const rows = (sold?.perAgent||[])
-    .slice()
-    .sort((a,b)=> ((b.amount||0) - (a.amount||0)))
-    .map(a=>{
-      const submitted = Math.round((a.amount||0)*12);
-      const name = a.name||"";
-      const cell = document.createElement("td");
-      cell.className = "agent";
-      cell.innerHTML = `${avatarHTML(name,28)} <span style="margin-left:8px">${escapeHtml(name)}</span>`;
-      // we must return string, so create wrapper and then swap
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td></td>
-        <td class="num">${fmtInt(a.sales||0)}</td>
-        <td class="num">${money(submitted)}</td>`;
-      row.children[0].replaceWith(cell);
-      // activate avatar after inserted
-      setTimeout(()=>activateAvatar(cell), 0);
-      return row.outerHTML;
-    }).join("");
-  elTbody.innerHTML = rows || `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">Loading roster or no sales yet.</td></tr>`;
-}
+  const setTitle = s => $('#viewLabel').textContent = s;
 
-// --- 2) Agent of the Week (leader by submitted AV) ---
-function renderAotW(sold, ytdAv){
-  setTitle("Agent of the Week");
-  const leader = (sold?.perAgent||[])
-    .slice()
-    .sort((a,b)=> (b.amount||0)-(a.amount||0))[0];
+  const avatarHTML = (name) => {
+    const s = slug(name);
+    const initials = (name||'').split(/\s+/).slice(0,2).map(p=>p[0]||'').join('').toUpperCase();
+    // Try jpg/png/webp
+    const sources = [`/public/headshots/${s}.jpg`,`/public/headshots/${s}.png`,`/public/headshots/${s}.webp`];
+    const id = `img-${Math.random().toString(36).slice(2)}`;
+    // We create a wrapper and try to set one that loads.
+    const wrapper = document.createElement('div'); wrapper.className='avatar';
+    const img = document.createElement('img'); img.alt = name||'';
+    img.onerror = () => { wrapper.outerHTML = `<div class="avatar-fallback">${initials}</div>`; };
+    img.src = sources[0];
+    // progressive failover
+    img.addEventListener('error', (e) => {
+      const next = sources.shift();
+      if (next === undefined){ wrapper.outerHTML = `<div class="avatar-fallback">${initials}</div>`; }
+      else { img.src = next; }
+    }, {once:false});
+    wrapper.appendChild(img);
+    return wrapper.outerHTML;
+  };
 
-  elThead.innerHTML = `
-    <tr>
-      <th>Leading for Agent of the Week</th>
-      <th style="text-align:right">Sold</th>
-      <th style="text-align:right">Submitted AV</th>
-    </tr>`;
-
-  if (!leader){
-    elTbody.innerHTML = `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">No leader yet.</td></tr>`;
-    return;
-  }
-  const submitted = Math.round((leader.amount||0)*12);
-  const name = leader.name||"";
-
-  // Build a big row with large headshot
-  const big = document.createElement("td");
-  big.innerHTML = `
-    <div class="agent" style="gap:14px">
-      ${avatarHTML(name,56)}
-      <div>
-        <div style="font-size:22px;font-weight:800">${escapeHtml(name)}</div>
-        ${ytdLineHTML(ytdAv, name)}
-      </div>
-    </div>`;
-  const row = document.createElement("tr");
-  row.innerHTML = `
-    <td></td>
-    <td class="num">${fmtInt(leader.sales||0)}</td>
-    <td class="num">${money(submitted)}</td>`;
-  row.children[0].replaceWith(big);
-  setTimeout(()=>activateAvatar(big),0);
-
-  elTbody.innerHTML = row.outerHTML;
-}
-
-function ytdLineHTML(ytdAv, name){
-  try{
-    const hit = (ytdAv?.agents||[]).find(a => (a.name||"").toLowerCase()=== (name||"").toLowerCase());
-    if (!hit) return "";
-    const amt = money(hit.amount||0);
-    return `<div style="margin-top:6px;color:#9fb0c8">YTD AV: <b>${amt}</b></div>`;
-  }catch(_){ return ""; }
-}
-
-// --- 3) Vendors (last 45d) + donut ---
-function renderVendors(vendors){
-  setTitle("Lead Vendors — % of Sales (Last 45 days)");
-  elThead.innerHTML = `
-    <tr>
-      <th>Vendor</th>
-      <th style="text-align:right">Deals</th>
-      <th style="text-align:right">% of total</th>
-    </tr>`;
-  const list = vendors?.vendors || vendors?.list || [];
-  const total = list.reduce((s,v)=> s + (v.deals||0), 0);
-
-  if (!list?.length || !total){
-    elTbody.innerHTML = `<tr><td colspan="3" style="padding:14px;color:#7b8aa3">No vendor chart available.</td></tr>`;
-    return;
+  // ---------- Networking ----------
+  async function getJSON(url){
+    const r = await fetch(url, {cache:'no-store'});
+    if (!r.ok) throw new Error(`${url} ${r.status}`);
+    return r.json();
   }
 
-  // Table rows
-  const rows = list
-    .slice()
-    .sort((a,b)=> (b.deals||0)-(a.deals||0))
-    .map(v=>`
-      <tr>
-        <td>${escapeHtml(v.name||"Unknown")}</td>
-        <td class="num">${fmtInt(v.deals||0)}</td>
-        <td class="num">${fmtPct((v.deals||0)/total)}</td>
-      </tr>
-    `).join("");
+  async function loadAll(){
+    [dataTeam, dataCalls] = await Promise.all([
+      getJSON(ENDPOINTS.team).catch(_=>({team:{}, perAgent:[], allSales:[]})),
+      getJSON(ENDPOINTS.calls).catch(_=>({team:{}, perAgent:[]})),
+    ]);
 
-  // Donut SVG
-  const donut = donutSVG(list.map(v=>({label:v.name, value:(v.deals||0)})));
+    try {
+      dataVendors = await getJSON(ENDPOINTS.vendor);
+      if (!dataVendors?.vendors?.length){
+        dataVendors = await getJSON(OVERRIDES.vendorStatic).catch(_=>({vendors:[]}));
+      }
+    } catch { dataVendors = {vendors:[]}; }
 
-  elTbody.innerHTML = `
-    <tr>
-      <td colspan="3" style="padding:8px 10px 18px">
-        <div style="display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start">
-          <div style="justify-self:center">${donut}</div>
-          <table style="margin:0"><tbody>${rows}</tbody></table>
-        </div>
-      </td>
-    </tr>`;
-}
+    // Overrides
+    ytd = null;
+    try{
+      const list = await getJSON(OVERRIDES.ytdList);
+      const total = await getJSON(OVERRIDES.ytdTotal);
+      ytd = {list, total};
+    }catch{}
 
-function donutSVG(slices){
-  const r = 120, cx = 150, cy = 150, circ = 2*Math.PI*r;
-  const total = slices.reduce((s,x)=>s+x.value,0) || 1;
-  let acc = 0;
-  const colors = (i)=>`hsl(${(i*57)%360} 80% 55%)`;
+    parList = null;
+    try{ parList = await getJSON(OVERRIDES.par); }catch{}
 
-  const arcs = slices.map((s,i)=>{
-    const frac = s.value/total;
-    const len = frac*circ;
-    const dash = `${len} ${circ-len}`;
-    const rot = (acc/total)*360; acc+=s.value;
-    return `<circle r="${r}" cx="${cx}" cy="${cy}"
-             stroke="${colors(i)}" stroke-width="36" fill="none"
-             stroke-dasharray="${dash}" transform="rotate(${rot} ${cx} ${cy})" />`;
-  }).join("");
-
-  // center label
-  return `
-  <svg width="300" height="300" viewBox="0 0 300 300">
-    <circle r="${r}" cx="${cx}" cy="${cy}" fill="none" stroke="#1e2937" stroke-width="36"/>
-    ${arcs}
-    <text x="150" y="150" text-anchor="middle" dominant-baseline="middle"
-          style="fill:#cfd7e3;font-weight:800;font-size:18px">Last 45 Days</text>
-  </svg>`;
-}
-
-function fmtPct(x){ return (Math.round((x||0)*1000)/10).toFixed(1) + "%"; }
-
-// --- 4) Agent Activity (calls, talk, logged, leads, sold, conv%) ---
-function renderActivity(calls){
-  setTitle("Agent Activity — (This week)");
-  elThead.innerHTML = `
-    <tr>
-      <th>Agent</th>
-      <th style="text-align:right">Calls</th>
-      <th style="text-align:right">Talk (min)</th>
-      <th style="text-align:right">Logged (h:mm)</th>
-      <th style="text-align:right">Leads</th>
-      <th style="text-align:right">Sold</th>
-      <th style="text-align:right">Conv %</th>
-    </tr>`;
-
-  const per = calls?.perAgent || [];
-  if (!per.length){
-    elTbody.innerHTML = `<tr><td colspan="7" style="padding:14px;color:#7b8aa3">No activity reported yet.</td></tr>`;
-    return;
+    setSummary();
+    rotateStart();
+    trackNewSales();
   }
 
-  const rows = per.slice().map(a=>{
-    const name = a.name||"";
-    const conv = a.leads ? (100*(a.sold||0)/a.leads) : 0;
-    const loggedH = Math.floor((a.loggedMin||0)/60);
-    const loggedM = (a.loggedMin||0)%60;
-    const cell = document.createElement("td");
-    cell.className="agent";
-    cell.innerHTML = `${avatarHTML(name,28)} <span style="margin-left:8px">${escapeHtml(name)}</span>`;
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td></td>
-      <td class="num">${fmtInt(a.calls||0)}</td>
-      <td class="num">${fmtInt(a.talkMin||0)}</td>
-      <td class="num">${loggedH}:${pad(loggedM)}</td>
-      <td class="num">${fmtInt(a.leads||0)}</td>
-      <td class="num">${fmtInt(a.sold||0)}</td>
-      <td class="num">${fmtPct(conv/100)}</td>`;
-    tr.children[0].replaceWith(cell);
-    setTimeout(()=>activateAvatar(cell),0);
-    return tr.outerHTML;
-  }).join("");
+  // ---------- Rule of the day (12h) ----------
+  async function initRule(){
+    let rules = [];
+    try { rules = await getJSON(OVERRIDES.rules); } catch {}
+    const key = 'few.rule.index';
+    const tsKey = 'few.rule.ts';
+    let idx = Number(localStorage.getItem(key) || 0);
+    let ts  = Number(localStorage.getItem(tsKey) || 0);
+    const now = Date.now();
+    const ageHrs = (now - ts)/(1000*60*60);
 
-  elTbody.innerHTML = rows;
-}
+    if (!rules.length){
+      $('#ruleTicker').textContent = 'RULE OF THE DAY — You are who you hunt with. Everybody wants to eat, but FEW will hunt.';
+      return;
+    }
+    if (ageHrs >= RULE_ROTATE_HOURS){ idx = (idx+1) % rules.length; ts = now; }
+    localStorage.setItem(key, String(idx));
+    localStorage.setItem(tsKey, String(ts||now));
+    $('#ruleTicker').textContent = 'RULE OF THE DAY — ' + rules[idx];
+  }
 
-/* =========================
-   ------ Sale Splash  ------
-   ========================= */
-function showSaleSplash(agentName, amount12x){
-  if (!elSalePop) return;
-  elSalePop.innerHTML = `
-    <div style="
-      position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
-      background:#1b3021;border:2px solid #4ccd8a;border-radius:18px;
-      padding:22px 28px;color:#fff;box-shadow:0 10px 30px rgba(0,0,0,.45);
-      text-align:center;min-width:320px;max-width:80vw;z-index:1000">
-      <div style="color:#ffe8a3;font-weight:700;letter-spacing:.08em;margin-bottom:8px">NEW SALE</div>
-      <div style="font-size:28px;font-weight:900;margin-bottom:6px">${escapeHtml(agentName||"")}</div>
-      <div style="font-size:20px;font-weight:800">${money(amount12x||0)} AV</div>
-    </div>`;
-  elSalePop.classList.add("show");
-  clearTimeout(_saleTimer);
-  _saleTimer = setTimeout(()=>{
-    elSalePop.classList.remove("show");
-    elSalePop.innerHTML = "";
-  }, SALE_SPLASH_MS);
-}
+  // ---------- Rotation ----------
+  let rotateIdx = 0, rotateTimer = null;
 
-function scanNewSales(sold){
-  const all = sold?.allSales || [];
-  // use unique leadId if available, otherwise composite
-  const fresh = [];
-  for (const s of all){
-    const id = s.leadId || `${s.agent||""}|${s.dateSold||""}|${s.amount||0}`;
-    if (!_lastSoldSeenIds.has(id)){
-      _lastSoldSeenIds.add(id);
-      fresh.push(s);
+  function rotateStart(){
+    clearInterval(rotateTimer);
+    drawCurrent();
+    rotateTimer = setInterval(()=>{
+      rotateIdx = (rotateIdx+1) % boards.length;
+      drawCurrent();
+    }, ROTATE_MS);
+  }
+
+  function drawCurrent(){
+    // Skip boards that have no data
+    let guard = 0;
+    while(guard++ < boards.length){
+      const fn = boards[rotateIdx];
+      const ok = fn();
+      if (ok) break;
+      rotateIdx = (rotateIdx+1) % boards.length;
     }
   }
-  // show latest one
-  if (fresh.length){
-    const s = fresh[fresh.length-1];
-    const amount12x = Math.round((s.amount||0)*12);
-    showSaleSplash(s.agent||"", amount12x);
+
+  // ---------- Boards ----------
+  // 1) ROSTER — This Week — Submitted AV (from team API)
+  function drawRoster(){
+    if (!dataTeam?.perAgent?.length) return false;
+    setTitle('This Week — Roster');
+    thead.innerHTML = `<tr>
+      <th>Agent</th><th>Sold</th><th class="num">Submitted AV</th>
+    </tr>`;
+    const rows = dataTeam.perAgent
+      .slice()
+      .sort((a,b)=>(b.av12x||0)-(a.av12x||0))
+      .map(a=>`
+        <tr>
+          <td><div class="agent">${avatarHTML(a.name)}<span>${escapeHtml(a.name)}</span></div></td>
+          <td>${fmtInt(a.sales||0)}</td>
+          <td class="num">${fmtUSD(a.av12x||0)}</td>
+        </tr>
+      `).join('');
+    tbody.innerHTML = rows || `<tr><td style="padding:16px;color:#7e8ea4;">No sales yet.</td></tr>`;
+    return true;
   }
-}
 
-/* =========================
-   ------- Rotation  --------
-   ========================= */
-const BOARDS = [
-  // each gets ({sold, calls, vendors, ytdAv, ytdTotal, par})
-  (d)=> renderRoster(d.sold),
-  (d)=> renderAotW(d.sold, d.ytdAv),
-  (d)=> renderVendors(d.vendors),
-  (d)=> renderActivity(d.calls),
-];
+  // 2) AGENT OF THE WEEK — large headshot, name, deals, AV (weekly), show one leader row
+  function drawAgentOfWeek(){
+    if (!dataTeam?.perAgent?.length) return false;
+    setTitle('Agent of the Week');
 
-async function paint(){
-  try{
-    const data = await fetchAll();
+    const top = dataTeam.perAgent
+      .slice()
+      .sort((a,b)=>(b.av12x||0)-(a.av12x||0))[0];
 
-    // Summary cards (team level)
-    const submittedAV = Math.round((data.sold?.team?.totalAV12x)||0);
-    const deals = Number(data.sold?.team?.totalSales||0);
-    const calls = Number(data.calls?.team?.calls||0);
-    setSummary({calls, submittedAV, deals});
-
-    // Board
-    const fn = BOARDS[_boardIdx % BOARDS.length];
-    fn(data);
-
-    // Sales splash
-    scanNewSales(data.sold);
-  }catch(e){
-    console.error(e);
-    setSummary({calls:0,submittedAV:0,deals:0});
-    elThead.innerHTML = "";
-    elTbody.innerHTML = `<tr><td style="padding:14px;color:#f66">Error loading dashboard.</td></tr>`;
+    thead.innerHTML = `<tr>
+      <th>Leading for Agent of the Week</th><th>Sold</th><th class="num">Submitted AV</th>
+    </tr>`;
+    tbody.innerHTML = `
+      <tr class="hero-row">
+        <td class="hero">
+          <div class="agent">${avatarHTML(top.name)}<span style="font-weight:900">${escapeHtml(top.name)}</span></div>
+        </td>
+        <td>${fmtInt(top.sales||0)}</td>
+        <td class="num">${fmtUSD(top.av12x||0)}</td>
+      </tr>
+    `;
+    return true;
   }
-}
 
-function startRotation(){
-  clearInterval(_rotateTimer);
-  _rotateTimer = setInterval(()=>{
-    _boardIdx = (_boardIdx + 1) % BOARDS.length;
-    paint();
-  }, ROTATE_MS);
-}
+  // 3) LEAD VENDORS — 45-day donut + table
+  function drawVendors(){
+    if (!dataVendors?.vendors?.length) return false;
+    setTitle('Lead Vendors — % of Sales (Last 45 days)');
 
-/* =========================
-   -------- Helpers ---------
-   ========================= */
-function escapeHtml(s){
-  return String(s||"")
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
-    .replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
-}
+    const list = dataVendors.vendors.slice().sort((a,b) => (b.deals||0)-(a.deals||0));
+    const total = list.reduce((s,v)=>s+(v.deals||0),0) || 1;
 
-/* =========================
-   --------- Boot ----------
-   ========================= */
-(async function boot(){
-  await loadRules();       // ticker
-  await paint();           // first render
-  startRotation();         // cycle boards
-  // poll for new sales periodically (also updates cards on next rotation)
-  setInterval(paint, SALES_POLL_MS);
+    // Donut SVG
+    const R=56, C=2*Math.PI*R;
+    let acc = 0;
+    const colors = list.map((_,i)=>`hsl(${(i*57)%360} 70% 55%)`);
+    const arcs = list.map((v,i)=>{
+      const frac = (v.deals||0)/total;
+      const dash = `${(frac*C).toFixed(2)} ${(C - frac*C).toFixed(2)}`;
+      const rot = (acc/total)*360; acc += v.deals||0;
+      return `<circle r="${R}" cx="70" cy="70" fill="transparent"
+        stroke="${colors[i]}" stroke-width="18"
+        stroke-dasharray="${dash}" transform="rotate(${rot-90} 70 70)"></circle>`;
+    }).join('');
+
+    thead.innerHTML = `<tr><th colspan="3">Lead Vendors</th></tr>`;
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="3" style="padding:10px 6px">
+          <div class="donutWrap">
+            <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label="Vendor donut">
+              <circle r="${R}" cx="70" cy="70" fill="transparent" stroke="#1a2433" stroke-width="18"></circle>
+              ${arcs}
+              <text x="70" y="75" text-anchor="middle" fill="#cfd7e3" font-size="14" font-weight="800">${fmtInt(total)} deals</text>
+            </svg>
+            <div class="legend">
+              ${list.map((v,i)=>`
+                <div class="legend-row">
+                  <div class="legend-name">
+                    <span class="swatch" style="background:${colors[i]}"></span>
+                    <span>${escapeHtml(v.name||'Unknown')}</span>
+                  </div>
+                  <div>${fmtInt(v.deals||0)} • ${Math.round(((v.deals||0)/total)*100)}%</div>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+    return true;
+  }
+
+  // 4) AGENT ACTIVITY — calls, talk, logged, leads, sold, conv%
+  function drawActivity(){
+    if (!dataCalls?.perAgent) return false;
+    setTitle('Agent Activity — (This week)');
+    thead.innerHTML = `<tr>
+      <th>Agent</th><th>Calls</th><th>Talk (min)</th><th>Logged (h:mm)</th><th>Leads</th><th>Sold</th><th class="num">Conv %</th>
+    </tr>`;
+
+    // Stitch in weekly sold counts from team list by name
+    const soldBy = new Map();
+    (dataTeam?.perAgent||[]).forEach(a => soldBy.set((a.name||'').toLowerCase(), a.sales||0));
+
+    const rows = (dataCalls.perAgent||[])
+      .slice()
+      .sort((a,b)=>(b.calls||0)-(a.calls||0))
+      .map(a=>{
+        const key = (a.name||'').toLowerCase();
+        const sold = soldBy.get(key) || 0;
+        const conv = (a.leads>0) ? Math.round((sold/a.leads)*100) : 0;
+        const h = Math.floor((a.loggedMin||0)/60), m = (a.loggedMin||0)%60;
+        return `<tr>
+          <td><div class="agent">${avatarHTML(a.name)}<span>${escapeHtml(a.name)}</span></div></td>
+          <td>${fmtInt(a.calls||0)}</td>
+          <td>${fmtInt(a.talkMin||0)}</td>
+          <td>${fmtInt(h)}:${String(m).padStart(2,'0')}</td>
+          <td>${fmtInt(a.leads||0)}</td>
+          <td>${fmtInt(sold)}</td>
+          <td class="num">${fmtInt(conv)}%</td>
+        </tr>`;
+      }).join('');
+
+    tbody.innerHTML = rows || `<tr><td style="padding:16px;color:#7e8ea4;">No activity reported yet.</td></tr>`;
+    return true;
+  }
+
+  // 5) YTD AV board (manual override files)
+  function drawYTD(){
+    if (!ytd?.list?.length) return false;
+    setTitle('YTD AV (Override)');
+    thead.innerHTML = `<tr><th>Agent</th><th class="num">YTD AV</th></tr>`;
+    const rows = ytd.list
+      .slice()
+      .sort((a,b)=>(b.av12x||0)-(a.av12x||0))
+      .map(a=>`
+        <tr>
+          <td><div class="agent">${avatarHTML(a.name)}<span>${escapeHtml(a.name)}</span></div></td>
+          <td class="num">${fmtUSD(a.av12x||0)}</td>
+        </tr>
+      `).join('');
+    tbody.innerHTML = rows || `<tr><td style="padding:16px">No YTD entries.</td></tr>`;
+    return true;
+  }
+
+  // 6) PAR board (optional override list with names & amounts)
+  function drawPAR(){
+    if (!parList?.length) return false;
+    setTitle('PAR — Performance & Retention');
+    thead.innerHTML = `<tr><th>Agent</th><th class="num">Issued AV</th></tr>`;
+    const rows = parList
+      .slice()
+      .sort((a,b)=>(b.issued||0)-(a.issued||0))
+      .map(a=>`
+        <tr>
+          <td><div class="agent">${avatarHTML(a.name)}<span>${escapeHtml(a.name)}</span></div></td>
+          <td class="num">${fmtUSD(a.issued||0)}</td>
+        </tr>
+      `).join('');
+    tbody.innerHTML = rows || `<tr><td style="padding:16px">No PAR entries.</td></tr>`;
+    return true;
+  }
+
+  // ---------- New sale splash (no "×12" text; show av12x as the amount) ----------
+  function trackNewSales(){
+    // find latest id in allSales; if different from lastSaleId, show splash
+    const all = dataTeam?.allSales || [];
+    if (!all.length) return;
+    const newest = all[all.length-1];
+    if (newest.leadId && newest.leadId !== lastSaleId){
+      lastSaleId = newest.leadId;
+      showSaleSplash(newest.agent, newest.av12x || newest.amount || 0);
+    }
+  }
+
+  function showSaleSplash(agentName, amount){
+    const wrap = $('#saleSplash');
+    wrap.querySelector('.name').textContent = agentName || '—';
+    wrap.querySelector('.amt').textContent  = fmtUSD(amount||0);
+    wrap.style.display = 'flex';
+    setTimeout(()=>{ wrap.style.display = 'none'; }, SALE_HOLD_MS);
+  }
+
+  // ---------- Utility ----------
+  function escapeHtml(s){
+    return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // ---------- OE countdown ----------
+  function initOE(targetISO='2025-11-01T00:00:00-04:00'){
+    const el = $('#oeTimer');
+    const pad = n => String(n).padStart(2,'0');
+    function tick(){
+      const now = new Date();
+      const target = new Date(targetISO);
+      let s = Math.max(0, Math.floor((target - now)/1000));
+      const d = Math.floor(s/86400); s%=86400;
+      const h = Math.floor(s/3600); s%=3600;
+      const m = Math.floor(s/60); const sec = s%60;
+      el.textContent = `${d}d ${pad(h)}h ${pad(m)}m ${pad(sec)}s`;
+      requestAnimationFrame(()=>setTimeout(tick, 250));
+    }
+    tick();
+  }
+
+  // ---------- Boot ----------
+  initRule();
+  initOE();
+  loadAll();
+
+  // Refresh data periodically (sales pop + cards) without breaking rotation
+  setInterval(async ()=>{
+    try{
+      dataTeam  = await getJSON(ENDPOINTS.team).catch(_=>dataTeam);
+      dataCalls = await getJSON(ENDPOINTS.calls).catch(_=>dataCalls);
+      setSummary();
+      trackNewSales();
+    }catch{}
+  }, 30000);
 })();
