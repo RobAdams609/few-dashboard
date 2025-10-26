@@ -1,0 +1,9 @@
+{
+  "pace_target": 416358,
+  "agents": [
+    { "name": "Robert Adams", "take_rate": 56, "ytd_av": 597236 },
+    { "name": "Fabricio Navarrete Cervantes", "take_rate": 62, "ytd_av": 659374 },
+    { "name": "Philip Baxter", "take_rate": 79, "ytd_av": 552810 },
+    { "name": "Marie Saint Cyr", "take_rate": 54, "ytd_av": 433709 }
+  ]
+}
