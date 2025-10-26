@@ -1,273 +1,302 @@
-/* =========================
-   THE FEW — Single File Build
-   No placeholders required.
-   ========================= */
+/* ===========================
+   FEW Dashboard — Single File Override
+   - No hardcoded headshot list
+   - Uses /headshots/roster.json for mapping
+   - Works with existing index.html (no placeholders added)
+   =========================== */
 
-const API = {
-  TEAM_SOLD: '/api/team_sold',
-  CALLS: '/api/calls_by_agent',
-  VENDORS: '/api/sales_by_vendor',
-  RULES: '/rules.json',
-  YTD: '/boards/ytd_av.json',
-  HEADSHOTS: '/headshots/roster.json',
-};
+(() => {
+  const ENDPOINTS = {
+    teamSold: '/api/team_sold',
+    callsByAgent: '/api/calls_by_agent',
+    salesByVendor: '/api/sales_by_vendor',
+    ytdAv: '/boards/ytd_av.json',
+    rules: '/rules.json',
+    roster: '/headshots/roster.json'
+  };
 
-const ROTATION_MS = 15000;               // per-board time
-const BOARDS = ['roster','agent','vendors','ytd','par'];
+  // ---- tiny utils
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const fmtMoney = (n) => `$${(+n || 0).toLocaleString()}`;
 
-const $ = (sel,root=document) => root.querySelector(sel);
-const el = (tag, cls, html) => {
-  const n = document.createElement(tag);
-  if (cls) n.className = cls;
-  if (html!=null) n.innerHTML = html;
-  return n;
-};
-const fmtMoney = n => `$${(Math.round(Number(n)||0)).toLocaleString()}`;
-const esc = s => (s??'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  const fetchJSON = async (url) => {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`${url} → ${r.status}`);
+    return r.json();
+  };
 
-async function getJSON(url){
-  const r = await fetch(url,{cache:'no-store'});
-  if(!r.ok) throw new Error(`${url} ${r.status}`);
-  return r.json();
-}
+  // ---------- Headshots: build dynamic resolver from roster.json
+  function buildHeadshotResolver(roster) {
+    const byName = new Map();
+    const byInitials = new Map();
+    const byEmail = new Map();
+    const byPhone = new Map();
 
-/* -------- Runtime state -------- */
-let data = {
-  sold:null, calls:null, vendors:[], rules:[], ytd:{}, headshots:{}
-};
+    const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+    const initialsOf = (full) =>
+      (full || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(w => w[0].toUpperCase())
+        .join('');
 
-/* Headshot aliases (same person, multiple labels) */
-const HEADSHOT_ALIASES = {
-  "Philip Baxter": "baxter.jpg",
-  "Fabricio Navarrete": "fabricio.jpg",
-  "F N": "fabricio.jpg",
-  "Nathan Johnson": "nathan.jpg",
-  "Robert Adams": "robert-adams.jpg",
-  "Ajani Senior": "ajani.jpg",
-  "A S": "ajani.jpg",
-};
+    for (const person of roster || []) {
+      const name = norm(person.name);
+      const photo = person.photo || null;
 
-function imgFor(name){
-  const file =
-    data.headshots[name] ||
-    data.headshots[(name||'').trim().toUpperCase()] ||
-    HEADSHOT_ALIASES[name] ||
-    HEADSHOT_ALIASES[(name||'').trim().toUpperCase()];
-  return file ? `/headshots/${file}` : `/headshots/roster.png`;
-}
+      if (name) byName.set(name, photo);
+      const init = initialsOf(person.name);
+      if (init) byInitials.set(init, photo);
 
-/* -------- Build the entire layout -------- */
-function buildShell(){
-  // Minimal base styles to guarantee layout even if CSS misses something.
-  const baseCSS = `
-  .wrap{max-width:1200px;margin:24px auto;padding:0 16px}
-  .title{font-size:40px;font-weight:800;text-align:center;margin:0 0 8px}
-  .rule{opacity:.9;text-align:center;margin:0 0 18px}
-  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:6px 0 18px}
-  .metric{background:#121416;border-radius:12px;padding:16px;text-align:center}
-  .metric .label{opacity:.8;font-size:12px;margin-bottom:6px}
-  .metric .value{font-size:24px;font-weight:800}
-  .board{background:#0f1113;border-radius:14px;padding:16px;min-height:380px}
-  .board h2{margin:0 0 12px}
-  table{width:100%;border-collapse:collapse}
-  th,td{padding:12px 10px;border-bottom:1px solid rgba(255,255,255,.06)}
-  th{opacity:.8;text-align:left;font-weight:600}
-  .num{text-align:right}
-  .row{display:flex;align-items:center;gap:12px}
-  .avatar{width:32px;height:32px;border-radius:50%;object-fit:cover}
-  .avatar.lg{width:72px;height:72px}
-  .agent-card{display:flex;align-items:center;gap:16px;background:#121416;border-radius:12px;padding:16px}
-  .agent-name{font-size:20px;font-weight:700}
-  .badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-  .badge{background:#1b1f24;border-radius:999px;padding:6px 10px;font-size:12px}
-  .badge.gold{background:#2a2314;color:#f0c96a;font-weight:700}
-  .empty{opacity:.6;padding:10px 0}
-  .oe-wrap{position:fixed;left:0;right:0;bottom:18px;display:flex;justify-content:center;pointer-events:none}
-  .oe{pointer-events:auto;min-width:320px;max-width:560px;background:linear-gradient(180deg,#0b1712,#0e1f18);border:1px solid #1f3a2e;border-radius:999px;padding:10px 18px;text-align:center}
-  @media(max-width:860px){.metrics{grid-template-columns:1fr}}
-  `;
-  const style = el('style'); style.textContent = baseCSS; document.head.appendChild(style);
+      if (person.email) byEmail.set(norm(person.email), photo);
+      if (Array.isArray(person.phones)) {
+        for (const p of person.phones) {
+          const onlyDigits = (p || '').replace(/\D/g, '');
+          if (onlyDigits) byPhone.set(onlyDigits, photo);
+        }
+      }
+    }
 
-  const wrap = el('div','wrap');
+    // manual alias glue for known short names → full names from your notes
+    const ALIASES = new Map([
+      ['f n', 'fabricio navarrete'],
+      ['f n.', 'fabricio navarrete'],
+      ['a s', 'ajani senior'],
+      ['a s.', 'ajani senior']
+      // add more if you want, but roster names should cover it
+    ]);
 
-  const header = el('header');
-  header.append(
-    el('h1','title','THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT'),
-    el('div','rule', 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.')
-  );
+    const resolve = ({ name, email, phone }) => {
+      // exact name
+      let key = norm(name);
+      if (byName.has(key)) return byName.get(key);
 
-  const metrics = el('section','metrics');
-  metrics.innerHTML = `
-    <div class="metric"><div class="label">This Week — Team Calls</div><div class="value" data-kpi="calls">0</div></div>
-    <div class="metric"><div class="label">This Week — Total Submitted AV</div><div class="value" data-kpi="av">$0</div></div>
-    <div class="metric"><div class="label">This Week — Deals Submitted</div><div class="value" data-kpi="deals">0</div></div>
-  `;
+      // alias name
+      if (ALIASES.has(key)) {
+        const aliased = ALIASES.get(key);
+        if (byName.has(aliased)) return byName.get(aliased);
+      }
 
-  const board = el('main','board'); // content gets replaced by JS
+      // initials from name
+      const init = (name || '').split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase()).join('');
+      if (init && byInitials.has(init)) return byInitials.get(init);
 
-  const oeWrap = el('div','oe-wrap');
-  oeWrap.appendChild(el('div','oe','OE Countdown'));
+      // email
+      if (email && byEmail.has(norm(email))) return byEmail.get(norm(email));
 
-  wrap.append(header, metrics, board);
-  document.body.append(wrap, oeWrap);
+      // phone (digits only)
+      if (phone) {
+        const digits = String(phone).replace(/\D/g, '');
+        if (byPhone.has(digits)) return byPhone.get(digits);
+      }
 
-  return {ruleNode:$('.rule',header), kpi:metrics, board};
-}
+      // no photo found
+      return null;
+    };
 
-/* -------- Renderers -------- */
-function setKPIs(){
-  $('[data-kpi="calls"]').textContent = (data.calls?.team?.calls ?? 0);
-  $('[data-kpi="av"]').textContent = fmtMoney(data.sold?.team?.totalAV12x ?? data.sold?.team?.totalAmount ?? 0);
-  $('[data-kpi="deals"]').textContent = (data.sold?.team?.totalSales ?? 0);
-}
+    return resolve;
+  }
 
-function startRuleRotation(ruleNode){
-  const list = Array.isArray(data.rules) && data.rules.length ? data.rules
-    : ['Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.'];
-  let i = 0;
-  const tick = ()=>{ ruleNode.innerHTML = list[i % list.length]; i++; };
-  tick();
-  setInterval(tick, 8000);
-}
+  // ---------- Render helpers
+  function renderBannerAndMetrics({ teamSold }) {
+    // Banner text & bonus line are already in your HTML; leave them.
+    // Fill the three metric cards if present.
+    const totalAV = teamSold?.team?.totalAV12x ?? teamSold?.team?.totalAV ?? 0;
+    const deals = Array.isArray(teamSold?.allSales) ? teamSold.allSales.length : (teamSold?.team?.totalSales ?? 0);
 
-function renderRoster(board){
-  const rows = (data.sold?.perAgent ?? []).slice()
-    .sort((a,b)=>(b.av12x??b.amount??0)-(a.av12x??a.amount??0));
-  board.innerHTML = `
-    <h2>This Week — Roster</h2>
-    <table>
-      <thead><tr><th>Agent</th><th class="num">Submitted AV</th><th class="num">Deals</th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
+    const metricAV = $('#metric-av') || $$('#board .metric-av')[0] || $$('#board [data-metric="av"]')[0];
+    const metricDeals = $('#metric-deals') || $$('#board .metric-deals')[0] || $$('#board [data-metric="deals"]')[0];
+
+    if (metricAV) metricAV.textContent = fmtMoney(totalAV);
+    if (metricDeals) metricDeals.textContent = deals;
+  }
+
+  function ensureOECentered() {
+    // Force center if theme CSS misses it
+    const el = $('#oe') || $('.oe-countdown') || $$('#board .oe')[0];
+    if (!el) return;
+    el.style.margin = '0 auto';
+    el.style.display = 'block';
+  }
+
+  function avatarImg(photo, name) {
+    if (photo) {
+      return `<img class="avatar" src="/headshots/${photo}" alt="${name}" />`;
+    }
+    // fallback: initials circle (no external image required)
+    const initials = (name || '')
+      .split(/\s+/).filter(Boolean).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+    return `<div class="avatar avatar--initials">${initials}</div>`;
+  }
+
+  function renderRosterTable(container, rows, resolvePhoto) {
+    if (!container) return;
+    const html = [
+      `<table class="table table--roster">
+        <thead>
           <tr>
-            <td><span class="row"><img class="avatar" src="${imgFor(r.name)}" alt=""> ${esc(r.name||'')}</span></td>
-            <td class="num">${fmtMoney(r.av12x??r.amount??0)}</td>
-            <td class="num">${r.sales ?? r.deals ?? 0}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-  `;
-}
+            <th>Agent</th>
+            <th class="ta-right">Submitted AV</th>
+            <th class="ta-right">Deals</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => {
+            const photo = resolvePhoto({ name: r.name, email: r.email, phone: r.phone });
+            return `
+              <tr>
+                <td>
+                  <div class="agent">
+                    ${avatarImg(photo, r.name)}
+                    <span class="agent__name">${r.name}</span>
+                  </div>
+                </td>
+                <td class="ta-right">${fmtMoney(r.amount || r.av || r.total || 0)}</td>
+                <td class="ta-right">${r.deals ?? r.count ?? r.sales ?? 0}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`
+    ].join('');
+    container.innerHTML = html;
+  }
 
-function renderAgent(board){
-  const rows = (data.sold?.perAgent ?? []).slice()
-    .sort((a,b)=>(b.av12x??b.amount??0)-(a.av12x??a.amount??0));
-  const lead = rows[0];
-  const name = lead?.name || '—';
-  const weekAV = lead ? (lead.av12x ?? lead.amount ?? 0) : 0;
-  const ytdAV = data.ytd[name] ?? 0;
-
-  board.innerHTML = `
-    <h2>Agent of the Week</h2>
-    <div class="agent-card">
-      <img class="avatar lg" src="${imgFor(name)}" alt="">
-      <div>
-        <div class="agent-name">${esc(name)}</div>
-        <div class="badges">
-          <span class="badge">${lead?.sales ?? 0} deals (this week)</span>
-          <span class="badge gold">${fmtMoney(weekAV)} submitted AV (this week)</span>
-          <span class="badge">${fmtMoney(ytdAV)} YTD AV</span>
+  function renderAgentOfWeek(container, leader, resolvePhoto) {
+    if (!container || !leader) return;
+    const photo = resolvePhoto({ name: leader.name, email: leader.email, phone: leader.phone });
+    container.innerHTML = `
+      <div class="aow">
+        ${avatarImg(photo, leader.name)}
+        <div class="aow__meta">
+          <div class="aow__name">${leader.name}</div>
+          <div class="aow__badges">
+            <span class="badge">${leader.deals ?? 0} deals (this week)</span>
+            <span class="badge badge--gold">${fmtMoney(leader.amount || 0)} submitted AV (this week)</span>
+            <span class="badge">${fmtMoney(leader.ytd || 0)} YTD AV</span>
+          </div>
         </div>
       </div>
-    </div>
-  `;
-}
-
-function renderVendors(board){
-  let rows = [];
-  if (Array.isArray(data.vendors)) {
-    rows = data.vendors.map(v=>({
-      vendor: v.vendor || v.name || 'Unknown',
-      deals: v.deals ?? v.count ?? 0,
-      pct: Number(v.pct ?? v.percent ?? 0)
-    }));
-  } else if (data.vendors && typeof data.vendors === 'object') {
-    rows = Object.entries(data.vendors).map(([k,v])=>({
-      vendor:k, deals:v.deals ?? v.count ?? 0, pct:Number(v.pct ?? v.percent ?? 0)
-    }));
+    `;
   }
-  rows.sort((a,b)=>(b.deals||0)-(a.deals||0));
 
-  board.innerHTML = `
-    <h2>Lead Vendors — Last 45 Days</h2>
-    <table>
-      <thead><tr><th>Vendor</th><th class="num">Deals</th><th class="num">% of total</th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
+  function renderVendors(container, list) {
+    if (!container) return;
+    // sort by deals desc
+    const rows = [...(list || [])].sort((a, b) => (b.deals || 0) - (a.deals || 0));
+    container.innerHTML = `
+      <table class="table table--vendors">
+        <thead>
           <tr>
-            <td>${esc(r.vendor)}</td>
-            <td class="num">${r.deals}</td>
-            <td class="num">${r.pct.toFixed(1)}%</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-  `;
-}
+            <th>Vendor</th>
+            <th class="ta-right">Deals</th>
+            <th class="ta-right">% of total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(v => `
+            <tr>
+              <td>${v.vendor}</td>
+              <td class="ta-right">${v.deals ?? 0}</td>
+              <td class="ta-right">${v.percent ?? 0}%</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
 
-function renderYTD(board){
-  const rows = Object.entries(data.ytd).map(([name,av])=>({name, av:Number(av)||0}))
-    .sort((a,b)=>b.av-a.av);
-  board.innerHTML = `
-    <h2>YTD — Team</h2>
-    <table>
-      <thead><tr><th>Agent</th><th class="num">YTD AV</th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
-          <tr>
-            <td><span class="row"><img class="avatar" src="${imgFor(r.name)}" alt=""> ${esc(r.name)}</span></td>
-            <td class="num">${fmtMoney(r.av)}</td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-  `;
-}
+  function rotateRules(rules) {
+    const el = $('#rule-of-the-day') || $('#rule') || $('.rule') || null;
+    if (!el || !Array.isArray(rules) || rules.length === 0) return;
+    let i = 0;
+    const set = () => { el.textContent = rules[i % rules.length]; i++; };
+    set();
+    // rotate every 30s
+    setInterval(set, 30000);
+  }
 
-function renderPAR(board){
-  board.innerHTML = `<h2>PAR — On Track</h2><div class="empty">No PAR list provided.</div>`;
-}
+  // ---------- main
+  async function main() {
+    try {
+      const [teamSold, callsByAgent, salesByVendor, ytd, rules, roster] = await Promise.all([
+        fetchJSON(ENDPOINTS.teamSold).catch(() => ({})),
+        fetchJSON(ENDPOINTS.callsByAgent).catch(() => ({})),
+        fetchJSON(ENDPOINTS.salesByVendor).catch(() => ({})),
+        fetchJSON(ENDPOINTS.ytdAv).catch(() => ({})),
+        fetchJSON(ENDPOINTS.rules).catch(() => []),
+        fetchJSON(ENDPOINTS.roster).catch(() => [])
+      ]);
 
-/* -------- Rotation -------- */
-let rot = 0, timer=null;
-function render(boardEl){
-  const k = BOARDS[rot % BOARDS.length];
-  if (k==='roster') renderRoster(boardEl);
-  else if (k==='agent') renderAgent(boardEl);
-  else if (k==='vendors') renderVendors(boardEl);
-  else if (k==='ytd') renderYTD(boardEl);
-  else renderPAR(boardEl);
-}
-function startRotation(boardEl){
-  render(boardEl);
-  timer = setInterval(()=>{ rot++; render(boardEl); }, ROTATION_MS);
-}
+      const resolvePhoto = buildHeadshotResolver(roster);
 
-/* -------- Boot -------- */
-(async function boot(){
-  const {ruleNode, kpi, board} = buildShell();
+      // metrics + banner (keeps your existing markup)
+      renderBannerAndMetrics({ teamSold });
+      ensureOECentered();
 
-  // fetch all data in parallel
-  const [sold,calls,vendors,rules,ytd,roster] = await Promise.all([
-    getJSON(API.TEAM_SOLD).catch(()=>({team:{totalSales:0,totalAmount:0,totalAV12x:0},perAgent:[]})),
-    getJSON(API.CALLS).catch(()=>({team:{calls:0}})),
-    getJSON(API.VENDORS).catch(()=>([])),
-    getJSON(API.RULES).catch(()=>([])),
-    getJSON(API.YTD).catch(()=>({})),
-    getJSON(API.HEADSHOTS).catch(()=>({}))
-  ]);
+      // ---------- Roster (This Week)
+      const perAgent = Array.isArray(teamSold?.perAgent) ? teamSold.perAgent : [];
+      const rosterBox = $('#board') || $('.board') || $('.roster-board');
+      renderRosterTable(rosterBox, perAgent.map(a => ({
+        name: a.name,
+        amount: a.av12x ?? a.amount ?? a.av,
+        deals: a.sales ?? a.deals ?? 0
+      })), resolvePhoto);
 
-  data.sold = sold;
-  data.calls = calls;
-  data.vendors = vendors;
-  data.rules = rules;
-  data.ytd = ytd || {};
-  data.headshots = {...roster, ...HEADSHOT_ALIASES};
+      // ---------- Agent of the Week
+      const leader = perAgent
+        .map(a => ({
+          name: a.name,
+          amount: a.av12x ?? a.amount ?? 0,
+          deals: a.sales ?? 0,
+          // stitch in YTD if present from the ytd.json
+          ytd: (ytd?.agents || []).find(p => (p.name || '').toLowerCase() === (a.name || '').toLowerCase())?.av ?? 0
+        }))
+        .sort((a, b) => (b.amount || 0) - (a.amount || 0))[0];
 
-  setKPIs();
-  startRuleRotation(ruleNode);
-  startRotation(board);
-})().catch(err=>{
-  console.error(err);
-  const fallback = el('div','wrap'); 
-  fallback.innerHTML = `<div class="board"><div class="empty">Dashboard failed to load.</div></div>`;
-  document.body.appendChild(fallback);
-});
+      const aowBox = $('#aow') || $('.agent-of-week') || null;
+      renderAgentOfWeek(aowBox, leader, resolvePhoto);
+
+      // ---------- Vendors (last 45 days)
+      const vendorBox = $('#vendors') || $('.vendor-board') || null;
+      const vendorRows = Array.isArray(salesByVendor?.vendors) ? salesByVendor.vendors : (salesByVendor || []);
+      renderVendors(vendorBox, vendorRows);
+
+      // ---------- Rules rotation
+      rotateRules(rules?.rules || rules);
+
+      // minimal CSS fixes for avatars and badges (safe, scoped)
+      injectOnce('few-inline-fixes', `
+        .avatar{width:36px;height:36px;border-radius:50%;object-fit:cover;display:inline-block;margin-right:10px}
+        .avatar--initials{width:36px;height:36px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#1f2a37;color:#e5e7eb;font-weight:700;margin-right:10px}
+        .agent{display:flex;align-items:center;gap:10px}
+        .table{width:100%;border-collapse:separate;border-spacing:0 8px}
+        .table th,.table td{padding:12px 16px}
+        .ta-right{text-align:right}
+        .aow{display:flex;align-items:center;gap:16px}
+        .aow .avatar{width:64px;height:64px}
+        .aow__name{font-size:22px;font-weight:700}
+        .badge{display:inline-block;padding:6px 10px;border-radius:999px;background:#0f172a;color:#cbd5e1;margin-right:8px;font-size:12px}
+        .badge--gold{background:#3b2f1a;color:#f6e3a1}
+      `);
+
+    } catch (err) {
+      console.error('Dash init failed:', err);
+    }
+  }
+
+  function injectOnce(id, css) {
+    if (document.getElementById(id)) return;
+    const s = document.createElement('style');
+    s.id = id;
+    s.textContent = css;
+    document.head.appendChild(s);
+  }
+
+  // boot
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', main);
+  } else {
+    main();
+  }
+})();
