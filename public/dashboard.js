@@ -294,14 +294,46 @@
     `;
   }
 
-  // ---------- Rules ----------
-  function startRuleRotation(rulesJson){
-    const base='THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
-    const list=Array.isArray(rulesJson?.rules)?rulesJson.rules.filter(Boolean):[];
-    if(!list.length){ setBanner(base,'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.'); return; }
-    let i=0; const apply=()=>setBanner(base,list[i%list.length]); apply(); setInterval(()=>{i++;apply();}, 12*60*60*1000);
+// --------- Rules (headline rotates every 12 hours, persistent + aligned)
+function startRuleRotation(rulesJson) {
+  const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
+  const list = Array.isArray(rulesJson?.rules) && rulesJson.rules.length
+    ? rulesJson.rules.filter(Boolean)
+    : ['Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.'];
+
+  // Remove any leftover “Rule of the Day” banner if it exists
+  const legacyTicker = document.getElementById('ticker');
+  if (legacyTicker) legacyTicker.remove();
+
+  // Persistent timing keys
+  const LS_BASE = 'few.rules.baseTs';
+  const LS_IDX  = 'few.rules.startIndex';
+
+  let baseTs = Number(localStorage.getItem(LS_BASE));
+  if (!Number.isFinite(baseTs) || baseTs <= 0) {
+    baseTs = Date.now();
+    localStorage.setItem(LS_BASE, String(baseTs));
   }
 
+  let startIdx = Number(localStorage.getItem(LS_IDX));
+  if (!Number.isFinite(startIdx)) startIdx = 0;
+
+  const SLOT_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+  const apply = () => {
+    const elapsed = Math.max(0, Date.now() - baseTs);
+    const slots = Math.floor(elapsed / SLOT_MS);
+    const i = ((startIdx + slots) % list.length + list.length) % list.length;
+    setBanner(base, list[i]);
+  };
+
+  apply(); // initial paint
+  const msToBoundary = SLOT_MS - ((Date.now() - baseTs) % SLOT_MS);
+  setTimeout(() => {
+    apply();
+    setInterval(apply, SLOT_MS);
+  }, msToBoundary);
+}
   // ---------- Data load ----------
   const seenLeadIds = new Set();
   async function loadAll(){
