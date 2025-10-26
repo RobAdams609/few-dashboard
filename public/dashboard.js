@@ -36,27 +36,57 @@
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
   // ---------- Headshot resolver ----------
-  function buildHeadshotResolver(roster){
-    const byName=new Map(), byEmail=new Map(), byPhone=new Map(), byInitial=new Map();
-    const initialsOf=(full='')=>full.trim().split(/\s+/).map(w=>(w[0]||'').toUpperCase()).join('');
-    for(const p of roster||[]){
-      const name = norm(p.name);
-      const email=(p.email||'').trim().toLowerCase();
-      const photo=p.photo||null;
-      if(name) byName.set(name, photo);
-      if(email) byEmail.set(email, photo);
-      if(Array.isArray(p.phones)) for(const raw of p.phones){
-        const ph=String(raw||'').replace(/\D+/g,''); if(ph) byPhone.set(ph, photo);
+  function buildHeadshotResolver(roster) {
+  const byName    = new Map();
+  const byEmail   = new Map();
+  const byPhone   = new Map();
+  const byInitial = new Map();
+
+  const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const initialsOf = (full='') =>
+    full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+
+  // turn "baxter.jpg" into "/headshots/baxter.jpg"
+  const photoURL = (p) => {
+    if (!p) return null;
+    const s = String(p);
+    return (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
+  };
+
+  for (const p of roster || []) {
+    const name  = norm(p.name);
+    const email = (p.email || '').trim().toLowerCase();
+    const photo = photoURL(p.photo);
+
+    if (name)  byName.set(name, photo);
+    if (email) byEmail.set(email, photo);
+
+    if (Array.isArray(p.phones)) {
+      for (const raw of p.phones) {
+        const phone = String(raw||'').replace(/\D+/g, '');
+        if (phone) byPhone.set(phone, photo);
       }
-      const ini = initialsOf(p.name); if(ini) byInitial.set(ini, photo);
     }
-    return (agent={})=>{
-      const cname = norm(canonicalName(agent.name||''));
-      const email=(agent.email||'').trim().toLowerCase();
-      const phone=String(agent.phone||'').replace(/\D+/g,'');
-      const ini = initialsOf(agent.name||'');
-      return byName.get(cname) ?? byEmail.get(email) ?? (phone?byPhone.get(phone):null) ?? byInitial.get(ini) ?? null;
-    };
+
+    const ini = initialsOf(p.name);
+    if (ini) byInitial.set(ini, photo);
+  }
+
+  return (agent = {}) => {
+    const name  = norm(agent.name);
+    const email = (agent.email || '').trim().toLowerCase();
+    const phone = String(agent.phone || '').replace(/\D+/g, '');
+    const ini   = initialsOf(agent.name);
+
+    return (
+      byName.get(name)   ??
+      byEmail.get(email) ??
+      (phone ? byPhone.get(phone) : null) ??
+      byInitial.get(ini) ??
+      null
+    );
+  };
+}
   }
 
   // ---------- Layout anchors (match your index.html) ----------
