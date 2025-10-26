@@ -1,33 +1,40 @@
-/* =========================================
-   FEW Dashboard — Single File Override
-   - Uses /headshots/roster.json for mapping
-   - Vendors derived from /api/team_sold (no vendor API)
-   - YTD files are /ytd_av.json and /ytd_total.json
-   - Rotating boards, 12h rule rotation
-   ========================================= */
+/* FEW Dashboard — Single File, Safe & Final
+   - Uses your existing HTML (no placeholders).
+   - Robust to missing endpoints.
+   - Vendor board computed from /api/team_sold (allSales) within rolling 45 days.
+   - PAR board reads /par.json: { pace_target, agents:[{name,take_rate,annual_av?}] }
+*/
 
 (() => {
+  // --------- Endpoints (exactly as your site uses) ---------
   const ENDPOINTS = {
-    teamSold:   '/api/team_sold',
-    callsByAgent:'/api/calls_by_agent',
-    ytdAv:      '/ytd_av.json',
-    ytdTotal:   '/ytd_total.json',
-    rules:      '/rules.json',
-    roster:     '/headshots/roster.json',
+    teamSold: '/api/team_sold',
+    callsByAgent: '/api/calls_by_agent',
+    rules: '/rules.json',
+    roster: '/headshots/roster.json',
+    ytdAv: '/ytd_av.json',
+    ytdTotal: '/ytd_total.json',
+    par: '/par.json' // manual override file you manage
   };
 
-  // ----- tiny utils
+  // --------- Tiny utils ---------
   const $  = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const fmtMoney = (n) => `$${(+n || 0).toLocaleString()}`;
+  const fmtMoney = (n) => `$${Math.round(+n || 0).toLocaleString()}`;
+  const safe = (v, d) => (v === undefined || v === null ? d : v);
 
   const fetchJSON = async (url) => {
-    const r = await fetch(url, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`${url} → ${r.status}`);
-    return r.json();
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`${url} → ${r.status}`);
+      return await r.json();
+    } catch (e) {
+      console.warn('fetchJSON fail:', url, e.message || e);
+      return null;
+    }
   };
 
-  // ---------- Headshots: dynamic resolver from roster.json
+  // --------- Headshots: build dynamic resolver from roster.json ---------
   function buildHeadshotResolver(roster) {
     const byName    = new Map();
     const byEmail   = new Map();
@@ -35,36 +42,35 @@
     const byInitial = new Map();
 
     const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-    const initialsOf = (full = '') =>
-      full.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('');
+    const initialsOf = (full='') =>
+      full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
 
-    for (const person of roster || []) {
-      const name   = norm(person.name);
-      const email  = (person.email || '').trim().toLowerCase();
-      const photo  = person.photo || null;
+    for (const p of roster || []) {
+      const name  = norm(p.name);
+      const email = (p.email || '').trim().toLowerCase();
+      const photo = p.photo || null;
 
       if (name)  byName.set(name, photo);
       if (email) byEmail.set(email, photo);
 
-      if (Array.isArray(person.phones)) {
-        for (const p of person.phones) {
-          const phone = (p || '').replace(/\D+/g, '');
+      if (Array.isArray(p.phones)) {
+        for (const raw of p.phones) {
+          const phone = String(raw||'').replace(/\D+/g, '');
           if (phone) byPhone.set(phone, photo);
         }
       }
-      const ini = initialsOf(person.name);
+      const ini = initialsOf(p.name);
       if (ini) byInitial.set(ini, photo);
     }
 
-    // Resolve: name → email → phone → initials → null
     return (agent = {}) => {
       const name  = norm(agent.name);
       const email = (agent.email || '').trim().toLowerCase();
-      const phone = (agent.phone || '').replace(/\D+/g, '');
+      const phone = String(agent.phone || '').replace(/\D+/g, '');
       const ini   = initialsOf(agent.name);
 
       return (
-        byName.get(name) ??
+        byName.get(name)   ??
         byEmail.get(email) ??
         (phone ? byPhone.get(phone) : null) ??
         byInitial.get(ini) ??
@@ -73,36 +79,9 @@
     };
   }
 
-  // Simple avatar renderer: headshot if found, otherwise FIRST LETTER
-  const avatarHTML = (photo, name = '') => {
-    const letter = (name.trim()[0] || '•').toUpperCase();
-    if (photo) {
-      return `<img class="avatar" src="/headshots/${photo}" alt="" />`;
-    }
-    return `<div class="avatar avatar-letter">${letter}</div>`;
-  };
-
-  // ---- Vendor breakdown from /api/team_sold (no vendor API)
-  function summarizeVendors(allSales = []) {
-    const byName = new Map();
-    for (const s of allSales) {
-      const name = (s?.soldProductName || 'Unknown').trim();
-      const amount = Number(s?.amount) || 0;
-      const row = byName.get(name) || { name, deals: 0, amount: 0 };
-      row.deals += 1;
-      row.amount += amount;
-      byName.set(name, row);
-    }
-    const rows = [...byName.values()];
-    const totalDeals = rows.reduce((a, b) => a + b.deals, 0) || 1;
-    for (const r of rows) r.share = +(r.deals * 100 / totalDeals).toFixed(1);
-    rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
-    return rows;
-  }
-
-  // ---------- Layout anchors (use existing structure on page)
-  const bannerEl    = $('.banner .title');
-  const blurbEl     = $('.banner .subtitle');
+  // --------- Layout anchors from your page ---------
+  const bannerTitle = $('.banner .title');
+  const bannerSub   = $('.banner .subtitle');
   const cards = {
     calls:  $$('.cards .card .value')[0] || $('#metric-calls'),
     av:     $$('.cards .card .value')[1] || $('#metric-av'),
@@ -111,189 +90,165 @@
   const boardTitleEl = $('#board-title') || $('.section h3') || $('.board-title');
   const boardEl      = $('#board')       || $('.table')      || $('.board');
 
-  // Remove legacy “Rule of the Day — …” ticker if present
+  // remove old ticker if any
   const oldTicker = $('.ticker');
-  if (oldTicker?.parentNode) oldTicker.parentNode.removeChild(oldTicker);
+  if (oldTicker && oldTicker.parentNode) oldTicker.parentNode.removeChild(oldTicker);
 
-  const setBanner = (headline, sub) => {
-    if (bannerEl) bannerEl.textContent = headline || '';
-    if (blurbEl)  blurbEl.textContent  = sub || '';
+  // lightweight banner setter
+  const setBanner = (headline, sub='') => {
+    if (bannerTitle) bannerTitle.textContent = headline || '';
+    if (bannerSub)   bannerSub.textContent   = sub || '';
   };
 
-  // ---------- Data loader
-  async function loadAll() {
-    const [rules, roster, calls, sold] = await Promise.all([
-      fetchJSON(ENDPOINTS.rules).catch(() => ({ rules: [] })),
-      fetchJSON(ENDPOINTS.roster).catch(() => []),
-      fetchJSON(ENDPOINTS.callsByAgent).catch(() => ({ team: { calls: 0 } })),
-      fetchJSON(ENDPOINTS.teamSold).catch(() => ({ team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] })),
-    ]);
+  // --------- Live sales alerts (gold toasts, 60s) ---------
+  const alertsRoot = (() => {
+    const el = document.createElement('div');
+    el.style.position = 'fixed';
+    el.style.right = '24px';
+    el.style.bottom = '24px';
+    el.style.display = 'flex';
+    el.style.flexDirection = 'column';
+    el.style.gap = '8px';
+    el.style.zIndex = '9999';
+    document.body.appendChild(el);
+    return el;
+  })();
 
-    // Vendors from team_sold
-    const vendorRows = summarizeVendors(sold?.allSales || []);
-
-    // YTD manual overrides
-    let ytdList = [];
-    let ytdTotal = 0;
-    try { ytdList  = await fetchJSON(ENDPOINTS.ytdAv); } catch {}
-    try { const t  = await fetchJSON(ENDPOINTS.ytdTotal); ytdTotal = t?.ytd_av_total || 0; } catch {}
-
-    // Headshots resolver
-    const headshotFor = buildHeadshotResolver(roster);
-
-    return { rules, roster, calls, sold, vendorRows, ytdList, ytdTotal, headshotFor };
+  function pushAlert({ name, soldProductName, amount }) {
+    const card = document.createElement('div');
+    card.style.padding = '12px 14px';
+    card.style.borderRadius = '10px';
+    card.style.background = 'linear-gradient(135deg,#9c7b00,#ffd34d)';
+    card.style.color = '#1a1a1a';
+    card.style.boxShadow = '0 6px 18px rgba(0,0,0,.35)';
+    card.style.fontWeight = '700';
+    card.style.maxWidth = '480px';
+    card.style.fontSize = '14px';
+    card.textContent = `${name} — ${soldProductName} • ${fmtMoney(amount)}`;
+    alertsRoot.appendChild(card);
+    setTimeout(() => card.remove(), 60_000); // 60 seconds
   }
 
-  // ---------- Cards
+  // Dedup alerting
+  const seenLeadIds = new Set();
+
+  // --------- Vendor summary (from team_sold.allSales) ---------
+  function summarizeVendors(allSales = []) {
+    const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
+    const byName = new Map();
+
+    for (const s of allSales) {
+      // dateSold may be string; be defensive
+      const t = Date.parse(s.dateSold || s.date || '');
+      if (!isFinite(t) || t < cutoff) continue;
+
+      const vendor = (s.soldProductName || 'Unknown').trim();
+      const amount = +s.amount || 0;
+
+      const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
+      row.deals += 1;
+      row.amount += amount;
+      byName.set(vendor, row);
+    }
+
+    const rows = [...byName.values()];
+    const totalDeals = rows.reduce((a, b) => a + b.deals, 0) || 1;
+    for (const r of rows) r.share = +(r.deals * 100 / totalDeals).toFixed(1);
+
+    rows.sort((a,b) => b.deals - a.deals || b.amount - a.amount);
+    return rows;
+  }
+
+  // --------- Render helpers ---------
   function renderCards({ calls, sold }) {
-    const callsVal = calls?.team?.calls ?? 0;
-    const avVal    = sold?.team?.totalAV12X ?? 0;
-    const dealsVal = sold?.team?.totalSales ?? 0;
+    const callsVal = safe(calls?.team?.calls, 0);
+    const avVal    = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
+    const dealsVal = safe(sold?.team?.totalSales, 0);
 
     if (cards.calls)  cards.calls.textContent  = (callsVal || 0).toLocaleString();
     if (cards.av)     cards.av.textContent     = fmtMoney(avVal);
     if (cards.deals)  cards.deals.textContent  = (dealsVal || 0).toLocaleString();
   }
 
-  // ---------- Board: Roster (EVERY agent)
-  function renderRosterBoard({ roster, sold, headshotFor }) {
-    const per = new Map();
-    for (const a of (sold?.perAgent || [])) {
-      per.set((a.name || '').trim().toLowerCase(), {
-        av: a.av12x || a.av12X || a.amount || 0,
-        deals: a.sales || 0
-      });
-    }
+  function agentRowHTML({ name, right1, right2, photoUrl, initial }) {
+    const avatar = photoUrl
+      ? `<img src="${photoUrl}" alt="" style="width:26px;height:26px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
+      : `<div style="width:26px;height:26px;border-radius:50%;background:#2a2a2a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;color:#ddd">${initial || '?'}</div>`;
 
+    return `<tr>
+      <td style="display:flex;align-items:center">${avatar}<span>${name}</span></td>
+      <td class="right">${right1}</td>
+      ${right2 !== undefined ? `<td class="right">${right2}</td>` : ''}
+    </tr>`;
+  }
+
+  // --------- Boards ---------
+  function renderRosterBoard({ roster, sold, resolvePhoto }) {
     boardTitleEl && (boardTitleEl.textContent = 'This Week — Roster');
 
-    const rows = [];
-    for (const person of roster || []) {
-      const key = (person.name || '').trim().toLowerCase();
-      const data = per.get(key) || { av: 0, deals: 0 };
-      rows.push({
-        name: person.name,
-        av: data.av,
-        deals: data.deals,
-        photo: headshotFor({ name: person.name, email: person.email })
+    const per = new Map();
+    for (const a of (sold?.perAgent || [])) {
+      const key = (a.name || '').trim().toLowerCase();
+      per.set(key, {
+        av: a.av12x ?? a.av12X ?? a.amount ?? 0,
+        deals: a.sales ?? 0
       });
     }
+
+    const rows = [];
+    for (const p of roster || []) {
+      const key = (p.name || '').trim().toLowerCase();
+      const d = per.get(key) || { av: 0, deals: 0 };
+      const photo = resolvePhoto({ name: p.name, email: p.email });
+      const initials = (p.name || '').split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+      rows.push({
+        name: p.name,
+        av: d.av, deals: d.deals,
+        photo, initials
+      });
+    }
+
     rows.sort((a,b) => b.av - a.av);
 
     boardEl.innerHTML = `
       <table class="table">
-        <thead>
-          <tr>
-            <th>Agent</th>
-            <th class="right">Submitted AV</th>
-            <th class="right">Deals</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Agent</th>
+          <th class="right">Submitted AV</th>
+          <th class="right">Deals</th>
+        </tr></thead>
         <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td class="agent-cell">
-                ${avatarHTML(r.photo, r.name)}
-                <span>${r.name}</span>
-              </td>
-              <td class="right">${fmtMoney(r.av)}</td>
-              <td class="right">${(r.deals||0).toLocaleString()}</td>
-            </tr>
-          `).join('')}
+          ${rows.map(r => agentRowHTML({
+            name: r.name,
+            right1: fmtMoney(r.av),
+            right2: (r.deals||0).toLocaleString(),
+            photoUrl: r.photo,
+            initial: r.initials
+          })).join('')}
         </tbody>
       </table>
     `;
   }
 
-  // ---------- Board: Agent of the Week (with YTD)
-  function renderAotWBoard({ sold, ytdList }) {
-    boardTitleEl && (boardTitleEl.textContent = 'Agent of the Week');
-
-    const per = sold?.perAgent || [];
-    if (!per.length) {
-      boardEl.innerHTML = `<div class="empty">No sales yet this week.</div>`;
-      return;
-    }
-
-    const top = [...per].map(x => ({
-      name: x.name,
-      av: x.av12x || x.av12X || x.amount || 0,
-      deals: x.sales || 0
-    })).sort((a,b) => b.av - a.av)[0];
-
-    let ytd = 0;
-    if (Array.isArray(ytdList)) {
-      const hit = ytdList.find(p => (p.name || '').trim().toLowerCase() === (top.name || '').trim().toLowerCase());
-      ytd = hit?.av || 0;
-    }
-
-    boardEl.innerHTML = `
-      <div class="card aotw">
-        <div class="aotw-name">${top.name}</div>
-        <div class="aotw-stats">
-          <span>${(top.deals||0)} deal${top.deals === 1 ? '' : 's'} (this week)</span>
-          <span>${fmtMoney(top.av)} submitted AV (this week)</span>
-          <span>${fmtMoney(ytd)} YTD AV</span>
-        </div>
-      </div>
-    `;
-  }
-
-  // ---------- Board: Vendors (from team_sold)
-  function renderVendorsBoard({ vendorRows }) {
-    boardTitleEl && (boardTitleEl.textContent = 'Lead Vendors — Last 45 Days');
-
-    if (!Array.isArray(vendorRows) || !vendorRows.length) {
-      boardEl.innerHTML = `<div class="empty">No vendor data yet.</div>`;
-      return;
-    }
-
-    const total = vendorRows.reduce((s,r) => s + r.deals, 0) || 1;
-
-    boardEl.innerHTML = `
-      <table class="table">
-        <thead>
-          <tr>
-            <th>Vendor</th>
-            <th class="right">Deals</th>
-            <th class="right">% of total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${vendorRows.map(r => `
-            <tr>
-              <td>${r.name}</td>
-              <td class="right">${r.deals.toLocaleString()}</td>
-              <td class="right">${((r.deals/total)*100).toFixed(1)}%</td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    `;
-  }
-
-  // ---------- Board: YTD Team
-  function renderYtdBoard({ ytdList, ytdTotal }) {
+  function renderYtdBoard({ ytdList, ytdTotal, resolvePhoto }) {
     boardTitleEl && (boardTitleEl.textContent = 'YTD — Team');
 
     const rows = Array.isArray(ytdList) ? [...ytdList] : [];
-    rows.sort((a,b) => (b.av || 0) - (a.av || 0));
+    rows.sort((a,b) => (b.av||0) - (a.av||0));
 
     boardEl.innerHTML = `
       <table class="table">
-        <thead>
-          <tr>
-            <th>Agent</th>
-            <th class="right">YTD AV</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Agent</th>
+          <th class="right">YTD AV</th>
+        </tr></thead>
         <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td>${r.name}</td>
-              <td class="right">${fmtMoney(r.av || 0)}</td>
-            </tr>
-          `).join('')}
+          ${rows.map(p => agentRowHTML({
+            name: p.name,
+            right1: fmtMoney(p.av||0),
+            photoUrl: resolvePhoto({ name: p.name }),
+            initial: (p.name||'').split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('')
+          })).join('')}
           <tr class="total">
             <td><strong>Total</strong></td>
             <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td>
@@ -303,70 +258,202 @@
     `;
   }
 
-  // ---------- Board: PAR (computed vs target)
-  function renderParBoard({ ytdList }) {
-    const TARGET = 416358; // your PAR threshold
-    boardTitleEl && (boardTitleEl.textContent = 'PAR — On Track');
+  function renderWeeklyActivity({ calls, sold, resolvePhoto }) {
+    boardTitleEl && (boardTitleEl.textContent = 'Weekly Activity');
 
-    const rows = (Array.isArray(ytdList) ? ytdList : [])
-      .map(p => ({ name: p.name, av: +p.av || 0, on: (+p.av || 0) >= TARGET }))
-      .sort((a,b) => b.av - a.av);
+    // per agent calls
+    const callMap = new Map();
+    for (const a of (calls?.perAgent || [])) {
+      callMap.set((a.name||'').trim().toLowerCase(), a.calls || 0);
+    }
+
+    // per agent deals (from sold)
+    const dealMap = new Map();
+    for (const a of (sold?.perAgent || [])) {
+      dealMap.set((a.name||'').trim().toLowerCase(), a.sales || 0);
+    }
+
+    // union of names
+    const names = new Set([...callMap.keys(), ...dealMap.keys()]);
+    const rows = [...names].map(k => {
+      const display = k.replace(/\b\w/g, m => m.toUpperCase());
+      return {
+        key: k,
+        name: display,
+        calls: callMap.get(k) || 0,
+        deals: dealMap.get(k) || 0
+      };
+    }).sort((a,b) => (b.calls + b.deals) - (a.calls + a.deals));
 
     boardEl.innerHTML = `
       <table class="table">
-        <thead>
-          <tr>
-            <th>Agent</th>
-            <th class="right">YTD AV</th>
-            <th class="right">Note</th>
-          </tr>
-        </thead>
+        <thead><tr>
+          <th>Agent</th>
+          <th class="right">Calls</th>
+          <th class="right">Deals</th>
+        </tr></thead>
         <tbody>
-          ${rows.map(r => `
-            <tr>
-              <td>${r.name}</td>
-              <td class="right">${fmtMoney(r.av)}</td>
-              <td class="right">${r.on ? 'On track' : ''}</td>
-            </tr>
-          `).join('') || `<tr><td colspan="3" class="empty">No PAR list provided.</td></tr>`}
+          ${rows.map(r => agentRowHTML({
+            name: r.name,
+            right1: (r.calls||0).toLocaleString(),
+            right2: (r.deals||0).toLocaleString(),
+            photoUrl: resolvePhoto({ name: r.name }),
+            initial: r.name.split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('')
+          })).join('')}
         </tbody>
       </table>
     `;
   }
 
-  // ---------- Rule rotator (12 hours)
+  function renderVendorsBoard({ vendorRows }) {
+    boardTitleEl && (boardTitleEl.textContent = 'Lead Vendors — Last 45 Days');
+
+    if (!vendorRows.length) {
+      boardEl.innerHTML = `<div class="empty">No vendor data yet.</div>`;
+      return;
+    }
+
+    // simple color band by share
+    const color = (pct) =>
+      pct >= 40 ? '#ffd34d' :
+      pct >= 20 ? '#f5c24a' :
+      pct >= 10 ? '#e8b147' : '#d7a044';
+
+    boardEl.innerHTML = `
+      <table class="table">
+        <thead><tr>
+          <th>Vendor</th>
+          <th class="right">Deals</th>
+          <th class="right">% of total</th>
+        </tr></thead>
+        <tbody>
+          ${vendorRows.map(v => `
+            <tr>
+              <td>${v.name}</td>
+              <td class="right">${v.deals.toLocaleString()}</td>
+              <td class="right" style="color:${color(v.share)}">${v.share}%</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function renderParBoard({ par }) {
+    boardTitleEl && (boardTitleEl.textContent = 'PAR — Tracking');
+
+    const pace = +safe(par?.pace_target, 0);
+    const agents = Array.isArray(par?.agents) ? par.agents : [];
+
+    if (!agents.length) {
+      boardEl.innerHTML = `<div class="empty">No PAR list provided.</div>`;
+      return;
+    }
+
+    boardEl.innerHTML = `
+      <table class="table">
+        <thead><tr>
+          <th>Agent</th>
+          <th class="right">Take&nbsp;Rate</th>
+          <th class="right">Annual&nbsp;AV</th>
+        </tr></thead>
+        <tbody>
+          ${agents.map(a => `
+            <tr>
+              <td>${a.name}</td>
+              <td class="right">${safe(a.take_rate, 0)}%</td>
+              <td class="right">${fmtMoney(safe(a.annual_av, 0))}</td>
+            </tr>
+          `).join('')}
+          <tr class="total">
+            <td><strong>PACE TO QUALIFY</strong></td>
+            <td></td>
+            <td class="right"><strong>${fmtMoney(pace)}</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+  }
+
+  // --------- Rules (headline rotates every 12 hours) ---------
   function startRuleRotation(rulesJson) {
-    const list = Array.isArray(rulesJson?.rules) ? rulesJson.rules.filter(Boolean) : [];
     const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
+    const list = Array.isArray(rulesJson?.rules) ? rulesJson.rules.filter(Boolean) : [];
     if (!list.length) {
       setBanner(base, 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.');
       return;
     }
-
     let i = 0;
-    const apply = () => setBanner(base, String(list[i % list.length]));
+    const apply = () => setBanner(base, list[i % list.length]);
     apply();
-    const TWELVE_HOURS_MS = 43_200_000;
-    setInterval(() => { i++; apply(); }, TWELVE_HOURS_MS);
+    setInterval(() => { i++; apply(); }, 12 * 60 * 60 * 1000); // 12 hours
   }
 
-  // ---------- Board rotation orchestrator
+  // --------- Data load ---------
+  async function loadAll() {
+    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
+      fetchJSON(ENDPOINTS.rules),
+      fetchJSON(ENDPOINTS.roster),
+      fetchJSON(ENDPOINTS.callsByAgent),
+      fetchJSON(ENDPOINTS.teamSold),
+      fetchJSON(ENDPOINTS.ytdAv),
+      fetchJSON(ENDPOINTS.ytdTotal),
+      fetchJSON(ENDPOINTS.par),
+    ]);
+
+    const resolvePhoto = buildHeadshotResolver(roster || []);
+
+    // vendor rows
+    const vendorRows = summarizeVendors(sold?.allSales || []);
+
+    // build alert list from allSales (only new)
+    if (Array.isArray(sold?.allSales)) {
+      for (const s of sold.allSales) {
+        const id = s.leadId || s.id || `${s.agent}-${s.dateSold}-${s.soldProductName}-${s.amount}`;
+        if (!seenLeadIds.has(id)) {
+          seenLeadIds.add(id);
+          // show alert for most recent 45d only
+          const t = Date.parse(s.dateSold || s.date || '');
+          if (isFinite(t) && (Date.now() - t) <= 45 * 24 * 3600 * 1000) {
+            pushAlert({
+              name: s.agent || 'Agent',
+              soldProductName: s.soldProductName || 'Sale',
+              amount: s.amount || 0
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      rules: rules || { rules: [] },
+      roster: roster || [],
+      calls: calls || { team: { calls: 0 }, perAgent: [] },
+      sold: sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] },
+      vendorRows,
+      ytdList: ytdList || [],
+      ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
+      par: par || { pace_target: 0, agents: [] },
+      resolvePhoto
+    };
+  }
+
+  // --------- Board rotation (5 boards x 30s) ---------
   function startBoardRotation(data) {
-    const renderers = [
+    const order = [
       () => renderRosterBoard(data),
-      () => renderAotWBoard(data),
-      () => renderVendorsBoard(data),
       () => renderYtdBoard(data),
+      () => renderWeeklyActivity(data),
+      () => renderVendorsBoard(data),
       () => renderParBoard(data),
     ];
-
     let i = 0;
-    const paint = () => renderers[i % renderers.length]();
+    const paint = () => order[i % order.length]();
     paint();
-    setInterval(() => { i++; paint(); }, 20000);
+    setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // ---------- Boot
+  // --------- Boot ---------
   (async () => {
     try {
       const data = await loadAll();
