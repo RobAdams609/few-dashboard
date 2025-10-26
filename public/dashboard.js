@@ -1,19 +1,19 @@
 /* =========================================
    FEW Dashboard — Single File Override
-   - No hardcoded headshot list
    - Uses /headshots/roster.json for mapping
-   - Works with your existing index.html
+   - Vendors derived from /api/team_sold (no vendor API)
+   - YTD files are /ytd_av.json and /ytd_total.json
+   - Rotating boards, 12h rule rotation
    ========================================= */
 
 (() => {
   const ENDPOINTS = {
-    teamSold: '/api/team_sold',
-    callsByAgent: '/api/calls_by_agent',
-    salesByVendor: '/sales_by_vendor.json', // TEMP fallback while server API needs env vars
-    ytdAv: '/ytd_av.json',                  // FIX: root, not /boards/
-    ytdTotal: '/ytd_total.json',
-    rules: '/rules.json',
-    roster: '/headshots/roster.json',
+    teamSold:   '/api/team_sold',
+    callsByAgent:'/api/calls_by_agent',
+    ytdAv:      '/ytd_av.json',
+    ytdTotal:   '/ytd_total.json',
+    rules:      '/rules.json',
+    roster:     '/headshots/roster.json',
   };
 
   // ----- tiny utils
@@ -26,45 +26,8 @@
     if (!r.ok) throw new Error(`${url} → ${r.status}`);
     return r.json();
   };
-// ---- Vendor breakdown from /api/team_sold (no /api/sales_by_vendor needed)
-function summarizeVendors(allSales = []) {
-  const byName = new Map();
-  for (const s of allSales) {
-    const name = (s?.soldProductName || 'Unknown').trim();
-    const amount = Number(s?.amount) || 0;
-    const row = byName.get(name) || { name, deals: 0, amount: 0 };
-    row.deals += 1;
-    row.amount += amount;
-    byName.set(name, row);
-  }
-  const rows = [...byName.values()];
-  const totalDeals = rows.reduce((a, b) => a + b.deals, 0) || 1;
-  for (const r of rows) r.share = +(r.deals * 100 / totalDeals).toFixed(1);
-  rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
-  return rows;
-}
 
-function drawVendorBoard(rootEl, rows) {
-  let card = rootEl.querySelector('#vendor-board');
-  if (!card) {
-    card = document.createElement('section');
-    card.id = 'vendor-board';
-    card.className = 'card';
-    card.innerHTML = `
-      <h3>Lead Vendors — Last 45 Days</h3>
-      <table class="table vendors">
-        <thead><tr><th>Vendor</th><th>Deals</th><th>% of total</th></tr></thead>
-        <tbody></tbody>
-      </table>
-    `;
-    rootEl.appendChild(card);
-  }
-  const tbody = card.querySelector('tbody');
-  tbody.innerHTML = rows.map(r =>
-    `<tr><td>${r.name}</td><td>${r.deals}</td><td>${r.share}%</td></tr>`
-  ).join('') || `<tr><td colspan="3">No vendor data yet.</td></tr>`;
-}
-  // ---------- Headshots: build dynamic resolver from roster.json
+  // ---------- Headshots: dynamic resolver from roster.json
   function buildHeadshotResolver(roster) {
     const byName    = new Map();
     const byEmail   = new Map();
@@ -72,19 +35,17 @@ function drawVendorBoard(rootEl, rows) {
     const byInitial = new Map();
 
     const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-    const initialsOf = (full) =>
-      (full || '')
-        .split(/\s+/)
-        .map(w => w[0] ? w[0].toUpperCase() : '')
-        .join('');
+    const initialsOf = (full = '') =>
+      full.trim().split(/\s+/).map(w => w[0]?.toUpperCase() || '').join('');
 
     for (const person of roster || []) {
       const name   = norm(person.name);
       const email  = (person.email || '').trim().toLowerCase();
       const photo  = person.photo || null;
 
-      if (name) byName.set(name, photo);
+      if (name)  byName.set(name, photo);
       if (email) byEmail.set(email, photo);
+
       if (Array.isArray(person.phones)) {
         for (const p of person.phones) {
           const phone = (p || '').replace(/\D+/g, '');
@@ -95,12 +56,12 @@ function drawVendorBoard(rootEl, rows) {
       if (ini) byInitial.set(ini, photo);
     }
 
-    // Resolve in this order: name → email → phone → initials → null
+    // Resolve: name → email → phone → initials → null
     return (agent = {}) => {
-      const name = norm(agent.name);
+      const name  = norm(agent.name);
       const email = (agent.email || '').trim().toLowerCase();
       const phone = (agent.phone || '').replace(/\D+/g, '');
-      const ini = initialsOf(agent.name);
+      const ini   = initialsOf(agent.name);
 
       return (
         byName.get(name) ??
@@ -112,9 +73,36 @@ function drawVendorBoard(rootEl, rows) {
     };
   }
 
-  // ---------- Layout anchors (use the existing structure on page)
-  const bannerEl   = $('.banner .title');
-  const blurbEl    = $('.banner .subtitle');
+  // Simple avatar renderer: headshot if found, otherwise FIRST LETTER
+  const avatarHTML = (photo, name = '') => {
+    const letter = (name.trim()[0] || '•').toUpperCase();
+    if (photo) {
+      return `<img class="avatar" src="/headshots/${photo}" alt="" />`;
+    }
+    return `<div class="avatar avatar-letter">${letter}</div>`;
+  };
+
+  // ---- Vendor breakdown from /api/team_sold (no vendor API)
+  function summarizeVendors(allSales = []) {
+    const byName = new Map();
+    for (const s of allSales) {
+      const name = (s?.soldProductName || 'Unknown').trim();
+      const amount = Number(s?.amount) || 0;
+      const row = byName.get(name) || { name, deals: 0, amount: 0 };
+      row.deals += 1;
+      row.amount += amount;
+      byName.set(name, row);
+    }
+    const rows = [...byName.values()];
+    const totalDeals = rows.reduce((a, b) => a + b.deals, 0) || 1;
+    for (const r of rows) r.share = +(r.deals * 100 / totalDeals).toFixed(1);
+    rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
+    return rows;
+  }
+
+  // ---------- Layout anchors (use existing structure on page)
+  const bannerEl    = $('.banner .title');
+  const blurbEl     = $('.banner .subtitle');
   const cards = {
     calls:  $$('.cards .card .value')[0] || $('#metric-calls'),
     av:     $$('.cards .card .value')[1] || $('#metric-av'),
@@ -123,31 +111,37 @@ function drawVendorBoard(rootEl, rows) {
   const boardTitleEl = $('#board-title') || $('.section h3') || $('.board-title');
   const boardEl      = $('#board')       || $('.table')      || $('.board');
 
-  // Remove old “Rule of the Day — …” ticker if present
+  // Remove legacy “Rule of the Day — …” ticker if present
   const oldTicker = $('.ticker');
-  if (oldTicker && oldTicker.parentNode) oldTicker.parentNode.removeChild(oldTicker);
+  if (oldTicker?.parentNode) oldTicker.parentNode.removeChild(oldTicker);
 
-  // Make banner headline big + rotating rule lives here
   const setBanner = (headline, sub) => {
     if (bannerEl) bannerEl.textContent = headline || '';
     if (blurbEl)  blurbEl.textContent  = sub || '';
   };
 
-  // ---------- Data loaders
+  // ---------- Data loader
   async function loadAll() {
     const [rules, roster, calls, sold] = await Promise.all([
-      fetchJSON(ENDPOINTS.rules).catch(() => ({rules: []})),
+      fetchJSON(ENDPOINTS.rules).catch(() => ({ rules: [] })),
       fetchJSON(ENDPOINTS.roster).catch(() => []),
-      fetchJSON(ENDPOINTS.callsByAgent).catch(() => ({team: {calls: 0}})),
-      fetchJSON(ENDPOINTS.teamSold).catch(() => ({team: {totalSales:0,totalAV12X:0}, perAgent: []})),
+      fetchJSON(ENDPOINTS.callsByAgent).catch(() => ({ team: { calls: 0 } })),
+      fetchJSON(ENDPOINTS.teamSold).catch(() => ({ team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] })),
     ]);
-const vendorRows = summarizeVendors(sold?.allSales || []);
+
+    // Vendors from team_sold
+    const vendorRows = summarizeVendors(sold?.allSales || []);
+
+    // YTD manual overrides
     let ytdList = [];
     let ytdTotal = 0;
     try { ytdList  = await fetchJSON(ENDPOINTS.ytdAv); } catch {}
     try { const t  = await fetchJSON(ENDPOINTS.ytdTotal); ytdTotal = t?.ytd_av_total || 0; } catch {}
 
-    return { rules, roster, calls, sold, vendors, ytdList, ytdTotal };
+    // Headshots resolver
+    const headshotFor = buildHeadshotResolver(roster);
+
+    return { rules, roster, calls, sold, vendorRows, ytdList, ytdTotal, headshotFor };
   }
 
   // ---------- Cards
@@ -161,8 +155,8 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
     if (cards.deals)  cards.deals.textContent  = (dealsVal || 0).toLocaleString();
   }
 
-  // ---------- Board: Roster (show EVERY agent, even with $0)
-  function renderRosterBoard({ roster, sold }) {
+  // ---------- Board: Roster (EVERY agent)
+  function renderRosterBoard({ roster, sold, headshotFor }) {
     const per = new Map();
     for (const a of (sold?.perAgent || [])) {
       per.set((a.name || '').trim().toLowerCase(), {
@@ -180,10 +174,10 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
       rows.push({
         name: person.name,
         av: data.av,
-        deals: data.deals
+        deals: data.deals,
+        photo: headshotFor({ name: person.name, email: person.email })
       });
     }
-
     rows.sort((a,b) => b.av - a.av);
 
     boardEl.innerHTML = `
@@ -198,7 +192,10 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
         <tbody>
           ${rows.map(r => `
             <tr>
-              <td>${r.name}</td>
+              <td class="agent-cell">
+                ${avatarHTML(r.photo, r.name)}
+                <span>${r.name}</span>
+              </td>
               <td class="right">${fmtMoney(r.av)}</td>
               <td class="right">${(r.deals||0).toLocaleString()}</td>
             </tr>
@@ -208,7 +205,7 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
     `;
   }
 
-  // ---------- Board: Agent of the Week
+  // ---------- Board: Agent of the Week (with YTD)
   function renderAotWBoard({ sold, ytdList }) {
     boardTitleEl && (boardTitleEl.textContent = 'Agent of the Week');
 
@@ -218,14 +215,12 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
       return;
     }
 
-    // top current week by av12x
     const top = [...per].map(x => ({
       name: x.name,
       av: x.av12x || x.av12X || x.amount || 0,
       deals: x.sales || 0
     })).sort((a,b) => b.av - a.av)[0];
 
-    // YTD for that person (optional)
     let ytd = 0;
     if (Array.isArray(ytdList)) {
       const hit = ytdList.find(p => (p.name || '').trim().toLowerCase() === (top.name || '').trim().toLowerCase());
@@ -244,20 +239,16 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
     `;
   }
 
-  // ---------- Board: Vendors (fallback if API not available)
-  function renderVendorsBoard({ vendors }) {
+  // ---------- Board: Vendors (from team_sold)
+  function renderVendorsBoard({ vendorRows }) {
     boardTitleEl && (boardTitleEl.textContent = 'Lead Vendors — Last 45 Days');
 
-    if (!vendors || !Array.isArray(vendors) || !vendors.length) {
+    if (!Array.isArray(vendorRows) || !vendorRows.length) {
       boardEl.innerHTML = `<div class="empty">No vendor data yet.</div>`;
       return;
     }
 
-    const rows = vendors
-      .map(v => ({ name: v.vendor || v.name || 'Unknown', deals: v.count || 0 }))
-      .sort((a,b) => b.deals - a.deals);
-
-    const total = rows.reduce((s,r) => s + r.deals, 0) || 1;
+    const total = vendorRows.reduce((s,r) => s + r.deals, 0) || 1;
 
     boardEl.innerHTML = `
       <table class="table">
@@ -269,7 +260,7 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
           </tr>
         </thead>
         <tbody>
-          ${rows.map(r => `
+          ${vendorRows.map(r => `
             <tr>
               <td>${r.name}</td>
               <td class="right">${r.deals.toLocaleString()}</td>
@@ -312,13 +303,38 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
     `;
   }
 
-  // ---------- Board: PAR (manual until a list is provided)
-  function renderParBoard() {
+  // ---------- Board: PAR (computed vs target)
+  function renderParBoard({ ytdList }) {
+    const TARGET = 416358; // your PAR threshold
     boardTitleEl && (boardTitleEl.textContent = 'PAR — On Track');
-    boardEl.innerHTML = `<div class="empty">No PAR list provided.</div>`;
+
+    const rows = (Array.isArray(ytdList) ? ytdList : [])
+      .map(p => ({ name: p.name, av: +p.av || 0, on: (+p.av || 0) >= TARGET }))
+      .sort((a,b) => b.av - a.av);
+
+    boardEl.innerHTML = `
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th class="right">YTD AV</th>
+            <th class="right">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => `
+            <tr>
+              <td>${r.name}</td>
+              <td class="right">${fmtMoney(r.av)}</td>
+              <td class="right">${r.on ? 'On track' : ''}</td>
+            </tr>
+          `).join('') || `<tr><td colspan="3" class="empty">No PAR list provided.</td></tr>`}
+        </tbody>
+      </table>
+    `;
   }
 
-  // ---------- Rule rotator (headline)
+  // ---------- Rule rotator (12 hours)
   function startRuleRotation(rulesJson) {
     const list = Array.isArray(rulesJson?.rules) ? rulesJson.rules.filter(Boolean) : [];
     const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
@@ -328,9 +344,10 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
     }
 
     let i = 0;
-    const apply = () => setBanner(base, list[i % list.length]);
+    const apply = () => setBanner(base, String(list[i % list.length]));
     apply();
-    setInterval(() => { i++; apply(); }, 8000);
+    const TWELVE_HOURS_MS = 43_200_000;
+    setInterval(() => { i++; apply(); }, TWELVE_HOURS_MS);
   }
 
   // ---------- Board rotation orchestrator
@@ -340,7 +357,7 @@ const vendorRows = summarizeVendors(sold?.allSales || []);
       () => renderAotWBoard(data),
       () => renderVendorsBoard(data),
       () => renderYtdBoard(data),
-      () => renderParBoard(),
+      () => renderParBoard(data),
     ];
 
     let i = 0;
