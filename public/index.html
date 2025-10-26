@@ -1,11 +1,208 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>The FEW</title>
-  <link rel="stylesheet" href="dashboard.css" />
-  <script src="dashboard.js" defer></script>
-</head>
-<body></body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FEW — Dashboard</title>
+    <link rel="stylesheet" href="/dashboard.css" />
+    <style>
+      :root{
+        --bg:#10151c; --panel:#0b0f15; --line:#253041; --muted:#9fb0c8;
+        --text:#cfd7e3; --glow:#fff5d6; --accent:#ffd36a; --good:#00e39b;
+      }
+      html,body{height:100%}
+      body{
+        margin:0; background:var(--bg); color:var(--text);
+        font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial,sans-serif;
+      }
+
+      /* Rule ticker (single) */
+      .ticker{
+        position:sticky; top:0; z-index:20;
+        background:var(--panel); border-bottom:1px solid var(--line);
+        padding:6px 10px; font-size:12px; color:#f0c060; letter-spacing:.02em;
+      }
+
+      /* Banner */
+      .banner{ text-align:center; padding:24px 12px 6px; }
+      .title{
+        font-size:44px; font-weight:800; line-height:1.1; color:var(--glow);
+        text-shadow:0 0 24px rgba(255,210,90,.45);
+      }
+      .subtitle{ margin-top:10px; font-size:14px; color:#a9b3c5; }
+
+      .section-label{ text-align:center; margin:14px 0 8px; color:var(--accent); font-weight:700; }
+
+      /* Summary cards (3) */
+      .summary{
+        display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+        gap:10px; padding:8px 10px 0;
+      }
+      .card{
+        background:var(--panel); border:1px solid var(--line);
+        border-radius:12px; padding:10px; text-align:center;
+      }
+      .card .k{ font-size:12px; color:var(--muted); }
+      .card .v{ font-size:20px; font-weight:800; margin-top:4px; color:var(--glow); }
+
+      /* Board table */
+      table{ width:100%; border-collapse:collapse; background:#0f141c; margin-top:8px; }
+      thead th{
+        background:var(--panel); color:var(--muted); font-size:13px; text-align:left;
+        padding:10px; border-top:1px solid var(--line); border-bottom:1px solid var(--line);
+      }
+      tbody td{ padding:10px; border-bottom:1px solid #1b2534; }
+      td.num{ text-align:right; font-variant-numeric:tabular-nums; }
+      .agent{ display:flex; align-items:center; gap:10px; }
+      .avatar,.avatar-fallback{
+        width:28px; height:28px; border-radius:50%; background:#1f2a3a;
+        display:inline-flex; align-items:center; justify-content:center;
+        font-size:12px; font-weight:700; color:#89a2c6;
+      }
+
+      /* New-sale splash */
+      .sale-pop{
+        position:fixed; left:50%; transform:translateX(-50%); bottom:-80px;
+        padding:10px 16px; border-radius:999px; background:#0b5d2a; color:#e7ffe7; font-weight:700;
+        box-shadow:0 10px 30px rgba(0,0,0,.35); transition:bottom .35s ease; z-index:30;
+      }
+      .sale-pop.show{ bottom:18px; }
+
+      /* OE Countdown */
+      #oeBar{
+        position:fixed; left:0; right:0; bottom:0; z-index:25;
+        background:var(--panel); border-top:1px solid var(--line);
+        padding:10px 16px; text-align:center;
+      }
+      #oeBarInner{
+        display:inline-block; min-width:520px; max-width:90vw;
+        background:rgba(0,0,0,.35); border:1px solid #223046; border-radius:999px;
+        padding:10px 18px;
+        box-shadow:0 0 0 0 rgba(0,227,155,.45);
+        animation:pulse 2s ease-in-out infinite;
+      }
+      #oeLabel{ color:#9fb0c8; margin-right:10px; font-weight:600; letter-spacing:.02em; }
+      #oeTimer{ color:var(--good); font-weight:800; font-size:18px; }
+      @keyframes pulse{
+        0%   { box-shadow:0 0 0 0 rgba(0,227,155,.55); }
+        70%  { box-shadow:0 0 0 16px rgba(0,227,155,0); }
+        100% { box-shadow:0 0 0 0 rgba(0,227,155,0); }
+      }
+
+      .footer-spacer{ height:44px; }
+
+      /* Apple Music dock */
+      #musicDock{
+        position:fixed; right:15px; bottom:80px; z-index:24;
+        border-radius:12px; overflow:hidden; box-shadow:0 5px 18px rgba(0,0,0,.35);
+        transition:all .3s ease;
+      }
+      #musicDock.minimized iframe{ display:none; }
+      #musicDock.minimized::after{
+        content:"🎵";
+        display:block; background:#0b0f15; color:#ffd36a;
+        font-size:20px; padding:10px 14px; border-radius:50%;
+        cursor:pointer; box-shadow:0 0 10px rgba(0,0,0,.4);
+      }
+      #musicDock iframe{ width:260px; height:120px; border:0; background:transparent; }
+    </style>
+  </head>
+
+  <body>
+    <!-- SINGLE rule ticker -->
+    <div id="ticker" class="ticker">RULE OF THE DAY — …</div>
+
+    <!-- Banner -->
+    <header class="banner">
+      <div class="title">THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT</div>
+      <div id="principle" class="subtitle">Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.</div>
+    </header>
+
+    <!-- Current view label -->
+    <div id="viewLabel" class="section-label">This Week — Roster</div>
+
+    <!-- Summary cards (exactly three, with stable IDs used by JS) -->
+    <div id="summary" class="summary">
+      <div class="card"><div class="k">This Week — Team Calls</div><div id="sumCalls" class="v">0</div></div>
+      <div class="card"><div class="k">This Week — Total Submitted AV</div><div id="sumSales" class="v">$0</div></div>
+      <div class="card"><div class="k">This Week — Deals Submitted</div><div id="sumTalk" class="v">0</div></div>
+    </div>
+
+    <!-- Rotating board area -->
+    <table id="board" aria-live="polite">
+      <thead id="thead"></thead>
+      <tbody id="tbody"><tr><td style="padding:18px;color:#5c6c82;">Loading…</td></tr></tbody>
+    </table>
+
+    <div class="footer-spacer"></div>
+
+    <!-- New-sale toast -->
+    <div id="salePop" class="sale-pop" role="status" aria-live="polite"></div>
+
+    <!-- Apple Music dock (starts minimized; click 🎵 to expand) -->
+    <div id="musicDock" class="minimized" aria-label="Apple Music dock">
+      <iframe
+        allow="autoplay *; encrypted-media *; fullscreen *"
+        sandbox="allow-forms allow-popups allow-same-origin allow-scripts allow-top-navigation-by-user-activation"
+        src="https://embed.music.apple.com/us/playlist/the-few/pl.u-4JomXN9TZB29Am?app=music">
+      </iframe>
+    </div>
+
+    <!-- OE Countdown -->
+    <div id="oeBar">
+      <div id="oeBarInner">
+        <span id="oeLabel">OE Countdown</span>
+        <span id="oeTimer">…</span>
+      </div>
+    </div>
+
+    <!-- App JS (cache-busted) -->
+    <script src="/dashboard.js?v=1003" defer></script>
+
+    <!-- OE countdown + music dock logic -->
+    <script>
+      // OE countdown
+      (function(){
+        const target = new Date('2025-11-01T00:00:00-04:00');
+        const el = document.getElementById('oeTimer');
+        const pad = n => String(n).padStart(2,'0');
+        function tick(){
+          const now = new Date();
+          let s = Math.max(0, Math.floor((target - now)/1000));
+          const d = Math.floor(s/86400); s%=86400;
+          const h = Math.floor(s/3600); s%=3600;
+          const m = Math.floor(s/60); const sec = s%60;
+          el.textContent = `${d}d ${pad(h)}h ${pad(m)}m ${pad(sec)}s`;
+          requestAnimationFrame(()=>setTimeout(tick, 250));
+        }
+        tick();
+      })();
+
+      // Apple Music dock — toggle & remember state
+      (function(){
+        const dock = document.getElementById('musicDock');
+        if (!dock) return;
+        const saved = localStorage.getItem('few.music.minimized');
+        if (saved === 'false') dock.classList.remove('minimized');
+        else dock.classList.add('minimized');
+        document.addEventListener('click', (e)=>{
+          if (dock.contains(e.target)){
+            if (dock.classList.contains('minimized')) {
+              dock.classList.remove('minimized');
+              localStorage.setItem('few.music.minimized', 'false');
+            }
+          } else {
+            dock.classList.add('minimized');
+            localStorage.setItem('few.music.minimized', 'true');
+          }
+        });
+        if (!dock.classList.contains('minimized')) {
+          setTimeout(()=>{
+            dock.classList.add('minimized');
+            localStorage.setItem('few.music.minimized', 'true');
+          }, 8000);
+        }
+      })();
+    </script>
+  </body>
 </html>
