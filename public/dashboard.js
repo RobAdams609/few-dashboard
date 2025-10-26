@@ -26,7 +26,44 @@
     if (!r.ok) throw new Error(`${url} → ${r.status}`);
     return r.json();
   };
+// ---- Vendor breakdown from /api/team_sold (no /api/sales_by_vendor needed)
+function summarizeVendors(allSales = []) {
+  const byName = new Map();
+  for (const s of allSales) {
+    const name = (s?.soldProductName || 'Unknown').trim();
+    const amount = Number(s?.amount) || 0;
+    const row = byName.get(name) || { name, deals: 0, amount: 0 };
+    row.deals += 1;
+    row.amount += amount;
+    byName.set(name, row);
+  }
+  const rows = [...byName.values()];
+  const totalDeals = rows.reduce((a, b) => a + b.deals, 0) || 1;
+  for (const r of rows) r.share = +(r.deals * 100 / totalDeals).toFixed(1);
+  rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
+  return rows;
+}
 
+function drawVendorBoard(rootEl, rows) {
+  let card = rootEl.querySelector('#vendor-board');
+  if (!card) {
+    card = document.createElement('section');
+    card.id = 'vendor-board';
+    card.className = 'card';
+    card.innerHTML = `
+      <h3>Lead Vendors — Last 45 Days</h3>
+      <table class="table vendors">
+        <thead><tr><th>Vendor</th><th>Deals</th><th>% of total</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    `;
+    rootEl.appendChild(card);
+  }
+  const tbody = card.querySelector('tbody');
+  tbody.innerHTML = rows.map(r =>
+    `<tr><td>${r.name}</td><td>${r.deals}</td><td>${r.share}%</td></tr>`
+  ).join('') || `<tr><td colspan="3">No vendor data yet.</td></tr>`;
+}
   // ---------- Headshots: build dynamic resolver from roster.json
   function buildHeadshotResolver(roster) {
     const byName    = new Map();
