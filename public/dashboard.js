@@ -1,11 +1,10 @@
-/* FEW DASHBOARD — CLEAN FINAL BUILD
-   Fully functional: metrics cards, 5 rotating boards, vendor donut,
-   headshots (Fabricio fix), live gold sale toasts (60s), and 12-hr rules rotation.
+/* FEW Dashboard — Single File, Final
+   Boards: This Week — Roster | YTD — Team | Weekly Activity | Lead Vendors (45d) | PAR — Tracking
+   Extras: Center splash on new sale (60s), vendor donut+legend, headshots with canonical names,
+           rules rotation every 12h (no top ticker), resilient to missing endpoints.
 */
-
 (() => {
-
-  // ---------- Endpoints ----------
+  // --------- Endpoints
   const ENDPOINTS = {
     teamSold: '/api/team_sold',
     callsByAgent: '/api/calls_by_agent',
@@ -16,260 +15,457 @@
     par: '/par.json',
   };
 
-  // ---------- Utils ----------
-  const $ = (sel, root=document) => root.querySelector(sel);
+  // --------- Tiny utils
+  const $  = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const fmtMoney = (n) => `$${Math.round(+n || 0).toLocaleString()}`;
-  const safe = (v, d=0) => (v == null ? d : v);
+  const safe = (v, d) => (v === undefined || v === null ? d : v);
   const fetchJSON = async (url) => {
     try {
-      const r = await fetch(url, { cache: "no-store" });
+      const r = await fetch(url, { cache: 'no-store' });
       if (!r.ok) throw new Error(`${url} → ${r.status}`);
       return await r.json();
     } catch (e) {
-      console.warn("fetch fail:", url, e.message);
+      console.warn('fetchJSON fail:', url, e.message || e);
       return null;
     }
   };
 
-  // ---------- Name Aliases (Fabricio fix) ----------
+  // --------- Name normalization (fixes F N / Fabricio variants)
   const NAME_ALIASES = new Map([
     ['f n','fabricio navarrete cervantes'],
     ['fab','fabricio navarrete cervantes'],
-    ['fabricio','fabricio navarrete cervantes'],
     ['fabrico','fabricio navarrete cervantes'],
+    ['fabricio','fabricio navarrete cervantes'],
     ['fabricio navarrete','fabricio navarrete cervantes'],
     ['fabricio cervantes','fabricio navarrete cervantes'],
     ['fabricio navarrete cervantes','fabricio navarrete cervantes'],
   ]);
-  const norm = s => (s || '').trim().toLowerCase().replace(/\s+/g,' ');
-  const canonicalName = n => NAME_ALIASES.get(norm(n)) || n;
+  const norm = s => String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
+  const canonicalName = name => NAME_ALIASES.get(norm(name)) || name;
 
-  // ---------- Headshot Resolver ----------
+  // --------- Headshot resolver (with photoURL helper)
   function buildHeadshotResolver(roster) {
-    const byName=new Map(), byEmail=new Map(), byPhone=new Map(), byInitial=new Map();
-    const initialsOf = (full='')=>full.trim().split(/\s+/).map(w=>w[0]?.toUpperCase()||'').join('');
-    const photoURL = p => !p ? null : (String(p).startsWith('http') || String(p).startsWith('/')) ? p : `/headshots/${p}`;
+    const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
 
-    for(const p of roster||[]){
-      const name=norm(canonicalName(p.name)), email=(p.email||'').trim().toLowerCase(), photo=photoURL(p.photo);
-      if(name) byName.set(name,photo);
-      if(email) byEmail.set(email,photo);
-      if(Array.isArray(p.phones)){
-        for(const ph of p.phones){
-          const num=String(ph||'').replace(/\D+/g,'');
-          if(num) byPhone.set(num,photo);
+    const initialsOf = (full='') =>
+      full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+
+    const photoURL = (p) => {
+      if (!p) return null;
+      const s = String(p);
+      return (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
+    };
+
+    // index by canonical name, email, phone, initials
+    for (const p of roster || []) {
+      const cName = norm(canonicalName(p.name));
+      const email = String(p.email||'').trim().toLowerCase();
+      const photo = photoURL(p.photo);
+      if (cName) byName.set(cName, photo);
+      if (email) byEmail.set(email, photo);
+      if (Array.isArray(p.phones)) {
+        for (const raw of p.phones) {
+          const phone = String(raw||'').replace(/\D+/g,'');
+          if (phone) byPhone.set(phone, photo);
         }
       }
-      const ini=initialsOf(p.name);
-      if(ini) byInitial.set(ini,photo);
+      const ini = initialsOf(p.name);
+      if (ini) byInitial.set(ini, photo);
     }
 
-    return (agent={})=>{
-      const name=norm(canonicalName(agent.name)), email=(agent.email||'').trim().toLowerCase();
-      const phone=String(agent.phone||'').replace(/\D+/g,''); const ini=initialsOf(agent.name);
-      return byName.get(name) ?? byEmail.get(email) ?? (phone?byPhone.get(phone):null) ?? byInitial.get(ini) ?? null;
+    // resolver used by all boards
+    return (agent = {}) => {
+      const cName = norm(canonicalName(agent.name));
+      const email = String(agent.email||'').trim().toLowerCase();
+      const phone = String(agent.phone||'').replace(/\D+/g,'');
+      const ini   = initialsOf(agent.name);
+      return (
+        byName.get(cName) ??
+        byEmail.get(email) ??
+        (phone ? byPhone.get(phone) : null) ??
+        byInitial.get(ini) ??
+        null
+      );
     };
   }
 
-  // ---------- Elements ----------
-  const bannerTitle=$('.banner .title'), bannerSub=$('.banner .subtitle');
-  const cards={calls:$('#sumCalls'), av:$('#sumSales'), deals:$('#sumTalk')};
-  const headEl=$('#thead'), bodyEl=$('#tbody'), viewLabelEl=$('#viewLabel');
-  const setView = label => { if(viewLabelEl) viewLabelEl.textContent = label; };
+  // --------- Layout anchors (match your index.html)
+  const bannerTitle = $('.banner .title');
+  const bannerSub   = $('.banner .subtitle');
+  const cards = { calls: $('#sumCalls'), av: $('#sumSales'), deals: $('#sumTalk') };
+  const boardTable  = $('#board');
+  const headEl      = $('#thead');
+  const bodyEl      = $('#tbody');
+  const viewLabelEl = $('#viewLabel');
 
-  // ---------- Sale Alerts ----------
-  const alertsRoot=document.createElement('div');
-  Object.assign(alertsRoot.style,{
-    position:'fixed',right:'24px',bottom:'24px',display:'flex',flexDirection:'column',gap:'8px',zIndex:9999
-  });
-  document.body.appendChild(alertsRoot);
-  const seenIds=new Set();
-  function pushAlert({name,soldProductName,amount}){
-    const el=document.createElement('div');
-    Object.assign(el.style,{
-      padding:'14px 18px',borderRadius:'12px',
-      background:'linear-gradient(135deg,#9c7b00,#ffd34d)',
-      color:'#000',fontWeight:'700',boxShadow:'0 6px 18px rgba(0,0,0,.4)',
-      fontSize:'16px',textAlign:'center'
-    });
-    el.textContent=`${name} • ${soldProductName} • ${fmtMoney(amount)}`;
-    alertsRoot.appendChild(el);
-    setTimeout(()=>el.remove(),60000);
+  // Remove legacy ticker if present
+  const ticker = $('#ticker');
+  if (ticker && ticker.parentNode) ticker.parentNode.removeChild(ticker);
+
+  const setView = (t) => { if (viewLabelEl) viewLabelEl.textContent = t; };
+  const setBanner = (h, s='') => { if (bannerTitle) bannerTitle.textContent = h||''; if (bannerSub) bannerSub.textContent = s||''; };
+
+  // --------- Inject minimal CSS (donut + legend + splash)
+  (function injectCSS(){
+    if (document.getElementById('few-inline-css')) return;
+    const css = `
+      .right{ text-align:right; font-variant-numeric:tabular-nums; }
+      .vendor-flex{ display:flex; gap:20px; align-items:center; flex-wrap:wrap; }
+      .legend{ min-width:260px; }
+      .legend-item{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 0; border-bottom:1px solid #1b2534; }
+      .legend-item .label{ color:#cfd7e3; }
+      .legend-item .val{ color:#9fb0c8; font-variant-numeric:tabular-nums; }
+      .dot{ display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align:middle; }
+      .splash{
+        position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+        background:linear-gradient(135deg,#a68109,#ffd34d);
+        color:#1a1a1a; padding:22px 28px; border-radius:16px;
+        box-shadow:0 18px 48px rgba(0,0,0,.45); z-index:9999; min-width:320px; text-align:center;
+      }
+      .splash .big{ font-size:24px; font-weight:900; line-height:1.2; }
+      .splash .mid{ font-size:20px; font-weight:800; margin-top:6px; }
+      .splash .sub{ font-size:12px; opacity:.85; margin-top:8px; }
+    `;
+    const tag = document.createElement('style');
+    tag.id = 'few-inline-css';
+    tag.textContent = css;
+    document.head.appendChild(tag);
+  })();
+
+  // --------- Gold center splash for new sale (60s)
+  function showSplash({ name, amount, soldProductName }) {
+    const el = document.createElement('div');
+    el.className = 'splash';
+    el.innerHTML = `
+      <div class="big">${name}</div>
+      <div class="mid">${fmtMoney(amount)}</div>
+      <div class="sub">${soldProductName || ''}</div>
+    `;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 60_000);
   }
+  const seenLeadIds = new Set();
 
-  // ---------- Vendor Summarizer ----------
-  const COLORS=['#FFD34D','#FF9F40','#FF6B6B','#6BCFFF','#7EE787','#B68CFF','#F78DA7','#72D4BA','#E3B341','#9CC2FF'];
-  const colorFor = name => COLORS[[...name].reduce((a,c)=>a+c.charCodeAt(0),0)%COLORS.length];
-  function summarizeVendors(allSales=[]){
-    const cutoff=Date.now()-45*24*3600*1000;
-    const map=new Map();
-    for(const s of allSales){
-      const t=Date.parse(s.dateSold||s.date||''); if(!isFinite(t)||t<cutoff)continue;
-      const v=(s.soldProductName||'Unknown').trim(), amt=+s.amount||0;
-      const row=map.get(v)||{name:v,deals:0,amount:0};
-      row.deals++; row.amount+=amt; map.set(v,row);
+  // --------- Cards
+  function renderCards({ calls, sold }) {
+    const callsVal = safe(calls?.team?.calls, 0);
+
+    let avVal = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
+    if (!avVal && Array.isArray(sold?.perAgent)) {
+      avVal = sold.perAgent.reduce((a,p)=>a + (+p.av12x || +p.av12X || +p.amount || 0), 0);
     }
-    const rows=[...map.values()];
-    const total=rows.reduce((a,b)=>a+b.deals,0)||1;
-    for(const r of rows){r.share=+(r.deals*100/total).toFixed(1); r.color=colorFor(r.name);}
-    rows.sort((a,b)=>b.deals-a.deals||b.amount-a.amount);
-    return {rows,total};
+
+    let dealsVal = safe(sold?.team?.totalSales, 0);
+    if (!dealsVal && Array.isArray(sold?.perAgent)) {
+      dealsVal = sold.perAgent.reduce((a,p)=>a + (+p.sales || 0), 0);
+    }
+
+    if (cards.calls) cards.calls.textContent = (callsVal||0).toLocaleString();
+    if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
+    if (cards.deals) cards.deals.textContent = (dealsVal||0).toLocaleString();
   }
 
-  // ---------- Render Helpers ----------
-  const agentRowHTML = ({name,right1,right2,photoUrl,initial})=>{
+  function agentRowHTML({ name, right1, right2, photoUrl, initial }) {
     const avatar = photoUrl
-      ? `<img src="${photoUrl}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;margin-right:8px;border:1px solid rgba(255,255,255,.15)">`
-      : `<div style="width:26px;height:26px;border-radius:50%;background:#2a2a2a;display:flex;align-items:center;justify-content:center;margin-right:8px;font-size:12px;color:#ccc;border:1px solid rgba(255,255,255,.15)">${initial||'?'}</div>`;
-    return `<tr><td style="display:flex;align-items:center">${avatar}${name}</td>
-            <td class="right">${right1}</td>${right2!==undefined?`<td class="right">${right2}</td>`:''}</tr>`;
-  };
-
-  function renderCards({calls,sold}){
-    if(cards.calls) cards.calls.textContent = (safe(calls?.team?.calls)).toLocaleString();
-    if(cards.deals) cards.deals.textContent = (safe(sold?.team?.totalSales)).toLocaleString();
-    if(cards.av) cards.av.textContent = fmtMoney(safe(sold?.team?.totalAV12X||sold?.team?.totalAv12x));
+      ? `<img src="${photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
+      : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initial || '?'}</div>`;
+    return `<tr>
+      <td class="agent" style="display:flex;align-items:center">${avatar}<span>${name}</span></td>
+      <td class="right">${right1}</td>
+      ${right2 !== undefined ? `<td class="right">${right2}</td>` : ''}
+    </tr>`;
   }
 
-  // ---------- Boards ----------
-  function renderRosterBoard({roster,sold,resolvePhoto}){
-    setView('This Week — Submitted AV');
-    const per=new Map();
-    for(const a of sold?.perAgent||[]){
-      per.set(norm(a.name),{av:a.av12x||a.amount||0,deals:a.sales||0});
+  // --------- Vendors aggregation (rolling 45d)
+  function summarizeVendors(allSales = []) {
+    const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
+    const byName = new Map();
+    for (const s of allSales) {
+      const t = Date.parse(s.dateSold || s.date || '');
+      if (!isFinite(t) || t < cutoff) continue;
+      const vendor = String(s.soldProductName || 'Unknown').trim() || 'Unknown';
+      const amount = +s.amount || 0;
+      const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
+      row.deals += 1; row.amount += amount;
+      byName.set(vendor, row);
     }
-    const rows=roster.map(p=>{
-      const d=per.get(norm(p.name))||{av:0,deals:0};
-      const photo=resolvePhoto(p);
-      const initials=p.name.split(/\s+/).map(w=>w[0]).join('').toUpperCase();
-      return {name:p.name,av:d.av,deals:d.deals,photo,initials};
-    }).sort((a,b)=>b.av-a.av);
-
-    headEl.innerHTML=`<tr><th>Agent</th><th class="right">Submitted AV</th><th class="right">Deals</th></tr>`;
-    bodyEl.innerHTML=rows.map(r=>agentRowHTML({name:r.name,right1:fmtMoney(r.av),right2:r.deals,photoUrl:r.photo,initial:r.initials})).join('');
+    const rows = [...byName.values()];
+    const totalDeals  = rows.reduce((a,r)=>a+r.deals,0) || 1;
+    const totalAmount = rows.reduce((a,r)=>a+r.amount,0);
+    for (const r of rows) {
+      r.shareDeals  = +(r.deals  * 100 / totalDeals).toFixed(1);
+      r.shareAmount = totalAmount ? +(r.amount * 100 / totalAmount).toFixed(1) : 0;
+    }
+    rows.sort((a,b)=> b.shareDeals - a.shareDeals || b.amount - a.amount);
+    return { rows, totalDeals, totalAmount };
   }
 
-  function renderYtdBoard({ytdList,ytdTotal,resolvePhoto}){
-    setView('YTD — Team');
-    const rows=[...ytdList].sort((a,b)=>b.av-a.av);
-    headEl.innerHTML=`<tr><th>Agent</th><th class="right">YTD AV</th></tr>`;
-    bodyEl.innerHTML=rows.map(p=>agentRowHTML({
-      name:p.name,right1:fmtMoney(p.av),
-      photoUrl:resolvePhoto({name:p.name}),initial:p.name.split(/\s+/).map(w=>w[0]).join('')
-    })).join('')+`<tr class="total"><td><strong>Total</strong></td><td class="right"><strong>${fmtMoney(ytdTotal)}</strong></td></tr>`;
-  }
+  // --------- Boards
+  function renderRosterBoard({ roster, sold, resolvePhoto }) {
+    setView('This Week — Roster');
+    const per = new Map();
+    for (const a of (sold?.perAgent || [])) {
+      const key = norm(canonicalName(a.name));
+      per.set(key, {
+        av: +a.av12x || +a.av12X || +a.amount || 0,
+        deals: +a.sales || 0
+      });
+    }
+    const rows = [];
+    for (const p of roster || []) {
+      const key = norm(canonicalName(p.name));
+      const d = per.get(key) || { av:0, deals:0 };
+      const photo = resolvePhoto({ name: p.name, email: p.email });
+      const initials = (p.name||'').trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+      rows.push({ name:p.name, av:d.av, deals:d.deals, photo, initials });
+    }
+    rows.sort((a,b)=> b.av - a.av);
 
-  function renderWeeklyActivity({calls,sold,resolvePhoto}){
-    setView('Weekly Activity');
-    const callMap=new Map(calls?.perAgent?.map(a=>[norm(a.name),a.calls||0]));
-    const dealMap=new Map(sold?.perAgent?.map(a=>[norm(a.name),a.sales||0]));
-    const allNames=new Set([...callMap.keys(),...dealMap.keys()]);
-    const rows=[...allNames].map(k=>({
-      name:k.replace(/\b\w/g,m=>m.toUpperCase()),
-      calls:callMap.get(k)||0,deals:dealMap.get(k)||0
-    })).sort((a,b)=>(b.calls+b.deals)-(a.calls+a.deals));
-    headEl.innerHTML=`<tr><th>Agent</th><th class="right">Calls</th><th class="right">Deals</th></tr>`;
-    bodyEl.innerHTML=rows.map(r=>agentRowHTML({
-      name:r.name,right1:r.calls,right2:r.deals,photoUrl:resolvePhoto({name:r.name}),
-      initial:r.name.split(/\s+/).map(w=>w[0]).join('')
+    if (headEl) headEl.innerHTML = `
+      <tr><th>Agent</th><th class="right">Submitted AV</th><th class="right">Deals</th></tr>`;
+    if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
+      name:r.name, right1:fmtMoney(r.av), right2:(r.deals||0).toLocaleString(),
+      photoUrl:r.photo, initial:r.initials
     })).join('');
   }
 
-  function renderVendorsBoard({sold}){
+  function renderYtdBoard({ ytdList, ytdTotal, resolvePhoto }) {
+    setView('YTD — Team');
+    const rows = Array.isArray(ytdList) ? [...ytdList] : [];
+    rows.sort((a,b)=> (b.av||0) - (a.av||0));
+    if (headEl) headEl.innerHTML = `<tr><th>Agent</th><th class="right">YTD AV</th></tr>`;
+    if (bodyEl) bodyEl.innerHTML = `
+      ${rows.map(p => agentRowHTML({
+        name: p.name,
+        right1: fmtMoney(p.av||0),
+        photoUrl: resolvePhoto({ name: p.name }),
+        initial: (p.name||'').split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('')
+      })).join('')}
+      <tr class="total"><td><strong>Total</strong></td>
+      <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td></tr>
+    `;
+  }
+
+  function renderWeeklyActivity({ calls, sold, resolvePhoto }) {
+    setView('Weekly Activity');
+    const callMap = new Map();
+    for (const a of (calls?.perAgent || [])) {
+      callMap.set(norm(canonicalName(a.name)), +a.calls || 0);
+    }
+    const dealMap = new Map();
+    for (const a of (sold?.perAgent || [])) {
+      dealMap.set(norm(canonicalName(a.name)), +a.sales || 0);
+    }
+    const names = new Set([...callMap.keys(), ...dealMap.keys()]);
+    const rows = [...names].map(k => {
+      const disp = k.replace(/\b\w/g, m => m.toUpperCase());
+      return { key:k, name:disp, calls:callMap.get(k)||0, deals:dealMap.get(k)||0 };
+    }).sort((a,b)=> (b.calls+b.deals) - (a.calls+a.deals));
+
+    if (headEl) headEl.innerHTML = `<tr><th>Agent</th><th class="right">Calls</th><th class="right">Deals</th></tr>`;
+    if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
+      name:r.name,
+      right1:(r.calls||0).toLocaleString(),
+      right2:(r.deals||0).toLocaleString(),
+      photoUrl: resolvePhoto({ name: r.name }),
+      initial: r.name.split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('')
+    })).join('');
+  }
+
+  function renderVendorsBoard({ vendorRows }) {
+    const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
+    const rows = data.rows || [];
+    const totalDeals = data.totalDeals || 0;
+    const totalAmount = data.totalAmount || 0;
+
     setView('Lead Vendors — Last 45 Days');
-    const {rows,total}=summarizeVendors(sold?.allSales||[]);
-    if(!rows.length){headEl.innerHTML='';bodyEl.innerHTML='<tr><td style="padding:18px;color:#5c6c82;">No vendor data yet.</td></tr>';return;}
-    const size=240,cx=size/2,cy=size/2,r=size/2-8,stroke=26;
-    const polar=(a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];
-    const arc=(a0,a1)=>{const large=(a1-a0)>Math.PI?1:0;const[x0,y0]=polar(a0),[x1,y1]=polar(a1);
-      return `M${x0} ${y0}A${r} ${r} 0 ${large} 1 ${x1} ${y1}`;};
+
+    if (!rows.length) {
+      if (headEl) headEl.innerHTML = '';
+      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No vendor data yet.</td></tr>`;
+      return;
+    }
+
+    const COLORS = ['#ffd34d','#ff9f40','#ff6b6b','#6bcfff','#7ee787','#b68cff','#f78da7','#72d4ba','#e3b341','#9cc2ff'];
+    const colorFor = (name='') => {
+      const h = [...name].reduce((a,c)=>a+c.charCodeAt(0),0);
+      return COLORS[h % COLORS.length];
+    };
+
+    // donut by deals
+    const size=240, cx=size/2, cy=size/2, r=size/2-8;
+    const polar=(cx,cy,r,a)=>[cx+r*Math.cos(a), cy+r*Math.sin(a)];
+    const arcPath=(cx,cy,r,a0,a1)=>{const large=(a1-a0)>Math.PI?1:0; const [x0,y0]=polar(cx,cy,r,a0); const [x1,y1]=polar(cx,cy,r,a1); return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;};
     let acc=-Math.PI/2;
-    const arcs=rows.map(v=>{const span=2*Math.PI*(v.deals/total);const d=arc(acc,acc+span);acc+=span;
-      return `<path d="${d}" stroke="${v.color}" stroke-width="${stroke}" fill="none"></path>`;}).join('');
-    const svg=`<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-      ${arcs}<circle cx="${cx}" cy="${cy}" r="${r-stroke/2-4}" fill="#0f141c"/>
-      <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Total Deals</text>
-      <text x="${cx}" y="${cy+18}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">${total}</text>
-    </svg>`;
-    headEl.innerHTML=`<tr><th>Vendor</th><th class="right">Deals</th><th class="right">% of total</th></tr>`;
-    const legend=rows.map(v=>`<div style="display:flex;justify-content:space-between;padding:4px 0">
-      <div><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${v.color};margin-right:6px;"></span>${v.name}</div>
-      <div>${v.deals} • ${v.share}%</div></div>`).join('');
-    bodyEl.innerHTML=`<tr><td colspan="3" style="padding:16px;display:flex;gap:18px;align-items:center;flex-wrap:wrap">${svg}<div>${legend}</div></td></tr>`;
+    const arcs = rows.map(v=>{
+      const span = totalDeals ? 2*Math.PI*(v.deals/totalDeals) : 0;
+      const d = arcPath(cx,cy,r,acc,acc+span); acc+=span;
+      return `<path d="${d}" stroke="${colorFor(v.name)}" stroke-width="28" fill="none"></path>`;
+    }).join('');
+    const svg = `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        ${arcs}
+        <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
+        <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals</text>
+        <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">${totalDeals.toLocaleString()}</text>
+      </svg>
+    `;
+
+    if (headEl) headEl.innerHTML = `
+      <tr>
+        <th>Vendor</th>
+        <th class="right">Deals</th>
+        <th class="right">% of total</th>
+        <th class="right">Amount (45d)</th>
+      </tr>
+    `;
+
+    const legend = rows.map(v => `
+      <div class="legend-item">
+        <span class="dot" style="background:${colorFor(v.name)}"></span>
+        <span class="label">${v.name}</span>
+        <span class="val">${v.deals.toLocaleString()} • ${v.shareDeals}% • ${fmtMoney(v.amount)}</span>
+      </div>`).join('');
+
+    const donutRow = `
+      <tr>
+        <td colspan="4" style="padding:18px">
+          <div class="vendor-flex">${svg}<div class="legend">${legend}</div></div>
+        </td>
+      </tr>
+    `;
+
+    const rowsHTML = rows.map(v => `
+      <tr>
+        <td><span class="dot" style="background:${colorFor(v.name)}"></span>${v.name}</td>
+        <td class="right">${v.deals.toLocaleString()}</td>
+        <td class="right" style="color:${colorFor(v.name)}">${v.shareDeals}%</td>
+        <td class="right">${fmtMoney(v.amount)}</td>
+      </tr>`).join('');
+
+    const totals = `
+      <tr class="total">
+        <td><strong>Total</strong></td>
+        <td class="right"><strong>${totalDeals.toLocaleString()}</strong></td>
+        <td></td>
+        <td class="right"><strong>${fmtMoney(totalAmount)}</strong></td>
+      </tr>
+    `;
+
+    if (bodyEl) bodyEl.innerHTML = donutRow + rowsHTML + totals;
   }
 
-  function renderParBoard({par}){
+  function renderParBoard({ par }) {
     setView('PAR — Tracking');
-    const pace=safe(par?.pace_target,0);
-    const agents=Array.isArray(par?.agents)?par.agents:[];
-    if(!agents.length){headEl.innerHTML='';bodyEl.innerHTML='<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>';return;}
-    headEl.innerHTML='<tr><th>Agent</th><th class="right">Take Rate</th><th class="right">Annual AV</th></tr>';
-    bodyEl.innerHTML=agents.map(a=>`<tr><td>${a.name}</td><td class="right">${safe(a.take_rate)}%</td><td class="right">${fmtMoney(safe(a.annual_av))}</td></tr>`).join('')
-      +`<tr class="total"><td><strong>PACE TO QUALIFY</strong></td><td></td><td class="right"><strong>${fmtMoney(pace)}</strong></td></tr>`;
+    const pace = +safe(par?.pace_target, 0);
+    const agents = Array.isArray(par?.agents) ? par.agents : [];
+    if (!agents.length) {
+      if (headEl) headEl.innerHTML = '';
+      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
+      return;
+    }
+    if (headEl) headEl.innerHTML = `
+      <tr><th>Agent</th><th class="right">Take&nbsp;Rate</th><th class="right">Annual&nbsp;AV</th></tr>`;
+    if (bodyEl) bodyEl.innerHTML = `
+      ${agents.map(a => `
+        <tr>
+          <td>${a.name}</td>
+          <td class="right">${safe(a.take_rate,0)}%</td>
+          <td class="right">${fmtMoney(safe(a.annual_av,0))}</td>
+        </tr>`).join('')}
+      <tr class="total"><td><strong>PACE TO QUALIFY</strong></td><td></td>
+      <td class="right"><strong>${fmtMoney(pace)}</strong></td></tr>
+    `;
   }
 
-  // ---------- Rules Rotation (12h) ----------
-  function startRuleRotation(rulesJson){
-    const base='THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
-    if(bannerTitle) bannerTitle.textContent=base;
-    const list=Array.isArray(rulesJson?.rules)?rulesJson.rules.filter(Boolean):[];
-    if(!bannerSub) return;
-    if(!list.length){bannerSub.textContent='Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.';return;}
-    let i=0; bannerSub.textContent=list[0];
-    setInterval(()=>{i=(i+1)%list.length; bannerSub.textContent=list[i];},12*60*60*1000);
+  // --------- Rules rotation (every 12h) — no ticker
+  function startRuleRotation(rulesJson) {
+    const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
+    const list = Array.isArray(rulesJson?.rules) ? rulesJson.rules.filter(Boolean) : [];
+    if (!list.length) {
+      setBanner(base, 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.');
+      return;
+    }
+    let i = 0;
+    const apply = () => setBanner(base, list[i % list.length]);
+    apply();
+    setInterval(() => { i++; apply(); }, 12*60*60*1000);
   }
 
-  // ---------- Load + Rotation ----------
-  async function loadAll(){
-    const [rules,roster,calls,sold,ytdList,ytdTotal,par]=await Promise.all([
+  // --------- Data load
+  async function loadAll() {
+    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
       fetchJSON(ENDPOINTS.rules),
       fetchJSON(ENDPOINTS.roster),
       fetchJSON(ENDPOINTS.callsByAgent),
       fetchJSON(ENDPOINTS.teamSold),
       fetchJSON(ENDPOINTS.ytdAv),
       fetchJSON(ENDPOINTS.ytdTotal),
-      fetchJSON(ENDPOINTS.par)
+      fetchJSON(ENDPOINTS.par),
     ]);
-    const resolvePhoto=buildHeadshotResolver(roster||[]);
-    if(Array.isArray(sold?.allSales)){
-      for(const s of sold.allSales){
-        const id=s.leadId||s.id||`${s.agent}-${s.dateSold}-${s.soldProductName}-${s.amount}`;
-        if(!seenIds.has(id)){
-          seenIds.add(id);
-          const t=Date.parse(s.dateSold||s.date||'');
-          if(isFinite(t)&&(Date.now()-t)<=45*24*3600*1000){
-            pushAlert({name:s.agent||'Agent',soldProductName:s.soldProductName||'Sale',amount:s.amount||0});
-          }
+
+    const resolvePhoto = buildHeadshotResolver(roster || []);
+
+    // Vendor rows object
+    const vendorRows = summarizeVendors(sold?.allSales || []);
+
+    // Center splash alerts for new sales within 45d
+    if (Array.isArray(sold?.allSales)) {
+      const cutoff = Date.now() - 45*24*3600*1000;
+      for (const s of sold.allSales) {
+        const id = s.leadId || s.id || `${s.agent}-${s.dateSold}-${s.soldProductName}-${s.amount}`;
+        const t = Date.parse(s.dateSold || s.date || '');
+        if (!seenLeadIds.has(id) && isFinite(t) && t >= cutoff) {
+          seenLeadIds.add(id);
+          showSplash({
+            name: s.agent || 'Agent',
+            amount: s.amount || 0,
+            soldProductName: s.soldProductName || ''
+          });
         }
       }
     }
-    return {rules,roster,calls,sold,ytdList:ytdList||[],ytdTotal:safe(ytdTotal?.ytd_av_total),par,resolvePhoto};
+
+    return {
+      rules: rules || { rules: [] },
+      roster: roster || [],
+      calls: calls || { team: { calls: 0 }, perAgent: [] },
+      sold: sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] },
+      vendorRows,
+      ytdList: ytdList || [],
+      ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
+      par: par || { pace_target: 0, agents: [] },
+      resolvePhoto
+    };
   }
 
-  function startBoardRotation(data){
-    const order=[
-      ()=>renderRosterBoard(data),
-      ()=>renderYtdBoard(data),
-      ()=>renderWeeklyActivity(data),
-      ()=>renderVendorsBoard(data),
-      ()=>renderParBoard(data)
+  // --------- Board rotation (30s each)
+  function startBoardRotation(data) {
+    const order = [
+      () => renderRosterBoard(data),
+      () => renderYtdBoard(data),
+      () => renderWeeklyActivity(data),
+      () => renderVendorsBoard(data),
+      () => renderParBoard(data),
     ];
-    let i=0; order[0]();
-    setInterval(()=>{i=(i+1)%order.length; order[i]();},30000);
+    let i = 0;
+    const paint = () => order[i % order.length]();
+    paint();
+    setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // ---------- Boot ----------
-  (async()=>{
-    try{
-      const data=await loadAll();
+  // --------- Boot
+  (async () => {
+    try {
+      const data = await loadAll();
       renderCards(data);
       startRuleRotation(data.rules);
       startBoardRotation(data);
-    }catch(e){
-      console.error(e);
-      if(bannerTitle) bannerTitle.textContent='THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
-      if(bannerSub) bannerSub.textContent='Error loading data.';
+    } catch (err) {
+      console.error(err);
+      setBanner('THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT', 'Error loading data.');
+      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
     }
   })();
-
 })();
