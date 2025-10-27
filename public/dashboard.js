@@ -78,6 +78,59 @@
   ]);
   const canonicalName = name => NAME_ALIASES.get(norm(name)) || name;
 
+  // --------- Vendor normalization (lock to your permanent labels)
+  const VENDOR_LABELS = [
+    '$7.50','TTM Nice!','George Region Shared','Red Media','Blast/Bulk','Exclusive JUMBO','ABC',
+    'Shared Jumbo','VS Default','RKA Website','Redrip/Give up Purchased','Lamy Dynasty Specials',
+    'JUMBO Splits','Exclusive 30s','Positive Intent/Argos','HotLine Bling','Referral','CG Exclusive'
+  ];
+
+  // map common messy variants → canonical labels above
+  const VENDOR_MAP = new Map([
+    // direct matches handled automatically
+    // frequent variants / noise → canonical
+    ['red media', 'Red Media'],
+    ['blast', 'Blast/Bulk'], ['blast/bulk', 'Blast/Bulk'],
+    ['abc', 'ABC'],
+    ['vs default', 'VS Default'], ['vs', 'VS Default'],
+    ['rka website', 'RKA Website'], ['website', 'RKA Website'],
+    ['redrip', 'Redrip/Give up Purchased'], ['give up purchased', 'Redrip/Give up Purchased'],
+    ['lamy dynasty specials', 'Lamy Dynasty Specials'], ['lamy dynasty', 'Lamy Dynasty Specials'],
+    ['jumbo splits', 'JUMBO Splits'], ['jumbo split', 'JUMBO Splits'],
+    ['exclusive 30s', 'Exclusive 30s'], ['exclusive 30', 'Exclusive 30s'],
+    ['positive intent', 'Positive Intent/Argos'], ['argos', 'Positive Intent/Argos'],
+    ['hotline bling', 'HotLine Bling'],
+    ['referral', 'Referral'],
+    ['cg exclusive', 'CG Exclusive'],
+    ['george region shared', 'George Region Shared'],
+    ['$7.50', '$7.50'], ['7.50', '$7.50'], ['$ 7.50', '$7.50'],
+    // junk that is NOT a vendor (plans/products) → ignore vendor change (we’ll keep last known or mark Unknown)
+    ['uhc', null], ['secure advantage', null], ['health access', null], ['secure access', null],
+    ['dental/vision', null], ['pa/pc', null], ['aca', null], ['aca/suppy', null], ['aca/suppy/wrap', null],
+    ['supplemental', null], ['stand alone supplemental', null]
+  ]);
+
+  function normalizeVendor(raw) {
+    const s = norm(raw);
+    // try exact canonical match first
+    for (const label of VENDOR_LABELS) {
+      if (s === norm(label)) return label;
+    }
+    // try mapped variants
+    for (const [k, v] of VENDOR_MAP.entries()) {
+      if (s.includes(k)) return v === null ? null : v; // null means “not a vendor label”
+    }
+    // heuristic: strip trailing amounts like "Red Media - $123"
+    const hyphen = s.split('-')[0].trim();
+    for (const label of VENDOR_LABELS) {
+      if (norm(label) === hyphen) return label;
+    }
+    // unknown → keep original casing if it’s close to any known label, else “Other”
+    const title = raw && String(raw).trim();
+    if (title) return title;
+    return 'Other';
+  }
+
   // --------- Headshot resolver (with photoURL helper)
   function buildHeadshotResolver(roster) {
     const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
@@ -213,20 +266,47 @@
     </tr>`;
   }
 
-  // --------- Vendors aggregation (rolling 45d)
+  // --------- Vendors aggregation (rolling 45d, normalized)
   function summarizeVendors(allSales = []) {
     const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
     const byName = new Map();
+
     for (const s of allSales) {
       const t = Date.parse(s.dateSold || s.date || '');
       if (!isFinite(t) || t < cutoff) continue;
-      const vendor = String(s.soldProductName || 'Unknown').trim() || 'Unknown';
-      const amount = +s.amount || 0;
-      const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
-      row.deals += 1; row.amount += amount;
-      byName.set(vendor, row);
+
+      // vendor can live in multiple fields; prefer soldProductName
+      const rawVendor = s.soldProductName || s.leadVendor || s.vendor || s.source || '';
+      const vendor = normalizeVendor(rawVendor);
+      if (vendor === null) continue; // skip things like "UHC", plan lines, etc.
+
+      // amount fallback chain (handle numbers like 159.12 or strings "$159.12")
+      let amount = +s.amount || +s.av12x || +s.av12X || 0;
+      if (!amount && typeof s.amount === 'string') {
+        const m = s.amount.match(/[\d,.]+/g);
+        if (m) amount = +m.join('').replace(/,/g, '');
+      }
+
+      const key = vendor || 'Other';
+      const row = byName.get(key) || { name: key, deals: 0, amount: 0 };
+      row.deals += 1;
+      row.amount += amount;
+      byName.set(key, row);
     }
-    const rows = [...byName.values()];
+
+    // ensure only canonical labels are present; bucket unknowns as "Other"
+    const rows = [];
+    let other = null;
+    for (const [name, r] of byName.entries()) {
+      if (VENDOR_LABELS.includes(name)) rows.push(r);
+      else {
+        other = other || { name: 'Other', deals: 0, amount: 0 };
+        other.deals += r.deals;
+        other.amount += r.amount;
+      }
+    }
+    if (other) rows.push(other);
+
     const totalDeals  = rows.reduce((a,r)=>a+r.deals,0) || 1;
     const totalAmount = rows.reduce((a,r)=>a+r.amount,0);
     for (const r of rows) {
@@ -444,7 +524,7 @@
 
     const resolvePhoto = buildHeadshotResolver(roster || []);
 
-    // Vendor rows object
+    // Vendor rows object — computed from last 45d of allSales
     const vendorRows = summarizeVendors(sold?.allSales || []);
 
     // Center splash alerts for new sales within 45d
