@@ -423,17 +423,18 @@ async function fetchLeadsPurchased() {
     setInterval(() => { i++; apply(); }, 12*60*60*1000);
   }
 
-  // --------- Data load
-  async function loadAll() {
-    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
-      fetchJSON(ENDPOINTS.rules),
-      fetchJSON(ENDPOINTS.roster),
-      fetchJSON(ENDPOINTS.callsByAgent),
-      fetchJSON(ENDPOINTS.teamSold),
-      fetchJSON(ENDPOINTS.ytdAv),
-      fetchJSON(ENDPOINTS.ytdTotal),
-      fetchJSON(ENDPOINTS.par),
-    ]);
+ // ---------- Data load ----------
+async function loadAll() {
+  const [rules, roster, calls, sold, ytdList, ytdTotalJson, par, leadsPurchasedMap] = await Promise.all([
+    fetchJSON(ENDPOINTS.rules),
+    fetchJSON(ENDPOINTS.roster),
+    fetchJSON(ENDPOINTS.callsByAgent),
+    fetchJSON(ENDPOINTS.teamSold),
+    fetchJSON(ENDPOINTS.ytdAv),
+    fetchJSON(ENDPOINTS.ytdTotal),
+    fetchJSON(ENDPOINTS.par),
+    fetchLeadsPurchased(), // <-- added for lead purchase tracking
+  ]);
 
     const resolvePhoto = buildHeadshotResolver(roster || []);
 
@@ -456,18 +457,21 @@ async function fetchLeadsPurchased() {
         }
       }
     }
+return {
+  rules: rules || { rules: [] },
+  roster: roster || [],
+  calls: calls || { team: { calls: 0 }, perAgent: [] },
+  sold: sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] },
+  vendorRows,
+  ytdList: ytdList || [],
+  ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
+  par: par || { pace_target: 0, agents: [] },
 
-    return {
-      rules: rules || { rules: [] },
-      roster: roster || [],
-      calls: calls || { team: { calls: 0 }, perAgent: [] },
-      sold: sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] },
-      vendorRows,
-      ytdList: ytdList || [],
-      ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
-      par: par || { pace_target: 0, agents: [] },
-      resolvePhoto
-    };
+  // ⬇️ add this line
+  leadsPurchased: leadsPurchasedMap || {},
+
+  resolvePhoto
+};
   }
 
   // --------- Board rotation (30s each)
