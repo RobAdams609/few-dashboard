@@ -182,13 +182,24 @@ function buildHeadshotResolver(roster) {
 function renderCards({ calls, sold }) {
   const callsVal = safe(calls?.team?.calls, 0);
 
-  // Try the team total; if missing, sum perAgent (av12x/av12X/amount)
+  // Try team total; if missing, sum perAgent (av12x/av12X/amount)
   let avVal = sold?.team?.totalAV12X ?? sold?.team?.totalAv12x;
   if (!(+avVal > 0)) {
     avVal = (sold?.perAgent || []).reduce(
       (sum, a) => sum + (+a.av12x || +a.av12X || +a.amount || 0), 0
     );
   }
+
+  // Deals fallback
+  let dealsVal = sold?.team?.totalSales;
+  if (!(+dealsVal > 0)) {
+    dealsVal = (sold?.perAgent || []).reduce((s, a) => s + (+a.sales || 0), 0);
+  }
+
+  if (cards.calls)  cards.calls.textContent  = (callsVal || 0).toLocaleString();
+  if (cards.av)     cards.av.textContent     = fmtMoney(avVal || 0);
+  if (cards.deals)  cards.deals.textContent  = (dealsVal || 0).toLocaleString();
+}
 
   // Deals fallback the same way
   let dealsVal = sold?.team?.totalSales;
