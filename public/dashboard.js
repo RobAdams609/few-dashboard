@@ -13,6 +13,7 @@
     ytdAv: '/ytd_av.json',
     ytdTotal: '/ytd_total.json',
     par: '/par.json',
+   leadsPurchased: '/api/leads_purchased',
   };
 
   // --------- Tiny utils
