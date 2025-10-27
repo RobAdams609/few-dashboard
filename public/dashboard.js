@@ -41,14 +41,14 @@
 
  // ---------- Headshot resolver (with photoURL helper) ----------
 function buildHeadshotResolver(roster) {
-  const byName   = new Map();
-  const byEmail  = new Map();
-  const byPhone  = new Map();
-  const byInitial= new Map();
+  const byName    = new Map();
+  const byEmail   = new Map();
+  const byPhone   = new Map();
+  const byInitial = new Map();
 
-  const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-  const initialsOf = (full='') =>
-    full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+  const norm = (s = '') => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const initialsOf = (full = '') =>
+    full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
 
   // turns "baxter.jpg" into "/headshots/baxter.jpg"
   const photoURL = (p) => {
@@ -57,8 +57,9 @@ function buildHeadshotResolver(roster) {
     return (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
   };
 
+  // Index roster by canonical name, email, phone, and initials
   for (const p of roster || []) {
-    const name  = norm(p.name);
+    const name  = norm(canonicalName(p.name)); // <-- canonicalized name
     const email = (p.email || '').trim().toLowerCase();
     const photo = photoURL(p.photo);
 
@@ -76,17 +77,22 @@ function buildHeadshotResolver(roster) {
     if (ini) byInitial.set(ini, photo);
   }
 
+  // Resolver used by all boards
   return (agent = {}) => {
-    const name  = norm(agent.name);
+    const name  = norm(canonicalName(agent.name)); // <-- canonicalized
     const email = (agent.email || '').trim().toLowerCase();
     const phone = String(agent.phone || '').replace(/\D+/g, '');
     const ini   = initialsOf(agent.name);
 
     return (
-      byName.get(name) ??
+      byName.get(name)   ??
       byEmail.get(email) ??
       (phone ? byPhone.get(phone) : null) ??
       byInitial.get(ini) ??
+      null
+    );
+  };
+}
       null
     );
   };
