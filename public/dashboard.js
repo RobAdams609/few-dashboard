@@ -12,8 +12,16 @@
     roster: '/headshots/roster.json',
     ytdAv: '/ytd_av.json',
     ytdTotal: '/ytd_total.json',
-    par: '/par.json'
-  };
+     par: '/par.json'
+};
+
+// ---- Manual Weekly Overrides (already 12x, do NOT multiply)
+const MANUAL_WEEKLY_OVERRIDES = [
+  { name: 'Bianca Nunez', av12x: 4291.12, sales: 1 }
+];
+
+// --------- Tiny utils
+const $  = (sel, root = document) => root.querySelector(sel);
 
   // --------- Tiny utils
   const $  = (sel, root = document) => root.querySelector(sel);
