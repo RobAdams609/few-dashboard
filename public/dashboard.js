@@ -469,3 +469,29 @@
     }
   })();
 })();
+// ---------- OE Countdown ----------
+(function () {
+  const timerEl = document.querySelector('#oeTimer');
+  if (!timerEl) return;
+
+  // Set your OE deadline here
+  const deadline = new Date('2025-11-01T00:00:00-04:00'); // Nov 1st at midnight ET
+  const pad = n => String(n).padStart(2, '0');
+
+  function updateCountdown() {
+    const now = new Date();
+    const diff = deadline - now;
+    if (diff <= 0) {
+      timerEl.textContent = 'LIVE';
+      return;
+    }
+    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const m = Math.floor((diff / (1000 * 60)) % 60);
+    const s = Math.floor((diff / 1000) % 60);
+    timerEl.textContent = `${d}d ${pad(h)}h ${pad(m)}m ${pad(s)}s`;
+    requestAnimationFrame(() => setTimeout(updateCountdown, 250));
+  }
+
+  updateCountdown();
+})();
