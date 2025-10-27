@@ -1106,9 +1106,29 @@ F N  09-13-2025 12:25 pm
       fetchJSON(ENDPOINTS.ytdAv),
       fetchJSON(ENDPOINTS.ytdTotal),
       fetchJSON(ENDPOINTS.par)
-    ]);
+  ]);
+  
+  // ---- Merge manual weekly overrides into sold.perAgent
+  const soldSafe = sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] };
+  if (!Array.isArray(soldSafe.perAgent)) soldSafe.perAgent = [];
 
-    const resolvePhoto = buildHeadshotResolver(roster || []);
+  if (Array.isArray(MANUAL_WEEKLY_OVERRIDES) && MANUAL_WEEKLY_OVERRIDES.length) {
+    const overrideKeys = new Set(MANUAL_WEEKLY_OVERRIDES.map(o => norm(canonicalName(o.name))));
+    // Remove any existing rows for same agent
+    soldSafe.perAgent = soldSafe.perAgent.filter(
+      a => !overrideKeys.has(norm(canonicalName(a.name)))
+    );
+    // Add manual overrides (already 12x)
+    for (const o of MANUAL_WEEKLY_OVERRIDES) {
+      soldSafe.perAgent.push({
+        name: o.name,
+        av12x: +o.av12x || 0,
+        sales: +o.sales || 0
+      });
+    }
+  }
+
+  const resolvePhoto = buildHeadshotResolver(roster || []);
 
     // Merge live sales + parsed backfill, then build vendor rows from merged
     const liveAllSales = Array.isArray(sold?.allSales) ? sold.allSales : [];
