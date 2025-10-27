@@ -35,18 +35,18 @@
   const norm = s => (s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
-  // ---------- Headshot resolver ----------
-  function buildHeadshotResolver(roster) {
-  const byName    = new Map();
-  const byEmail   = new Map();
-  const byPhone   = new Map();
-  const byInitial = new Map();
+ // ---------- Headshot resolver (with photoURL helper) ----------
+function buildHeadshotResolver(roster) {
+  const byName   = new Map();
+  const byEmail  = new Map();
+  const byPhone  = new Map();
+  const byInitial= new Map();
 
   const norm = (s) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   const initialsOf = (full='') =>
     full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
 
-  // turn "baxter.jpg" into "/headshots/baxter.jpg"
+  // turns "baxter.jpg" into "/headshots/baxter.jpg"
   const photoURL = (p) => {
     if (!p) return null;
     const s = String(p);
@@ -63,7 +63,7 @@
 
     if (Array.isArray(p.phones)) {
       for (const raw of p.phones) {
-        const phone = String(raw||'').replace(/\D+/g, '');
+        const phone = String(raw || '').replace(/\D+/g, '');
         if (phone) byPhone.set(phone, photo);
       }
     }
@@ -79,7 +79,7 @@
     const ini   = initialsOf(agent.name);
 
     return (
-      byName.get(name)   ??
+      byName.get(name) ??
       byEmail.get(email) ??
       (phone ? byPhone.get(phone) : null) ??
       byInitial.get(ini) ??
@@ -87,8 +87,6 @@
     );
   };
 }
-  }
-
   // ---------- Layout anchors (match your index.html) ----------
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
