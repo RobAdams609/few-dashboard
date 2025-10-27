@@ -39,16 +39,21 @@
   const norm = s => (s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
- // ---------- Headshot resolver (with photoURL helper) ----------
+// --------- Headshot resolver (with photoURL helper) ----------
 function buildHeadshotResolver(roster) {
   const byName    = new Map();
   const byEmail   = new Map();
   const byPhone   = new Map();
   const byInitial = new Map();
 
-  const norm = (s = '') => s.trim().toLowerCase().replace(/\s+/g, ' ');
-  const initialsOf = (full = '') =>
-    full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+  // normalize + canonicalize (“F N”, “Fabrico”, etc.)
+  const norm = (s='') => s.trim().toLowerCase().replace(/\s+/g, ' ');
+  const initialsOf = (full='') =>
+    full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+  const canonicalName = (name='') => {
+    const N = norm(name);
+    return NAME_ALIASES.get(N) || name;
+  };
 
   // turns "baxter.jpg" into "/headshots/baxter.jpg"
   const photoURL = (p) => {
@@ -59,7 +64,7 @@ function buildHeadshotResolver(roster) {
 
   // Index roster by canonical name, email, phone, and initials
   for (const p of roster || []) {
-    const name  = norm(canonicalName(p.name)); // <-- canonicalized name
+    const name  = norm(canonicalName(p.name));   // <— canonicalized name
     const email = (p.email || '').trim().toLowerCase();
     const photo = photoURL(p.photo);
 
@@ -72,27 +77,22 @@ function buildHeadshotResolver(roster) {
         if (phone) byPhone.set(phone, photo);
       }
     }
-
-    const ini = initialsOf(p.name);
+    const ini = initialsOf(p.name || '');
     if (ini) byInitial.set(ini, photo);
   }
 
   // Resolver used by all boards
   return (agent = {}) => {
-    const name  = norm(canonicalName(agent.name)); // <-- canonicalized
+    const name  = norm(canonicalName(agent.name)); // <— canonicalized
     const email = (agent.email || '').trim().toLowerCase();
     const phone = String(agent.phone || '').replace(/\D+/g, '');
-    const ini   = initialsOf(agent.name);
+    const ini   = initialsOf(agent.name || '');
 
     return (
       byName.get(name)   ??
       byEmail.get(email) ??
       (phone ? byPhone.get(phone) : null) ??
       byInitial.get(ini) ??
-      null
-    );
-  };
-}
       null
     );
   };
