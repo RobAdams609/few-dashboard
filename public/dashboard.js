@@ -296,7 +296,8 @@
     const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
     const rows = data.rows || [];
     const totalDeals = data.totalDeals || 0;
-    const totalAmount = data.totalAmount || 0;
+    // NOTE: amount/AV intentionally not displayed per request
+    // const totalAmount = data.totalAmount || 0;
 
     setView('Lead Vendors — Last 45 Days');
 
@@ -328,43 +329,48 @@
         <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
         <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals</text>
         <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">${totalDeals.toLocaleString()}</text>
-   if (headEl) headEl.innerHTML = `
-  <tr>
-    <th>Vendor</th>
-    <th class="right">Deals</th>
-    <th class="right">% of total</th>
-  </tr>
-`;
+      </svg>
+    `;
 
+    if (headEl) headEl.innerHTML = `
+      <tr>
+        <th>Vendor</th>
+        <th class="right">Deals</th>
+        <th class="right">% of total</th>
+      </tr>
+    `;
+
+    // LEGEND: remove amount
     const legend = rows.map(v => `
       <div class="legend-item">
         <span class="dot" style="background:${colorFor(v.name)}"></span>
         <span class="label">${v.name}</span>
-        <span class="val">${v.deals.toLocaleString()} • ${v.shareDeals}% • ${fmtMoney(v.amount)}</span>
+        <span class="val">${v.deals.toLocaleString()} • ${v.shareDeals}%</span>
       </div>`).join('');
 
+    // Donut row spans only 3 columns now
     const donutRow = `
       <tr>
-        <td colspan="4" style="padding:18px">
+        <td colspan="3" style="padding:18px">
           <div class="vendor-flex">${svg}<div class="legend">${legend}</div></div>
         </td>
       </tr>
     `;
 
+    // TABLE ROWS: remove amount col
     const rowsHTML = rows.map(v => `
       <tr>
         <td><span class="dot" style="background:${colorFor(v.name)}"></span>${v.name}</td>
         <td class="right">${v.deals.toLocaleString()}</td>
         <td class="right" style="color:${colorFor(v.name)}">${v.shareDeals}%</td>
-        <td class="right">${fmtMoney(v.amount)}</td>
       </tr>`).join('');
 
+    // TOTALS: remove amount total cell
     const totals = `
       <tr class="total">
         <td><strong>Total</strong></td>
         <td class="right"><strong>${totalDeals.toLocaleString()}</strong></td>
         <td></td>
-        <td class="right"><strong>${fmtMoney(totalAmount)}</strong></td>
       </tr>
     `;
 
