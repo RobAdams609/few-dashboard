@@ -328,17 +328,13 @@
         <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
         <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals</text>
         <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">${totalDeals.toLocaleString()}</text>
-      </svg>
-    `;
-
-    if (headEl) headEl.innerHTML = `
-      <tr>
-        <th>Vendor</th>
-        <th class="right">Deals</th>
-        <th class="right">% of total</th>
-        <th class="right">Amount (45d)</th>
-      </tr>
-    `;
+   if (headEl) headEl.innerHTML = `
+  <tr>
+    <th>Vendor</th>
+    <th class="right">Deals</th>
+    <th class="right">% of total</th>
+  </tr>
+`;
 
     const legend = rows.map(v => `
       <div class="legend-item">
