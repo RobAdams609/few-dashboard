@@ -30,6 +30,35 @@
       console.warn('fetchJSON fail:', url, e.message || e);
       return null;
     }
+async function fetchLeadsPurchased() {
+  const raw = await fetchJSON(ENDPOINTS.leadsPurchased);
+  if (!raw) return new Map();
+  const weekStart = Date.now() - 7*24*3600*1000;
+  const byAgent = new Map();
+  const bump = (name, n=1) => {
+    if (!name) return;
+    const k = String(name).trim().toLowerCase();
+    byAgent.set(k, (byAgent.get(k)||0) + n);
+  };
+
+  // Aggregated shape
+  if (Array.isArray(raw?.perAgent)) {
+    for (const r of raw.perAgent) bump(r.name, +r.leads || +r.count || 0);
+    return byAgent;
+  }
+
+  // Flat list shape
+  if (Array.isArray(raw)) {
+    for (const e of raw) {
+      const who = e.agent || e.buyer || e.owner || e.name;
+      const t = Date.parse(e.createdAt || e.date || e.purchasedAt || '');
+      if (isFinite(t) && t >= weekStart) bump(who, 1);
+    }
+    return byAgent;
+  }
+
+  return byAgent;
+}
   };
 
   // --------- Name normalization (fixes F N / Fabricio variants)
