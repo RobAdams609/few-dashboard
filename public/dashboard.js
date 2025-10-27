@@ -28,10 +28,14 @@
 
   // ---------- Name normalization (fixes F N / Fabricio variants) ----------
   const NAME_ALIASES = new Map([
-    ['f n','fabricio navarrete cervantes'],
-    ['fabricio navarrete','fabricio navarrete cervantes'],
-    ['fabricio cervantes','fabricio navarrete cervantes'],
-  ]);
+  ['f n', 'fabricio navarrete cervantes'],
+  ['fab', 'fabricio navarrete cervantes'],
+  ['fabrico', 'fabricio navarrete cervantes'],
+  ['fabricio', 'fabricio navarrete cervantes'],
+  ['fabricio navarrete', 'fabricio navarrete cervantes'],
+  ['fabricio cervantes', 'fabricio navarrete cervantes'],
+  ['fabricio navarrete cervantes', 'fabricio navarrete cervantes'],
+]);
   const norm = s => (s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
