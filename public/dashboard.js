@@ -13,7 +13,7 @@
     ytdAv: '/ytd_av.json',
     ytdTotal: '/ytd_total.json',
     par: '/par.json',
-   leadsPurchased: '/api/leads_purchased',
+    leadsPurchased: '/api/leads_purchased',
   };
 
   // --------- Tiny utils
@@ -21,6 +21,8 @@
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const fmtMoney = (n) => `$${Math.round(+n || 0).toLocaleString()}`;
   const safe = (v, d) => (v === undefined || v === null ? d : v);
+  const norm = s => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
   const fetchJSON = async (url) => {
     try {
       const r = await fetch(url, { cache: 'no-store' });
@@ -30,56 +32,58 @@
       console.warn('fetchJSON fail:', url, e.message || e);
       return null;
     }
-async function fetchLeadsPurchased() {
-  const raw = await fetchJSON(ENDPOINTS.leadsPurchased);
-  if (!raw) return new Map();
-  const weekStart = Date.now() - 7*24*3600*1000;
-  const byAgent = new Map();
-  const bump = (name, n=1) => {
-    if (!name) return;
-    const k = String(name).trim().toLowerCase();
-    byAgent.set(k, (byAgent.get(k)||0) + n);
   };
 
-  // Aggregated shape
-  if (Array.isArray(raw?.perAgent)) {
-    for (const r of raw.perAgent) bump(r.name, +r.leads || +r.count || 0);
-    return byAgent;
-  }
+  // Leads purchased (this week) helper
+  async function fetchLeadsPurchased() {
+    const raw = await fetchJSON(ENDPOINTS.leadsPurchased);
+    if (!raw) return new Map();
 
-  // Flat list shape
-  if (Array.isArray(raw)) {
-    for (const e of raw) {
-      const who = e.agent || e.buyer || e.owner || e.name;
-      const t = Date.parse(e.createdAt || e.date || e.purchasedAt || '');
-      if (isFinite(t) && t >= weekStart) bump(who, 1);
+    const weekStart = Date.now() - 7 * 24 * 3600 * 1000;
+    const byAgent = new Map();
+    const bump = (name, n = 1) => {
+      if (!name) return;
+      const k = String(name).trim().toLowerCase();
+      byAgent.set(k, (byAgent.get(k) || 0) + n);
+    };
+
+    // Aggregated shape
+    if (Array.isArray(raw?.perAgent)) {
+      for (const r of raw.perAgent) bump(r.name, +r.leads || +r.count || 0);
+      return byAgent;
     }
+
+    // Flat list shape
+    if (Array.isArray(raw)) {
+      for (const e of raw) {
+        const who = e.agent || e.buyer || e.owner || e.name;
+        const t = Date.parse(e.createdAt || e.date || e.purchasedAt || '');
+        if (isFinite(t) && t >= weekStart) bump(who, 1);
+      }
+      return byAgent;
+    }
+
     return byAgent;
   }
-
-  return byAgent;
-}
-  };
 
   // --------- Name normalization (fixes F N / Fabricio variants)
   const NAME_ALIASES = new Map([
-    ['f n','fabricio navarrete cervantes'],
-    ['fab','fabricio navarrete cervantes'],
-    ['fabrico','fabricio navarrete cervantes'],
-    ['fabricio','fabricio navarrete cervantes'],
-    ['fabricio navarrete','fabricio navarrete cervantes'],
-    ['fabricio cervantes','fabricio navarrete cervantes'],
-    ['fabricio navarrete cervantes','fabricio navarrete cervantes'],
+    ['f n', 'fabricio navarrete cervantes'],
+    ['fab', 'fabricio navarrete cervantes'],
+    ['fabrico', 'fabricio navarrete cervantes'],
+    ['fabricio', 'fabricio navarrete cervantes'],
+    ['fabricio navarrete', 'fabricio navarrete cervantes'],
+    ['fabricio cervantes', 'fabricio navarrete cervantes'],
+    ['fabricio navarrete cervantes', 'fabricio navarrete cervantes'],
   ]);
-  const norm = s => String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
   const canonicalName = name => NAME_ALIASES.get(norm(name)) || name;
 
   // --------- Headshot resolver (with photoURL helper)
   function buildHeadshotResolver(roster) {
     const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
 
-    const initialsOf = (full='') =>
-      full.trim().split(/\s+/).map(w => (w[0]||'').toUpperCase()).join('');
+    const initialsOf = (full = '') =>
+      full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
 
     const photoURL = (p) => {
       if (!p) return null;
@@ -90,13 +94,13 @@ async function fetchLeadsPurchased() {
     // index by canonical name, email, phone, initials
     for (const p of roster || []) {
       const cName = norm(canonicalName(p.name));
-      const email = String(p.email||'').trim().toLowerCase();
+      const email = String(p.email || '').trim().toLowerCase();
       const photo = photoURL(p.photo);
       if (cName) byName.set(cName, photo);
       if (email) byEmail.set(email, photo);
       if (Array.isArray(p.phones)) {
         for (const raw of p.phones) {
-          const phone = String(raw||'').replace(/\D+/g,'');
+          const phone = String(raw || '').replace(/\D+/g, '');
           if (phone) byPhone.set(phone, photo);
         }
       }
@@ -107,8 +111,8 @@ async function fetchLeadsPurchased() {
     // resolver used by all boards
     return (agent = {}) => {
       const cName = norm(canonicalName(agent.name));
-      const email = String(agent.email||'').trim().toLowerCase();
-      const phone = String(agent.phone||'').replace(/\D+/g,'');
+      const email = String(agent.email || '').trim().toLowerCase();
+      const phone = String(agent.phone || '').replace(/\D+/g, '');
       const ini   = initialsOf(agent.name);
       return (
         byName.get(cName) ??
@@ -124,7 +128,6 @@ async function fetchLeadsPurchased() {
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
   const cards = { calls: $('#sumCalls'), av: $('#sumSales'), deals: $('#sumTalk') };
-  const boardTable  = $('#board');
   const headEl      = $('#thead');
   const bodyEl      = $('#tbody');
   const viewLabelEl = $('#viewLabel');
@@ -134,7 +137,10 @@ async function fetchLeadsPurchased() {
   if (ticker && ticker.parentNode) ticker.parentNode.removeChild(ticker);
 
   const setView = (t) => { if (viewLabelEl) viewLabelEl.textContent = t; };
-  const setBanner = (h, s='') => { if (bannerTitle) bannerTitle.textContent = h||''; if (bannerSub) bannerSub.textContent = s||''; };
+  const setBanner = (h, s = '') => {
+    if (bannerTitle) bannerTitle.textContent = h || '';
+    if (bannerSub)   bannerSub.textContent   = s || '';
+  };
 
   // --------- Inject minimal CSS (donut + legend + splash)
   (function injectCSS(){
@@ -177,7 +183,7 @@ async function fetchLeadsPurchased() {
   }
   const seenLeadIds = new Set();
 
-  // --------- Cards
+  // --------- Cards (top 3)
   function renderCards({ calls, sold }) {
     const callsVal = safe(calls?.team?.calls, 0);
 
@@ -423,18 +429,18 @@ async function fetchLeadsPurchased() {
     setInterval(() => { i++; apply(); }, 12*60*60*1000);
   }
 
- // ---------- Data load ----------
-async function loadAll() {
-  const [rules, roster, calls, sold, ytdList, ytdTotalJson, par, leadsPurchasedMap] = await Promise.all([
-    fetchJSON(ENDPOINTS.rules),
-    fetchJSON(ENDPOINTS.roster),
-    fetchJSON(ENDPOINTS.callsByAgent),
-    fetchJSON(ENDPOINTS.teamSold),
-    fetchJSON(ENDPOINTS.ytdAv),
-    fetchJSON(ENDPOINTS.ytdTotal),
-    fetchJSON(ENDPOINTS.par),
-    fetchLeadsPurchased(), // <-- added for lead purchase tracking
-  ]);
+  // ---------- Data load ----------
+  async function loadAll() {
+    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par, leadsPurchasedMap] = await Promise.all([
+      fetchJSON(ENDPOINTS.rules),
+      fetchJSON(ENDPOINTS.roster),
+      fetchJSON(ENDPOINTS.callsByAgent),
+      fetchJSON(ENDPOINTS.teamSold),
+      fetchJSON(ENDPOINTS.ytdAv),
+      fetchJSON(ENDPOINTS.ytdTotal),
+      fetchJSON(ENDPOINTS.par),
+      fetchLeadsPurchased(),
+    ]);
 
     const resolvePhoto = buildHeadshotResolver(roster || []);
 
@@ -457,21 +463,19 @@ async function loadAll() {
         }
       }
     }
-return {
-  rules: rules || { rules: [] },
-  roster: roster || [],
-  calls: calls || { team: { calls: 0 }, perAgent: [] },
-  sold: sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] },
-  vendorRows,
-  ytdList: ytdList || [],
-  ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
-  par: par || { pace_target: 0, agents: [] },
 
-  // ⬇️ add this line
-  leadsPurchased: leadsPurchasedMap || {},
-
-  resolvePhoto
-};
+    return {
+      rules: rules || { rules: [] },
+      roster: roster || [],
+      calls: calls || { team: { calls: 0 }, perAgent: [] },
+      sold: sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] },
+      vendorRows,
+      ytdList: ytdList || [],
+      ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
+      par: par || { pace_target: 0, agents: [] },
+      leadsPurchased: leadsPurchasedMap || {},
+      resolvePhoto
+    };
   }
 
   // --------- Board rotation (30s each)
@@ -503,13 +507,14 @@ return {
     }
   })();
 })();
+
 // ---------- OE Countdown ----------
 (function () {
   const timerEl = document.querySelector('#oeTimer');
   if (!timerEl) return;
 
-  // Set your OE deadline here
-  const deadline = new Date('2025-11-01T00:00:00-04:00'); // Nov 1st at midnight ET
+  // Set your OE deadline here (ET)
+  const deadline = new Date('2025-11-01T00:00:00-04:00');
   const pad = n => String(n).padStart(2, '0');
 
   function updateCountdown() {
