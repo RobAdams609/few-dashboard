@@ -1,5 +1,3 @@
-<!-- FEW Dashboard — Single File (Full Rewrite, with live splash fix and alias correction) -->
-<script>
 /* FEW Dashboard — Single File (Full Rewrite)
    Boards: This Week — Roster | YTD — Team | Weekly Activity | Lead Vendors (45d) | PAR — Tracking
    Extras: Center splash on new sale (60s), vendor donut+legend, headshots w/ canonical names,
@@ -64,8 +62,8 @@
     ['robert adams','robert adams'],
     ['nathan johnson','nathan johnson'],
     ['anna gleason','anna'],
-    ['sebastian beltran','sebastian beltran']
-    // NOTE: removed wrong alias that mapped Elizabeth Snyder to Eli.
+    ['sebastian beltran','sebastian beltran'],
+    ['elizabeth snyder','eli'] // loose mapping used only for photo fallbacks
   ]);
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
@@ -170,15 +168,6 @@
     setTimeout(() => el.remove(), 60_000);
   }
   const seenLeadIds = new Set();
-
-  // Stable deal id (works even when leadId missing)
-  function dealId(s) {
-    const agent = (s?.agent || s?.agentName || '').toLowerCase().trim();
-    const when  = s?.dateSold || s?.date || '';
-    const prod  = s?.soldProductName || '';
-    const amt   = s?.amount || 0;
-    return s?.leadId || s?.id || `${agent}|${when}|${prod}|${amt}`;
-  }
 
   // --------- Cards
   function renderCards({ calls, sold }) {
@@ -1147,13 +1136,19 @@ F N  09-13-2025 12:25 pm
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
     const vendorRows = summarizeVendors(mergedAllSales);
 
-    // Seed dedupe: mark existing recent deals as seen so we only splash on NEW ones after boot
-    {
+    // Center splash alerts for new live sales within 45d (only liveAllSales, not backfill)
+    if (Array.isArray(liveAllSales)) {
       const cutoff = Date.now() - 45*24*3600*1000;
       for (const s of liveAllSales) {
+        const id = s.leadId || s.id || `${s.agent}-${s.dateSold}-${s.soldProductName}-${s.amount}`;
         const t = Date.parse(s.dateSold || s.date || '');
-        if (Number.isFinite(t) && t >= cutoff) {
-          seenLeadIds.add(dealId(s));
+        if (!seenLeadIds.has(id) && Number.isFinite(t) && t >= cutoff) {
+          seenLeadIds.add(id);
+          showSplash({
+            name: s.agent || 'Agent',
+            amount: s.amount || 0,
+            soldProductName: s.soldProductName || ''
+          });
         }
       }
     }
@@ -1169,65 +1164,6 @@ F N  09-13-2025 12:25 pm
       par: par || { pace_target: 0, agents: [] },
       resolvePhoto
     };
-  }
-
-  // --------- Live poller: fetch new sales & update splash/cards (every 15s)
-  function startLivePoller(state) {
-    const intervalMs = 15000;
-    async function tick() {
-      try {
-        const [sold, calls] = await Promise.all([
-          fetchJSON(ENDPOINTS.teamSold),
-          fetchJSON(ENDPOINTS.callsByAgent)
-        ]);
-
-        if (sold) {
-          const liveAllSales = Array.isArray(sold.allSales) ? sold.allSales : [];
-          const cutoff = Date.now() - 45*24*3600*1000;
-
-          // Splash only *new* deals
-          for (const s of liveAllSales) {
-            const t = Date.parse(s.dateSold || s.date || '');
-            const id = dealId(s);
-            if (!seenLeadIds.has(id) && Number.isFinite(t) && t >= cutoff) {
-              seenLeadIds.add(id);
-              showSplash({
-                name: s.agent || s.agentName || 'Agent',
-                amount: s.amount || 0,
-                soldProductName: s.soldProductName || ''
-              });
-            }
-          }
-
-          // Keep state current so boards/cards stay accurate on next render
-          const soldSafe = sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] };
-          if (!Array.isArray(soldSafe.perAgent)) soldSafe.perAgent = [];
-          // Re-apply manual overrides (already 12x)
-          if (Array.isArray(MANUAL_WEEKLY_OVERRIDES) && MANUAL_WEEKLY_OVERRIDES.length) {
-            const overrideKeys = new Set(MANUAL_WEEKLY_OVERRIDES.map(o => norm(canonicalName(o.name))));
-            soldSafe.perAgent = soldSafe.perAgent.filter(a => !overrideKeys.has(norm(canonicalName(a.name))));
-            for (const o of MANUAL_WEEKLY_OVERRIDES) {
-              soldSafe.perAgent.push({ name:o.name, av12x:+o.av12x||0, sales:+o.sales||0 });
-            }
-          }
-
-          state.sold = soldSafe;
-          const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
-          state.vendorRows = summarizeVendors(mergedAllSales);
-        }
-
-        if (calls) {
-          state.calls = calls;
-        }
-
-        // Update the top cards immediately
-        renderCards(state);
-      } catch (err) {
-        console.warn('live poller error:', err?.message || err);
-      }
-    }
-    // Initial delay to avoid double-splash right at boot, then repeat
-    setTimeout(() => { tick(); setInterval(tick, intervalMs); }, 2000);
   }
 
   // --------- Board rotation (30s each)
@@ -1252,7 +1188,6 @@ F N  09-13-2025 12:25 pm
       renderCards(data);
       startRuleRotation(data.rules);
       startBoardRotation(data);
-      startLivePoller(data); // <— NEW: continuous updates & splash on NEW deals only
     } catch (err) {
       console.error(err);
       setBanner('THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT', 'Error loading data.');
@@ -1287,4 +1222,3 @@ F N  09-13-2025 12:25 pm
 
   updateCountdown();
 })();
-</script>
