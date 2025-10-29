@@ -5,16 +5,17 @@
    Notes: 1) No layout width changes. 2) Fixed all template literal bugs, duplicate utils, and string concat.
 */
 (() => {
-  // --------- Endpoints
-  const ENDPOINTS = {
-    teamSold: '/api/team_sold',
-    callsByAgent: '/api/calls_by_agent',
-    rules: '/rules.json',
-    roster: '/headshots/roster.json',
-    ytdAv: '/ytd_av.json',
-    ytdTotal: '/ytd_total.json',
-    par: '/par.json'
-  };
+// --------- Endpoints
+const ENDPOINTS = {
+  teamSold: '/api/team_sold',
+  callsByAgent: '/api/calls_by_agent',
+  rules: '/rules.json',
+  roster: '/headshots/roster.json',
+  ytdAv: '/ytd_av.json',
+  ytdTotal: '/ytd_total.json',
+  par: '/par.json',
+  callsOverride: '/calls_week_override.json' // added
+};
 
   // ---- Manual Weekly Overrides (already 12x, do NOT multiply)
   const MANUAL_WEEKLY_OVERRIDES = [
@@ -279,33 +280,103 @@
       <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td></tr>
     `;
   }
+function renderWeeklyActivity({ roster, calls, sold, resolvePhoto, callsOverride }) {
+  setView('Weekly Activity');
 
-  function renderWeeklyActivity({ calls, sold, resolvePhoto }) {
-    setView('Weekly Activity');
-    const callMap = new Map();
-    for (const a of (calls?.perAgent || [])) {
-      callMap.set(norm(canonicalName(a.name)), +a.calls || 0);
+  // If an override JSON is present, use it (keys = agent emails)
+  if (callsOverride && typeof callsOverride === 'object') {
+    // Build quick lookups
+    const byEmailToName = new Map();
+    for (const p of roster || []) {
+      const email = String(p.email || '').trim().toLowerCase();
+      if (email) byEmailToName.set(email, p.name || email);
     }
-    const dealMap = new Map();
-    for (const a of (sold?.perAgent || [])) {
-      dealMap.set(norm(canonicalName(a.name)), +a.sales || 0);
-    }
-    const names = new Set([...callMap.keys(), ...dealMap.keys()]);
-    const rows = [...names].map(k => {
-      const disp = k.replace(/\b\w/g, m => m.toUpperCase());
-      const initials = disp.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-      return { key:k, name:disp, initials, calls:callMap.get(k) || 0, deals:dealMap.get(k) || 0 };
-    }).sort((a,b)=> (b.calls + b.deals) - (a.calls + a.deals));
 
-    if (headEl) headEl.innerHTML = `<tr><th>Agent</th><th class="right">Calls</th><th class="right">Deals</th></tr>`;
-    if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
-      name:r.name,
-      right1:(r.calls || 0).toLocaleString(),
-      right2:(r.deals || 0).toLocaleString(),
-      photoUrl: resolvePhoto({ name: r.name }),
-      initial: r.initials
-    })).join('');
+    const rows = Object.entries(callsOverride).map(([emailRaw, m]) => {
+      const email = String(emailRaw || '').trim().toLowerCase();
+      const name  = byEmailToName.get(email) || (email ? email.split('@')[0] : 'Agent');
+      const leads = +m.leads || 0;
+      const soldC = +m.sold  || 0;
+      const conv = leads > 0 ? ((soldC / leads) * 100) : 0;
+
+      return {
+        key: email || name,
+        name,
+        calls: +m.calls || 0,
+        talkMin: +m.talkMin || 0,
+        loggedMin: +m.loggedMin || 0,
+        leads,
+        sold: soldC,
+        conv
+      };
+    });
+
+    rows.sort((a, b) => (b.sold - a.sold) || (b.calls - a.calls));
+
+    if (headEl) headEl.innerHTML = `
+      <tr>
+        <th>Agent</th>
+        <th class="right">Calls</th>
+        <th class="right">Talk&nbsp;Time</th>
+        <th class="right">Logged</th>
+        <th class="right">Leads</th>
+        <th class="right">Sold</th>
+        <th class="right">Conv&nbsp;%</th>
+      </tr>
+    `;
+
+    const fmtMin = (n) => {
+      const m = Math.max(0, Math.floor(+n || 0));
+      const h = Math.floor(m / 60);
+      const mm = m % 60;
+      return h ? `${h}h ${mm}m` : `${mm}m`;
+    };
+
+    if (bodyEl) bodyEl.innerHTML = rows.map(r => {
+      const photoUrl = resolvePhoto({ name: r.name, email: r.key.includes('@') ? r.key : undefined });
+      const initials = (r.name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+      const avatar = photoUrl
+        ? `<img src="${photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
+        : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initials}</div>`;
+
+      return `
+        <tr>
+          <td class="agent" style="display:flex;align-items:center">${avatar}<span>${r.name}</span></td>
+          <td class="right">${r.calls.toLocaleString()}</td>
+          <td class="right">${fmtMin(r.talkMin)}</td>
+          <td class="right">${fmtMin(r.loggedMin)}</td>
+          <td class="right">${r.leads.toLocaleString()}</td>
+          <td class="right">${r.sold.toLocaleString()}</td>
+          <td class="right">${r.conv.toFixed(1)}%</td>
+        </tr>
+      `;
+    }).join('');
+
+    return; // done with override path
   }
+
+  // Fallback: simple calls + deals if no override present
+  const callMap = new Map();
+  for (const a of (calls?.perAgent || [])) callMap.set(norm(canonicalName(a.name)), +a.calls || 0);
+  const dealMap = new Map();
+  for (const a of (sold?.perAgent || []))  dealMap.set(norm(canonicalName(a.name)), +a.sales || 0);
+
+  const names = new Set([...callMap.keys(), ...dealMap.keys()]);
+  const rows = [...names].map(k => {
+    const disp = k.replace(/\b\w/g, m => m.toUpperCase());
+    const initials = disp.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+    return { key:k, name:disp, initials, calls:callMap.get(k) || 0, deals:dealMap.get(k) || 0 };
+  }).sort((a,b)=> (b.calls + b.deals) - (a.calls + a.deals));
+
+  if (headEl) headEl.innerHTML = `<tr><th>Agent</th><th class="right">Calls</th><th class="right">Deals</th></tr>`;
+  if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
+    name:r.name,
+    right1:(r.calls || 0).toLocaleString(),
+    right2:(r.deals || 0).toLocaleString(),
+    photoUrl: resolvePhoto({ name: r.name }),
+    initial: r.initials
+  })).join('');
+}
 
   function renderVendorsBoard({ vendorRows }) {
     const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
@@ -1103,16 +1174,17 @@ F N  09-13-2025 12:25 pm
   const BACKFILL_SALES = parseBackfill(BACKFILL_TEXT);
 
   // ---------- Data load ----------
-  async function loadAll() {
-    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
-      fetchJSON(ENDPOINTS.rules),
-      fetchJSON(ENDPOINTS.roster),
-      fetchJSON(ENDPOINTS.callsByAgent),
-      fetchJSON(ENDPOINTS.teamSold),
-      fetchJSON(ENDPOINTS.ytdAv),
-      fetchJSON(ENDPOINTS.ytdTotal),
-      fetchJSON(ENDPOINTS.par)
-    ]);
+async function loadAll() {
+  const [rules, roster, calls, sold, ytdList, ytdTotalJson, par, callsOverride] = await Promise.all([
+    fetchJSON(ENDPOINTS.rules),
+    fetchJSON(ENDPOINTS.roster),
+    fetchJSON(ENDPOINTS.callsByAgent),
+    fetchJSON(ENDPOINTS.teamSold),
+    fetchJSON(ENDPOINTS.ytdAv),
+    fetchJSON(ENDPOINTS.ytdTotal),
+    fetchJSON(ENDPOINTS.par),
+    fetchJSON(ENDPOINTS.callsOverride)
+  ]);
 
     // ---- Merge manual weekly overrides into sold.perAgent
     const soldSafe = sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] };
@@ -1152,17 +1224,9 @@ F N  09-13-2025 12:25 pm
       }
     }
 
-    return {
-      rules: rules || { rules: [] },
-      roster: roster || [],
-      calls: calls || { team: { calls: 0 }, perAgent: [] },
-      sold: soldSafe,
-      vendorRows,
-      ytdList: ytdList || [],
-      ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
-      par: par || { pace_target: 0, agents: [] },
-      resolvePhoto
-    };
+  par: par || { pace_target: 0, agents: [] },
+  callsOverride,
+  resolvePhoto
   }
 
   // --------- Board rotation (30s each)
