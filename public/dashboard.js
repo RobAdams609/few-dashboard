@@ -63,7 +63,7 @@
     ['nathan johnson','nathan johnson'],
     ['anna gleason','anna'],
     ['sebastian beltran','sebastian beltran']
-    // FIX 2: removed incorrect alias that mapped "elizabeth snyder" -> "eli"
+    // removed incorrect ['elizabeth snyder','eli']
   ]);
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
@@ -429,9 +429,643 @@
   }
 
   // ---------- Backfill Parser (uses your pasted block; no other files)
-  const BACKFILL_TEXT = `... (unchanged; omitted here for brevity in this comment) ...`;
-  // NOTE: keep full BACKFILL_TEXT block from your working version. No edits needed.
-  // (For your actual file, keep the full text exactly as before.)
+  const BACKFILL_TEXT = `
+Joyce Banks
+Red Media - $16.7
+UHC: 16.70
+Marie Saint Cyr  10-27-2025 12:47 pm
+Brooke Holtscotto
+Red Media - $38
+ACA: 38
+Marie Saint Cyr  10-27-2025 10:04 am
+Jeanette Griggs
+Referral - $1
+UHC: 1
+Eli Thermilus  10-26-2025 5:07 pm
+Tegan Mitchell
+Red Media - $290
+PA/PC : 290
+Marie Saint Cyr  10-26-2025 4:11 pm
+Christy Constant
+TTM Nice! - $49
+Robert Adams  10-26-2025 9:56 am
+Giondra Dean
+Red Media - $83
+ACA/Suppy/wrap: 83
+F N  10-25-2025 12:32 pm
+Maxwell Parker
+VS Default - $159.12
+Supplemental/Association/Other: 71.74
+UHC: 87.38
+Elizabeth Snyder  10-24-2025 8:02 pm
+Crystal Smith
+Red Media - $59
+UHC/Suppy/wrap: 59
+F N  10-24-2025 6:21 pm
+Aaliyah Montano
+Blast/Bulk - $60
+Supplemental/Association/Other: 60
+Nathan Johnson  10-24-2025 6:21 pm
+Debra Hernandez
+Red Media - $616
+Health Access/Secure Access: 616
+Philip Baxter  10-24-2025 12:34 pm
+Steve Caloca
+Lamy Dynasty Specials - $926
+Anna Gleason  10-22-2025 9:09 pm
+Madison Stiles
+ABC - $473
+Marie Saint Cyr  10-22-2025 7:42 pm
+Angela Champaneria
+Lamy Dynasty Specials - $884
+Secure Advantage : 884
+Philip Baxter  10-22-2025 7:33 pm
+Christina Ales
+Red Media - $1,216
+Anna Gleason  10-22-2025 6:52 pm
+Martin Hayes
+Red Media - $134
+Sebastian Beltran  10-22-2025 5:55 pm
+Anthony Hardy
+Red Media - $116
+ACA/Suppy/wrap: 116
+Eli Thermilus  10-22-2025 11:51 am
+Sheri Beauchamp
+Lamy Dynasty Specials - $582.18
+Robert Adams  10-21-2025 7:58 pm
+Kelly Dean
+Red Media - $69
+ACA: 69
+F N  10-21-2025 4:24 pm
+Gordon Albert
+Referral - $1
+UHC: 1
+A S  10-21-2025 11:41 am
+Mildred Ocariz
+Referral - $356
+PA/PC : 360.59
+Elizabeth Snyder  10-20-2025 6:53 pm
+Stephany Henry
+VS Default - $25
+Sebastian Beltran  10-20-2025 6:26 pm
+Daniel Amann
+Red Media - $61
+Sebastian Beltran  10-20-2025 5:45 pm
+Chris Sanders
+Red Media - $58
+ACA/Suppy/wrap: 58
+A S  10-20-2025 10:34 am
+Hermogenes Reyes
+VS Default - $43
+Dental/Vision: 43
+A S  10-19-2025 5:01 pm
+Amy Shattuck
+Exclusive JUMBO - $532
+PA/PC : 532
+F N  10-19-2025 1:24 pm
+Danielle
+Red Media - $250
+Philip Baxter  10-19-2025 3:25 am
+Katie Burns
+Red Media - $109
+ACA: 30
+ACA/Suppy/wrap: 82
+Philip Baxter  10-19-2025 3:07 am
+Robert Williams
+Red Media - $253
+Philip Baxter  10-19-2025 2:45 am
+Jody Christiansen
+Red Media - $512
+Robert Adams  10-18-2025 10:22 am
+Sandyanamirey Dumitru
+Red Media - $56
+Dental/Vision : 56.22
+Elizabeth Snyder  10-17-2025 4:34 pm
+Ben Welker
+Referral - $245
+PA/PC : 246
+Philip Baxter  10-17-2025 2:21 pm
+Jasmine Wilson
+Lamy Dynasty Specials - $477
+PA/PC: 479
+Philip Baxter  10-17-2025 2:20 pm
+Tracy Ferris
+Red Media - $523
+Secure Advantage : 526
+Philip Baxter  10-17-2025 2:19 pm
+Gabriel Onthank
+Red Media - $29
+Anna Gleason  10-17-2025 10:36 am
+Marcel Moore
+VS Default - $119
+Sebastian Beltran  10-16-2025 2:09 pm
+Francie Baedke
+Red Media - $152
+ACA/Suppy/wrap: 155
+A S  10-16-2025 1:04 pm
+Britney Sessoms
+Red Media - $64
+Anna Gleason  10-16-2025 11:31 am
+Tabitha Chrisentery
+Red Media - $57.95
+Stand Alone Supplemental/Association/Other: 57.95
+A S  10-15-2025 9:19 pm
+Estrella Martinez
+$7.50 - $310
+Anna Gleason  10-15-2025 7:11 pm
+Vincent Cicinelli
+Referral - $252
+Secure Advantage : 252
+Eli Thermilus  10-15-2025 6:57 pm
+Natalie Slaughter
+JUMBO Splits - $120
+Sebastian Beltran  10-15-2025 6:35 pm
+Michelle Sessum
+$7.50 - $58
+UHC/Suppy/wrap: 58
+Nathan Johnson  10-15-2025 5:22 pm
+James Lyons
+$7.50 - $7
+Robert Adams  10-15-2025 12:32 pm
+Annetta Atkins
+Red Media - $59
+ACA/Suppy/wrap: 59
+Eli Thermilus  10-15-2025 10:24 am
+Veronica Simmons
+CG Exclusive - $69
+Sebastian Beltran  10-14-2025 6:12 pm
+Jill Hutchinson
+Referral - $441.61
+Robert Adams  10-14-2025 5:32 pm
+Shannon Kelliher
+Red Media - $362
+Marie Saint Cyr  10-14-2025 2:03 pm
+Tadonya Thomas
+VS Default - $43
+Dental/Vision: 43
+F N  10-14-2025 8:53 am
+Matthew Hermsen
+CG Exclusive - $106
+ACA/Suppy: 106
+Eli Thermilus  10-13-2025 7:18 pm
+Courtney Rosencrance
+Exclusive 30s - $600.51
+Robert Adams  10-13-2025 6:44 pm
+Rosanna Kohrs
+Referral - $830
+Supplemental/Association/Other: 2112
+PA/PC : 831
+Philip Baxter  10-13-2025 5:38 pm
+Autumn Roche
+Red Media - $94
+ACA/Suppy/wrap: 94
+Eli Thermilus  10-13-2025 5:01 pm
+Monette Jj
+Red Media - $62
+Stand Alone Supplemental/Association/Other: 62
+A S  10-13-2025 4:12 pm
+Guadalupe Martin Hernandez
+Red Media - $48
+Robert Adams  10-13-2025 4:05 pm
+Lester Bynog
+Red Media - $189
+Stand Alone Supplemental/Association/Other: 159
+Philip Baxter  10-13-2025 11:51 am
+Madison Conquest
+Red Media - $84
+Anna Gleason  10-12-2025 4:20 pm
+Michael Mazzoleni
+Red Media - $268
+Anna Gleason  10-10-2025 1:51 pm
+Monica Jones
+Referral - $7
+ACA/Suppy: 7
+Eli Thermilus  10-09-2025 6:23 pm
+Patti Hodges Shaw
+Referral - $158
+PA/PC : 158
+Red Media - $1
+Philip Baxter  10-09-2025 6:13 pm
+Chinenye Oguejiofor
+Red Media - $130
+ACA/Suppy/wrap: 130
+F N  10-09-2025 1:50 pm
+Zoey Sheeder
+Referral - $53
+ACA/Suppy: 53
+A S  10-09-2025 11:58 am
+Wranslee Wichum
+Referral - $158
+PA/PC : 158
+Philip Baxter  10-09-2025 10:26 am
+Margaretta Yancey
+Red Media - $120
+ACA/Suppy/wrap: 120
+Eli Thermilus  10-08-2025 7:05 pm
+Abigail Robeson
+Red Media - $52
+ACA: 52
+Philip Baxter  10-08-2025 6:07 pm
+Stephanie Reina
+Referral - $94
+Dental/Vision : 94
+Philip Baxter  10-08-2025 1:20 pm
+Charles Holt
+Red Media - $92
+Sebastian Beltran  10-08-2025 10:52 am
+Amanda Switek
+Red Media - $51
+UHC: 0
+UHC/Suppy/wrap: 51
+Philip Baxter  10-08-2025 8:59 am
+Sander Hosteenez
+Red Media - $111
+ACA/Suppy/wrap: 111
+F N  10-07-2025 3:57 pm
+Laura Rojas Rodriguez
+Red Media - $259
+Philip Baxter  10-07-2025 10:46 am
+Abigail Londrigan
+Red Media - $132
+ACA/Suppy/wrap: 132
+F N  10-06-2025 9:13 pm
+Makayla King
+$7.50 - $16
+Sebastian Beltran  10-06-2025 8:43 pm
+Skylar Broz
+Exclusive JUMBO - $192
+PA/PC : 192
+Eli Thermilus  10-06-2025 7:54 pm
+Orlando Castillo
+Red Media - $253
+Robert Adams  10-06-2025 6:42 pm
+Jamise Bradley
+Referral - $40
+ACA/Suppy: 40
+Eli Thermilus  10-06-2025 5:57 pm
+Mitchel Alburo
+Red Media - $318
+Robert Adams  10-06-2025 5:52 pm
+Nicole Emerson
+HotLine Bling - $187
+ACA/Suppy: 187
+F N  10-06-2025 5:01 pm
+Emily Beets
+Referral - $55
+ACA: 55
+Philip Baxter  10-06-2025 4:36 pm
+Camilla Pulka
+Red Media - $20
+Anna Gleason  10-06-2025 2:51 pm
+Lola Hampton
+Red Media - $110
+ACA/Suppy/wrap: 110
+A S  10-06-2025 1:55 pm
+Avery Russell
+Red Media - $85
+ACA/Suppy/wrap: 85
+Eli Thermilus  10-06-2025 1:34 pm
+Joshua Brodsky
+ABC - $251
+PA/PC : 251
+Marie Saint Cyr  10-06-2025 12:47 pm
+Kerri Johnson
+Lamy Dynasty Specials - $252
+Philip Baxter  10-06-2025 11:29 am
+Hollyann Walden
+Red Media - $1
+Robert Adams  10-06-2025 11:14 am
+Clarissa Velez
+Red Media - $84
+Dental/Vision : 84.00
+Robert Adams  10-05-2025 4:32 pm
+Deoveon Gallman
+Red Media - $209
+Anna Gleason  10-05-2025 3:27 pm
+Maria Cantu
+Red Media - $1
+ACA: 1
+F N  10-05-2025 2:03 pm
+Isaiah Anaya
+CG Exclusive - $35
+F N  10-05-2025 1:22 pm
+Bo Bailey
+Red Media - $632
+PA/PC : 632
+Marie Saint Cyr  10-05-2025 12:36 pm
+Amanthia Jeffs
+Red Media - $73
+ACA/Suppy/wrap: 73
+A S  10-03-2025 5:04 pm
+Deneen Portenier
+Red Media - $78
+Robert Adams  10-02-2025 6:02 pm
+Isabella Madrid
+Red Media - $475
+ACA/Suppy/wrap: 475/115
+Marie Saint Cyr  10-02-2025 8:56 am
+Kailey Secrest
+Red Media - $52
+Anna Gleason  10-01-2025 8:02 pm
+Caleb Gardner
+Red Media - $60
+Anna Gleason  10-01-2025 8:01 pm
+Lina Waterstradt
+Red Media - $247
+PA/PC : 247
+Eli Thermilus  10-01-2025 7:54 pm
+Wendy Bradley
+Red Media - $154
+ACA/Suppy/wrap: 154
+Eli Thermilus  10-01-2025 6:16 pm
+Karthik Surapaneni
+Referral - $230
+PA/PC : 230
+Eli Thermilus  10-01-2025 6:14 pm
+Hope McIntosh
+Red Media - $56
+Robert Adams  10-01-2025 5:47 pm
+Theresa Croker
+RKA Website - $1,445
+Robert Adams  10-01-2025 1:23 pm
+Ryan Manning
+Red Media - $389
+PA/PC : 389
+Marie Saint Cyr  10-01-2025 12:05 pm
+Brianna Barnes
+Red Media - $359
+PA/PC : 359
+Eli Thermilus  10-01-2025 11:32 am
+Tara Roth
+Red Media - $193
+Sebastian Beltran  10-01-2025 9:49 am
+Priscilla Villasenor
+Red Media - $89
+ACA/Suppy/wrap: 89
+A S  09-30-2025 7:31 pm
+Elizabeth Grant
+Red Media - $221
+PA/PC : 221
+Eli Thermilus  09-30-2025 6:15 pm
+Gregory Rudisill
+Blast/Bulk - $142.21
+UHC/Suppy: 142.21
+UHC: 142.21
+Robert Adams  09-30-2025 4:10 pm
+Joseph Brooks
+Red Media - $598
+Anna Gleason  09-30-2025 9:17 am
+Christian Ponce
+CG Exclusive - $209
+PA/PC : 209
+Eli Thermilus  09-29-2025 8:33 pm
+Garrett Caldwell
+Lamy Dynasty Specials - $406
+PA/PC: 406
+Marie Saint Cyr  09-29-2025 5:38 pm
+Samuel Cody Lammons Lammons
+Red Media - $213
+Robert Adams  09-29-2025 3:57 pm
+Kristin Kingston
+Red Media - $52
+Robert Adams  09-29-2025 3:53 pm
+Sharon Lawrence
+Red Media - $582
+PA/PC : 582
+Eli Thermilus  09-29-2025 3:28 pm
+Valarie Lincoln
+Red Media - $568
+Anna Gleason  09-29-2025 11:51 am
+Kyle Brady
+Red Media - $64
+Anna Gleason  09-29-2025 10:10 am
+Daniel Ingman
+Red Media - $73
+Robert Adams  09-29-2025 9:33 am
+Zanivia Dixon
+Red Media - $180
+Anna Gleason  09-29-2025 11:51 am
+Guillermo Trejo
+Red Media - $64
+Sebastian Beltran  09-28-2025 2:11 pm
+David Cwynar
+Red Media - $854
+PA/PC : 854
+F N  09-27-2025 10:40 am
+Antwon Smith
+ABC - $1
+UHC/Suppy: 1
+F N  09-26-2025 11:36 am
+Diana Henning
+ABC - $75
+Dental/Vision : 75
+F N  09-26-2025 10:06 am
+Meggen Lang
+Red Media - $648
+PA/PC : 648
+Marie Saint Cyr  09-26-2025 9:22 am
+Aaron Harris
+Red Media - $651
+Health Access/Secure Access: 651
+Nathan Johnson  09-25-2025 8:34 pm
+Alison Warren
+Red Media - $431
+Secure Advantage : 431
+Eli Thermilus  09-25-2025 8:31 pm
+Bradley Battle
+$7.50 - $320
+Sebastian Beltran  09-25-2025 6:03 pm
+Lohana Lacenapadron
+CG Exclusive - $1
+ACA: 1
+Marie Saint Cyr  09-25-2025 9:14 am
+Neil Valmores
+Referral - $330
+ACA/Suppy: 330
+F N  09-24-2025 7:23 pm
+Jordanne Torres
+Red Media - $316
+Robert Adams  09-24-2025 7:19 pm
+Tanja Hinote
+Red Media - $437
+Sebastian Beltran  09-24-2025 7:10 pm
+Tericia Thomas
+Red Media - $59
+Anna Gleason  09-24-2025 6:37 pm
+Kirra McMenomy
+Red Media - $50
+ACA/Suppy/wrap: 50
+Eli Thermilus  09-24-2025 5:53 pm
+Alexa Peoples
+Red Media - $566
+PA/PC : 566
+Eli Thermilus  09-24-2025 5:50 pm
+Ashley Chapman
+Red Media - $284
+Marie Saint Cyr  09-24-2025 5:40 pm
+Pamela Layne
+Lamy Dynasty Specials - $38
+Dental/Vision: 38
+Eli Thermilus  09-24-2025 5:29 pm
+Rico Williams
+Red Media - $348
+Red Media - $348
+Sebastian Beltran  09-24-2025 4:54 pm
+Serenity Johnson
+RKA Website - $336
+Health Access/Secure Access: 336
+F N  09-24-2025 10:43 am
+Jill Chenevert
+ABC - $548
+PA/PC : 548
+F N  09-24-2025 10:42 am
+Mia Knight
+Red Media - $52
+Anna Gleason  09-24-2025 10:01 am
+Madison Ford
+Red Media - $361
+PA/PC : 361
+Nathan Johnson  09-23-2025 8:18 pm
+Scott Wozniczka
+Red Media - $138
+PA/PC : 138
+Eli Thermilus  09-23-2025 8:11 pm
+Cheyanne Dillard Colbert
+Red Media - $68
+Anna Gleason  09-23-2025 7:53 pm
+Hannah Skendziel
+Red Media - $552
+PA/PC : 552
+Nathan Johnson  09-23-2025 6:00 pm
+Mik Asay
+Red Media - $386
+PA/PC : 386
+A S  09-23-2025 10:32 am
+Tiara Gilead
+Red Media - $292
+PA/PC : 292
+Nathan Johnson  09-22-2025 9:57 pm
+Tonya Weston
+ABC - $138
+UHC/Suppy: 140
+F N  09-22-2025 7:37 pm
+Abraham Mendez
+Red Media - $986
+PA/PC : 986
+Marie Saint Cyr  09-22-2025 1:23 pm
+Kathryn Ross
+ABC - $1,094
+Secure Advantage : 1094
+A S  09-22-2025 11:47 am
+Fredrick Ward
+Lamy Dynasty Specials - $446
+Health Access/Secure Access: 448
+Philip Baxter  09-22-2025 11:42 am
+Melisande Perrott
+Red Media - $79
+ACA: 19
+ACA/Suppy/wrap: 79
+Nathan Johnson  09-21-2025 12:00 pm
+Yosef Attiayh
+VS Default - $198
+Robert Adams  09-20-2025 10:19 am
+Laura Risola
+Lamy Dynasty Specials - $565
+Robert Adams  09-19-2025 7:44 pm
+Tara Filius
+Red Media - $806
+Robert Adams  09-19-2025 7:00 pm
+Packer Gorner
+Red Media - $141
+Philip Baxter  09-19-2025 5:53 pm
+Olivia Gorman
+Red Media - $253
+Philip Baxter  09-19-2025 3:20 pm
+Tyler Kok
+Red Media - $856
+PA/PC : 856
+Nathan Johnson  09-19-2025 12:08 pm
+Rex Bowden
+CG Exclusive - $834.69
+Robert Adams  09-18-2025 9:02 pm
+Ethan Hazelwood
+Red Media - $1
+Anna Gleason  09-18-2025 5:20 pm
+Jessica Harrell
+Red Media - $45.67
+UHC/Suppy/wrap: $45.67
+Robert Adams  09-18-2025 1:55 pm
+Angel Givens
+Red Media - $300
+Philip Baxter  09-18-2025 1:38 am
+Ricardo Glynn
+VS Default - $505
+Sebastian Beltran  09-17-2025 8:01 pm
+Carly Gulsby
+Lamy Dynasty Specials - $618
+ACA/Suppy: 618
+Eli Thermilus  09-17-2025 6:15 pm
+Terah Graham
+Red Media - $303
+Philip Baxter  09-17-2025 3:57 pm
+Kathy Haye
+Red Media - $301
+Philip Baxter  09-17-2025 3:07 pm
+William Nelson
+Red Media - $348
+PA/PC : 348
+Marie Saint Cyr  09-16-2025 8:35 pm
+Jesus Romero
+Red Media - $1
+ACA: 0
+Marie Saint Cyr  09-16-2025 8:28 pm
+Pravaliika Vella
+Red Media - $1
+ACA: 1
+Eli Thermilus  09-16-2025 6:16 pm
+Ariana Stevens
+Red Media - $55
+Dental/Vision : 55
+Robert Adams  09-16-2025 5:49 pm
+Zachary Redinger
+Red Media - $223
+Secure Advantage : 223
+A S  09-16-2025 4:30 pm
+Karen House
+RKA Website - $599
+Robert Adams  09-16-2025 10:06 am
+Hyungwoo Noh
+Red Media - $190
+ACA/Suppy/wrap: 190
+Eli Thermilus  09-16-2025 10:05 am
+Beatrice Mboga
+Red Media - $1
+ACA/Suppy/wrap: 150
+Sebastian Beltran  09-15-2025 8:18 pm
+Jawun Savage
+VS Default - $149
+Robert Adams  09-15-2025 8:14 pm
+Michael Odenwald
+ABC - $884
+PA/PC : 884
+Marie Saint Cyr  09-15-2025 6:45 pm
+Edna Meffert
+Red Media - $97
+ACA/Suppy/wrap: 97
+Robert Adams  09-15-2025 1:11 pm
+Traci Wulf
+Redrip/Give up Purchased - $70
+ACA/Suppy: 72
+F N  09-15-2025 10:57 am
+Una Coleman
+Red Media - $45
+ACA/Suppy/wrap: 45
+Eli Thermilus  09-15-2025 9:50 am
+Mandie Smaus
+CG Exclusive - $351
+Health Access/Secure Access: 351
+F N  09-13-2025 12:25 pm
+`;
 
   function parseBackfill(text) {
     const out = [];
@@ -448,7 +1082,7 @@
       const v = vendorRe.exec(ln);
       if (v) {
         const vendor = v[1].trim();
-        if (!VENDOR_SET.has(vendor)) { continue; }
+        if (!VENDOR_SET.has(vendor)) { continue; } // ignore non-vendor product lines
         const amount = +v[2].replace(/,/g,'');
         pending = { soldProductName: vendor, amount, date: '', agent: '' };
         out.push(pending);
@@ -461,6 +1095,7 @@
         pending = null;
       }
     }
+    // normalize date field name for summarizeVendors
     return out.map(o => ({ ...o, dateSold: o.date }));
   }
 
@@ -485,9 +1120,11 @@
 
     if (Array.isArray(MANUAL_WEEKLY_OVERRIDES) && MANUAL_WEEKLY_OVERRIDES.length) {
       const overrideKeys = new Set(MANUAL_WEEKLY_OVERRIDES.map(o => norm(canonicalName(o.name))));
+      // Remove any existing rows for same agent
       soldSafe.perAgent = soldSafe.perAgent.filter(
         a => !overrideKeys.has(norm(canonicalName(a.name)))
       );
+      // Add manual overrides (already 12x)
       for (const o of MANUAL_WEEKLY_OVERRIDES) {
         soldSafe.perAgent.push({
           name: o.name,
@@ -504,7 +1141,7 @@
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
     const vendorRows = summarizeVendors(mergedAllSales);
 
-    // FIX 1 (part A): seed seen IDs on first load WITHOUT popping
+    // Seed seen IDs on first load WITHOUT popping
     if (Array.isArray(liveAllSales)) {
       const cutoff = Date.now() - 45*24*3600*1000;
       for (const s of liveAllSales) {
@@ -543,10 +1180,9 @@
     setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // --------- Live sale polling (FIX 1 — part B):
-  // re-fetch team_sold, pop splash for NEW sales only, and refresh cards
+  // --------- Live sale polling: fetch, pop NEW sales, refresh cards
   function startLiveSalePolling(initialData) {
-    const POLL_MS = 12_000; // tight, low overhead
+    const POLL_MS = 12_000;
     const cutoffWindow = 45 * 24 * 3600 * 1000;
 
     const tick = async () => {
@@ -572,7 +1208,6 @@
         }
       }
 
-      // keep cards in sync (uses totals from API; structure unchanged)
       if (newSalesFound) {
         renderCards({ calls: initialData.calls, sold });
       }
@@ -588,7 +1223,7 @@
       renderCards(data);
       startRuleRotation(data.rules);
       startBoardRotation(data);
-      startLiveSalePolling(data); // FIX 1: enable ongoing pops for new sales
+      startLiveSalePolling(data);
     } catch (err) {
       console.error(err);
       setBanner('THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT', 'Error loading data.');
