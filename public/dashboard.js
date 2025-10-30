@@ -280,32 +280,75 @@
     `;
   }
 
-  function renderWeeklyActivity({ calls, sold, resolvePhoto }) {
-    setView('Weekly Activity');
-    const callMap = new Map();
-    for (const a of (calls?.perAgent || [])) {
-      callMap.set(norm(canonicalName(a.name)), +a.calls || 0);
-    }
-    const dealMap = new Map();
-    for (const a of (sold?.perAgent || [])) {
-      dealMap.set(norm(canonicalName(a.name)), +a.sales || 0);
-    }
-    const names = new Set([...callMap.keys(), ...dealMap.keys()]);
-    const rows = [...names].map(k => {
-      const disp = k.replace(/\b\w/g, m => m.toUpperCase());
-      const initials = disp.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-      return { key:k, name:disp, initials, calls:callMap.get(k) || 0, deals:dealMap.get(k) || 0 };
-    }).sort((a,b)=> (b.calls + b.deals) - (a.calls + a.deals));
+// --- WEEKLY ACTIVITY (calls_week_override.json)
+async function renderWeeklyActivity() {
+  const headEl = document.querySelector('#thead');
+  const bodyEl = document.querySelector('#tbody');
+  const viewLabelEl = document.querySelector('#viewLabel');
 
-    if (headEl) headEl.innerHTML = `<tr><th>Agent</th><th class="right">Calls</th><th class="right">Deals</th></tr>`;
-    if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
-      name:r.name,
-      right1:(r.calls || 0).toLocaleString(),
-      right2:(r.deals || 0).toLocaleString(),
-      photoUrl: resolvePhoto({ name: r.name }),
-      initial: r.initials
-    })).join('');
+  if (viewLabelEl) viewLabelEl.textContent = 'Weekly Activity';
+
+  // pull override
+  const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
+  const json = res && res.ok ? await res.json() : null;
+  if (!json || typeof json !== 'object') {
+    if (headEl) headEl.innerHTML = '';
+    if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No call data.</td></tr>`;
+    return;
   }
+
+  // build rows
+  const rows = [];
+  for (const [email, stats] of Object.entries(json)) {
+    const nameFromEmail = email.split('@')[0].replace(/\./g, ' ');
+    const name = (stats.name || nameFromEmail).replace(/\b\w/g, c => c.toUpperCase());
+    const leads = Number(stats.leads || 0);
+    const sold = Number(stats.sold || 0);
+    const calls = Number(stats.calls || 0);
+    const talkMin = Number(stats.talkMin || 0);
+    const loggedMin = Number(stats.loggedMin || 0);
+    const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
+
+    rows.push({ name, email, leads, sold, conv, calls, talkMin, loggedMin });
+  }
+
+  // sort: sold desc → leads desc
+  rows.sort((a, b) => b.sold - a.sold || b.leads - a.leads);
+
+  if (headEl) {
+    headEl.innerHTML = `
+      <tr>
+        <th>Agent</th>
+        <th class="right">Leads</th>
+        <th class="right">Sold</th>
+        <th class="right">Conv%</th>
+        <th class="right">Calls</th>
+        <th class="right">Talk&nbsp;min</th>
+        <th class="right">Log&nbsp;min</th>
+      </tr>
+    `;
+  }
+
+  if (bodyEl) {
+    bodyEl.innerHTML = rows.map(r => {
+      const initials = r.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+      return `
+        <tr>
+          <td style="display:flex;align-items:center;">
+            <div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;font-size:12px;font-weight:700;color:#89a2c6;">${initials}</div>
+            ${r.name}
+          </td>
+          <td class="right">${r.leads.toLocaleString()}</td>
+          <td class="right">${r.sold.toLocaleString()}</td>
+          <td class="right">${r.conv}%</td>
+          <td class="right">${r.calls.toLocaleString()}</td>
+          <td class="right">${r.talkMin.toLocaleString()}</td>
+          <td class="right">${r.loggedMin.toLocaleString()}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+}
 
   function renderVendorsBoard({ vendorRows }) {
     const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
