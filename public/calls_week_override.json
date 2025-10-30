@@ -1,17 +1,17 @@
 {
   "robert@rkainsuranceadvisors.com": {
-    "calls": 466,
-    "talkMin": 137,
-    "loggedMin": 763,
-    "leads": 48,
-    "sold": 3
+    "calls": 601,
+    "talkMin": 145,
+    "loggedMin": 788,
+    "leads": 52,
+    "sold": 4
   },
   "fabricio.a.navarrete@gmail.com": {
     "calls": 1,
-    "talkMin": 29,
+    "talkMin": 33,
     "loggedMin": 418,
-    "leads": 44,
-    "sold": 4
+    "leads": 127,
+    "sold": 6
   },
   "landisagency@gmail.com": {
     "calls": 0,
@@ -22,37 +22,37 @@
   },
   "ajanisenior.healthadvisor@gmail.com": {
     "calls": 168,
-    "talkMin": 49,
-    "loggedMin": 438,
-    "leads": 22,
+    "talkMin": 68,
+    "loggedMin": 549,
+    "leads": 90,
     "sold": 3
   },
   "phil@americanpathinsurance.com": {
-    "calls": 19,
+    "calls": 26,
     "talkMin": 1,
-    "loggedMin": 228,
-    "leads": 33,
+    "loggedMin": 720,
+    "leads": 43,
     "sold": 1
   },
   "anna.ushealthadvisors@gmail.com": {
-    "calls": 475,
-    "talkMin": 55,
-    "loggedMin": 943,
-    "leads": 22,
+    "calls":575,
+    "talkMin": 70,
+    "loggedMin": 1077,
+    "leads": 79,
     "sold": 0
   },
   "eli.thermilushealthadvisor@gmail.com": {
     "calls": 1,
     "talkMin": 0,
-    "loggedMin": 501,
-    "leads": 40,
-    "sold": 3
+    "loggedMin": 755,
+    "leads": 48,
+    "sold": 4
   },
   "maries.healthadvisor@gmail.com": {
-    "calls": 235,
-    "talkMin": 67,
-    "loggedMin": 551,
-    "leads": 31,
+    "calls": 292,
+    "talkMin": 85,
+    "loggedMin": 738,
+    "leads":140,
     "sold": 5
   },
   "fraitlzineg.healthadvisor@gmail.com": {
@@ -63,24 +63,24 @@
     "sold": 0
   },
   "nathanjohnson.healthadvisor@gmail.com": {
-    "calls": 24,
-    "talkMin": 67,
+    "calls": 1004,
+    "talkMin": 7,
     "loggedMin": 843,
     "leads": 713,
     "sold": 3
   },
   "sebastianbeltran.healthadvisor@gmail.com": {
     "calls": 436,
-    "talkMin": 105,
-    "loggedMin": 691,
-    "leads": 66,
+    "talkMin": 124,
+    "loggedMin": 960,
+    "leads": 87,
     "sold": 0
   },
   "elizabethsnyde.healthadvisor@gmail.com": {
-    "calls": 197,
-    "talkMin": 58,
-    "loggedMin": 343,
-    "leads": 22,
+    "calls": 596,
+    "talkMin": 92,
+    "loggedMin": 480,
+    "leads": 27,
     "sold": 1
   }
 }
