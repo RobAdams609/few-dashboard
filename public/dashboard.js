@@ -390,30 +390,33 @@
     if (bodyEl) bodyEl.innerHTML = donutRow + rowsHTML + totals;
   }
 
-  function renderParBoard({ par }) {
-    setView('PAR — Tracking');
-    const pace = +safe(par?.pace_target, 0);
-    const agents = Array.isArray(par?.agents) ? par.agents : [];
-    if (!agents.length) {
-      if (headEl) headEl.innerHTML = '';
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style=\"padding:18px;color:#5c6c82;\">No PAR list provided.</td></tr>`;
-      return;
-    }
-    if (headEl) headEl.innerHTML = `
-      <tr><th>Agent</th><th class="right">Take&nbsp;Rate</th><th class="right">Annual&nbsp;AV</th></tr>
-    `;
-    if (bodyEl) bodyEl.innerHTML = `
-      ${agents.map(a => `
-        <tr>
-          <td>${a.name}</td>
-          <td class="right">${safe(a.take_rate,0)}%</td>
-          <td class="right">${fmtMoney(safe(a.annual_av,0))}</td>
-        </tr>`).join('')}
-      <tr class="total"><td><strong>PACE TO QUALIFY</strong></td><td></td>
-      <td class="right"><strong>${fmtMoney(pace)}</strong></td></tr>
-    `;
+function renderParBoard({ par }) {
+  setView('PAR — Tracking');
+  const pace = +safe(par?.pace_target, 0);
+  const agents = Array.isArray(par?.agents) ? par.agents : [];
+  if (!agents.length) {
+    if (headEl) headEl.innerHTML = '';
+    if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
+    return;
   }
-
+  if (headEl) headEl.innerHTML = `
+    <tr><th>Agent</th><th class="right">Take&nbsp;Rate</th><th class="right">Annual&nbsp;AV</th></tr>
+  `;
+  if (bodyEl) bodyEl.innerHTML = `
+    ${agents.map(a => `
+      <tr>
+        <td>${a.name}</td>
+        <td class="right">${safe(a.take_rate,0)}%</td>
+        <td class="right">${fmtMoney(safe(a.ytd_av,0))}</td>
+      </tr>
+    `).join('')}
+    <tr class="total">
+      <td><strong>PACE TO QUALIFY</strong></td>
+      <td></td>
+      <td class="right"><strong>${fmtMoney(pace)}</strong></td>
+    </tr>
+  `;
+}
   // --------- Rules rotation (every 12h) — no ticker
   function startRuleRotation(rulesJson) {
     const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
