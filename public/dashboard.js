@@ -16,45 +16,6 @@
     par: '/par.json'
   };
 
-// ---- Manual Weekly Overrides (auto-expire by week)
-// Put the ISO week you meant this override for:
-const MANUAL_WEEKLY_OVERRIDES = [
-  {
-    name: 'Bianca Nunez',
-    av12x: 4291.12,
-    sales: 1,
-    weekId: '2025-10-W43' // <-- the week this was for
-  }
-];
-
-// helper: returns e.g. "2025-10-W44"
-function currentWeekId() {
-  const d = new Date();
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  // get ISO week-of-month-ish: 1–5
-  const week = Math.ceil((d.getDate() - d.getDay() + 1) / 7);
-  return `${year}-${month}-W${week}`;
-}
-
-// later when we merge overrides into sold.perAgent:
-function applyWeeklyOverrides(soldSafe) {
-  const thisWeek = currentWeekId();
-  const active = (MANUAL_WEEKLY_OVERRIDES || []).filter(o => !o.weekId || o.weekId === thisWeek);
-  if (!active.length) return;
-
-  const overrideKeys = new Set(active.map(o => norm(canonicalName(o.name))));
-  soldSafe.perAgent = soldSafe.perAgent.filter(
-    a => !overrideKeys.has(norm(canonicalName(a.name)))
-  );
-  for (const o of active) {
-    soldSafe.perAgent.push({
-      name: o.name,
-      av12x: +o.av12x || 0,
-      sales: +o.sales || 0
-    });
-  }
-}
 
   // --------- Tiny utils
   const $  = (sel, root = document) => root.querySelector(sel);
