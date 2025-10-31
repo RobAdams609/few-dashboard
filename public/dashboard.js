@@ -275,7 +275,26 @@
       <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td></tr>
     `;
   }
-
+// look up display name from roster by email
+let WEEKLY_ROSTER_CACHE = null;
+async function getRosterByEmail() {
+  if (WEEKLY_ROSTER_CACHE) return WEEKLY_ROSTER_CACHE;
+  try {
+    const r = await fetch('/headshots/roster.json', { cache: 'no-store' });
+    if (r.ok) {
+      const arr = await r.json();
+      const map = new Map();
+      for (const p of arr || []) {
+        const em = (p.email || '').trim().toLowerCase();
+        if (em) map.set(em, p.name);
+      }
+      WEEKLY_ROSTER_CACHE = map;
+      return map;
+    }
+  } catch (e) {}
+  WEEKLY_ROSTER_CACHE = new Map();
+  return WEEKLY_ROSTER_CACHE;
+}
 // --- WEEKLY ACTIVITY (calls_week_override.json)
 async function renderWeeklyActivity() {
   const headEl = document.querySelector('#thead');
@@ -293,20 +312,23 @@ async function renderWeeklyActivity() {
     return;
   }
 
-  // build rows
-  const rows = [];
-  for (const [email, stats] of Object.entries(json)) {
-    const nameFromEmail = email.split('@')[0].replace(/\./g, ' ');
-    const name = (stats.name || nameFromEmail).replace(/\b\w/g, c => c.toUpperCase());
-    const leads = Number(stats.leads || 0);
-    const sold = Number(stats.sold || 0);
-    const calls = Number(stats.calls || 0);
-    const talkMin = Number(stats.talkMin || 0);
-    const loggedMin = Number(stats.loggedMin || 0);
-    const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
+// build rows
+const rows = [];
+const rosterMap = await getRosterByEmail();
+for (const [email, stats] of Object.entries(json)) {
+  const em = (email || '').toLowerCase();
+  const rosterName = rosterMap.get(em);
+  const nameFromEmail = (email || '').split('@')[0].replace(/\./g, ' ');
+  const name = (rosterName || stats.name || nameFromEmail).replace(/\b\w/g, c => c.toUpperCase());
+  const leads = Number(stats.leads || 0);
+  const sold = Number(stats.sold || 0);
+  const calls = Number(stats.calls || 0);
+  const talkMin = Number(stats.talkMin || 0);
+  const loggedMin = Number(stats.loggedMin || 0);
+  const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
 
-    rows.push({ name, email, leads, sold, conv, calls, talkMin, loggedMin });
-  }
+  rows.push({ name, email, leads, sold, conv, calls, talkMin, loggedMin });
+}
 
   // sort: sold desc → leads desc
   rows.sort((a, b) => b.sold - a.sold || b.leads - a.leads);
