@@ -349,8 +349,84 @@ async function renderWeeklyActivity() {
     }).join('');
   }
 }
+// --- AGENT OF THE WEEK (uses av_week_override.json + ytd_av.json)
+async function renderAgentOfWeek() {
+  const headEl = document.querySelector('#thead');
+  const bodyEl = document.querySelector('#tbody');
+  const viewLabelEl = document.querySelector('#viewLabel');
+  if (viewLabelEl) viewLabelEl.textContent = 'Agent of the Week';
 
-  function renderVendorsBoard({ vendorRows }) {
+  // weekly AV
+  const weekRes = await fetch('/av_week_override.json', { cache: 'no-store' }).catch(() => null);
+  const weekJson = weekRes && weekRes.ok ? await weekRes.json() : null;
+
+  if (!Array.isArray(weekJson) || !weekJson.length) {
+    if (headEl) headEl.innerHTML = '';
+    if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
+    return;
+  }
+
+  // find top
+  let top = null;
+  for (const row of weekJson) {
+    const name = row.name || row.agent || '';
+    const av = Number(row.av12x || row.av || 0);
+    if (!top || av > top.av) {
+      top = { name, av };
+    }
+  }
+
+  // YTD lookup
+  let ytdVal = 0;
+  const ytdRes = await fetch('/ytd_av.json', { cache: 'no-store' }).catch(() => null);
+  const ytdJson = ytdRes && ytdRes.ok ? await ytdRes.json() : null;
+  if (Array.isArray(ytdJson)) {
+    const hit = ytdJson.find(x => (x.name || '').toLowerCase() === top.name.toLowerCase());
+    if (hit) ytdVal = Number(hit.av || 0);
+  }
+
+  // headshot (from your roster)
+  let photo = null;
+  try {
+    const rosterRes = await fetch('/headshots/roster.json', { cache: 'no-store' });
+    if (rosterRes.ok) {
+      const roster = await rosterRes.json();
+      const m = Array.isArray(roster)
+        ? roster.find(p => (p.name || '').toLowerCase() === top.name.toLowerCase())
+        : null;
+      if (m && m.photo) {
+        const s = String(m.photo);
+        photo = s.startsWith('http') || s.startsWith('/') ? s : `/headshots/${s}`;
+      }
+    }
+  } catch (_) {
+    /* ignore */
+  }
+
+  if (headEl) headEl.innerHTML = `<tr><th colspan="3">AGENT OF THE WEEK</th></tr>`;
+  if (bodyEl) {
+    const initials = top.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+    bodyEl.innerHTML = `
+      <tr>
+        <td colspan="3" style="padding:26px 18px;">
+          <div style="display:flex;align-items:center;gap:18px;">
+            ${
+              photo
+                ? `<img src="${photo}" style="width:78px;height:78px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
+                : `<div style="width:78px;height:78px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
+            }
+            <div>
+              <div style="font-size:20px;font-weight:700;">${top.name}</div>
+              <div style="opacity:.8;margin-top:4px;">Weekly AV Submitted • $${Math.round(top.av).toLocaleString()}</div>
+              <div style="opacity:.5;margin-top:2px;">YTD AV • $${Math.round(ytdVal).toLocaleString()}</div>
+              <div style="margin-top:8px;background:rgba(0,255,128,.12);border:1px solid rgba(0,255,128,.4);border-radius:999px;display:inline-block;padding:3px 14px;font-size:12px;letter-spacing:.04em;">🏅 AGENT OF THE WEEK</div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+}  function renderVendorsBoard({ vendorRows }) {
     const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
     const rows = data.rows || [];
     const totalDeals = data.totalDeals || 0;
