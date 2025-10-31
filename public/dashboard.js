@@ -56,24 +56,30 @@
     'CG Exclusive'
   ]);
 
-  // --------- Name normalization (fixes F N / Fabricio variants)
-  const NAME_ALIASES = new Map([
-    ['f n','fabricio navarrete cervantes'],
-    ['fab','fabricio navarrete cervantes'],
-    ['fabrico','fabricio navarrete cervantes'],
-    ['fabricio','fabricio navarrete cervantes'],
-    ['fabricio navarrete','fabricio navarrete cervantes'],
-    ['fabricio cervantes','fabricio navarrete cervantes'],
-    ['fabricio navarrete cervantes','fabricio navarrete cervantes'],
-    ['a s','ajani senior'],
-    ['marie saint cyr','marie saint cyr'],
-    ['eli thermilus','eli thermilus'],
-    ['philip baxter','philip baxter'],
-    ['robert adams','robert adams'],
-    ['nathan johnson','nathan johnson'],
-    ['anna gleason','anna'],
-    ['sebastian beltran','sebastian beltran']
-  ]);
+const NAME_ALIASES = new Map([
+  // Fabricio — all roads → "f n"
+  ['fabricio a navarrete', 'f n'],
+  ['fabricio navarrete', 'f n'],
+  ['fabricio navarrete cervantes', 'f n'],
+  ['fabricio cervantes', 'f n'],
+  ['fabricio', 'f n'],
+  ['fab', 'f n'],
+  ['f n', 'f n'],
+
+  // Ajani — all roads → "a s" (because roster has "A S" / "a-s.jpg")
+  ['ajani senior', 'a s'],
+  ['a s', 'a s'],
+
+  // rest exactly as in roster
+  ['marie saint cyr', 'marie saint cyr'],
+  ['eli thermilus', 'eli thermilus'],
+  ['philip baxter', 'philip baxter'],
+  ['robert adams', 'robert adams'],
+  ['nathan johnson', 'nathan johnson'],
+  ['anna gleason', 'anna'],
+  ['sebastian beltran', 'sebastian beltran'],
+  ['michelle landis', 'michelle landis']
+]);
   const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
   // --------- Headshot resolver (with photoURL helper)
