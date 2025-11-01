@@ -70,9 +70,9 @@
     'CG Exclusive'
   ]);
 
-  // --------- Canonical names (this is where we STOP making up Fabricio names)
+// --------- Canonical names (stop inventing Fabricio names)
 const NAME_ALIASES = new Map([
-  // Fabricio → "F N"
+  // Fabricio — map all variants to roster canonical "f n"
   ['fabricio a navarrete', 'f n'],
   ['fabricio navarrete', 'f n'],
   ['fabricio navarrete cervantes', 'f n'],
@@ -81,15 +81,12 @@ const NAME_ALIASES = new Map([
   ['fab', 'f n'],
   ['f n', 'f n'],
 
-  // Ajani → "A S"
+  // Ajani — map to roster canonical "a s"
   ['ajani senior', 'a s'],
+  ['ajani s', 'a s'],
   ['a s', 'a s'],
 
-  // Fraitzline
-  ['fraitzline gustave', 'fraitzline'],
-  ['fraitzline', 'fraitzline'],
-
-  // Rest of team
+  // rest — mirror roster names (lowercased keys)
   ['marie saint cyr', 'marie saint cyr'],
   ['eli thermilus', 'eli thermilus'],
   ['philip baxter', 'philip baxter'],
@@ -99,12 +96,9 @@ const NAME_ALIASES = new Map([
   ['sebastian beltran', 'sebastian beltran'],
   ['michelle landis', 'michelle landis'],
   ['elizabeth snyder', 'elizabeth snyder'],
-  ['marie', 'marie saint cyr'],
+  ['fraitzline healthadvisor', 'fraitzline healthadvisor'] // keep roster key if used
 ]);
-
-const canonicalName = (name) => NAME_ALIASES.get(
-  String(name || '').trim().toLowerCase()
-) || name;
+const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
   // --------- Headshot resolver (with photoURL helper)
   function buildHeadshotResolver(roster) {
