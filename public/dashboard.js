@@ -433,73 +433,121 @@
     }
   }
 
-  // --- AGENT OF THE WEEK (AUTO from API, NOT manual)
-  // Rule you gave: "agent who has the most submitted av for the week" → that’s your current-week perAgent
-  async function renderAgentOfWeekAuto(data) {
-    setView('Agent of the Week');
+// --- AGENT OF THE WEEK (AUTO from API + direct YTD pull)
+async function renderAgentOfWeekAuto(data) {
+  setView('Agent of the Week');
 
-    const sold = data?.sold || {};
-    const perAgent = Array.isArray(sold.perAgent) ? sold.perAgent : [];
-    if (!perAgent.length) {
-      if (headEl) headEl.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
-      return;
+  const sold = data?.sold || {};
+  const perAgent = Array.isArray(sold.perAgent) ? sold.perAgent : [];
+
+  // no weekly data → show empty
+  if (!perAgent.length) {
+    if (document.querySelector('#thead')) {
+      document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
     }
-
-    // pick highest AV this week
-    let top = null;
-    for (const row of perAgent) {
-      const name = canonicalName(row.name || row.agent || '');
-      const av = Number(row.av12x || row.av12X || row.amount || 0);
-      const deals = Number(row.sales || row.deals || 0);
-      if (!top || av > top.av) {
-        top = { name, av, deals };
-      }
+    if (document.querySelector('#tbody')) {
+      document.querySelector('#tbody').innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
     }
-    if (!top) {
-      if (headEl) headEl.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data.</td></tr>`;
-      return;
-    }
+    return;
+  }
 
-    // pull YTD AV for this agent
-    let ytdVal = 0;
-    if (Array.isArray(data.ytdList)) {
-      const hit = data.ytdList.find(x => norm(x.name) === norm(top.name));
-      if (hit) ytdVal = Number(hit.av || 0);
-    }
-
-    // pull photo from resolver
-    const photo = data.resolvePhoto ? data.resolvePhoto({ name: top.name }) : null;
-    const initials = top.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-
-    if (headEl) headEl.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
-    if (bodyEl) {
-      bodyEl.innerHTML = `
-        <tr>
-          <td colspan="4" style="padding:26px 18px;">
-            <div style="display:flex;align-items:center;gap:18px;">
-              ${
-                photo
-                  ? `<img src="${photo}" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
-                  : `<div style="width:92px;height:92px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
-              }
-              <div style="flex:1;">
-                <div style="font-size:22px;font-weight:700;">${top.name}</div>
-                <div style="margin-top:4px;opacity:.85;">Weekly Submitted AV • ${fmtMoney(top.av)}</div>
-                <div style="margin-top:2px;opacity:.55;">Deals this week • ${(top.deals || 0).toLocaleString()}</div>
-                <div style="margin-top:2px;opacity:.55;">YTD AV • ${fmtMoney(ytdVal)}</div>
-                <div style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.4);border-radius:999px;padding:4px 16px;font-size:12px;letter-spacing:.04em;">
-                  <span style="font-size:16px;">🥇</span>
-                  <span>Agent of the Week Belt</span>
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-      `;
+  // 1) pick top weekly by AV
+  let top = null;
+  for (const row of perAgent) {
+    const nameRaw = row.name || row.agent || '';
+    const name = canonicalName(nameRaw);
+    const av = Number(row.av12x || row.av12X || row.amount || 0);
+    const deals = Number(row.sales || row.deals || 0);
+    if (!top || av > top.av) {
+      top = { name, av, deals };
     }
   }
+  if (!top) {
+    if (document.querySelector('#thead')) {
+      document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+    }
+    if (document.querySelector('#tbody')) {
+      document.querySelector('#tbody').innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data.</td></tr>`;
+    }
+    return;
+  }
+
+  // 2) get YTD from three places, in this order:
+  //    a) in-memory (data.ytdList)
+  //    b) live fetch /ytd_av.json (array)
+  //    c) live fetch /ytd_av.json (wrapped object)
+  const wantName = norm(top.name);
+  let ytdVal = 0;
+
+  // a) in-memory
+  if (Array.isArray(data.ytdList)) {
+    const hit = data.ytdList.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
+    if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
+  }
+
+  // b/c) if still 0 → try fetch
+  if (!ytdVal) {
+    try {
+      const r = await fetch('/ytd_av.json', { cache: 'no-store' });
+      if (r.ok) {
+        const json = await r.json();
+
+        // case 1: array
+        if (Array.isArray(json)) {
+          const hit = json.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
+          if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
+        } else if (json && typeof json === 'object') {
+          // case 2: object that has a list/agents field
+          const arr = Array.isArray(json.list)
+            ? json.list
+            : Array.isArray(json.agents)
+              ? json.agents
+              : [];
+          if (arr.length) {
+            const hit = arr.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
+            if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
+          }
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  // 3) photo
+  const photo = data.resolvePhoto ? data.resolvePhoto({ name: top.name }) : null;
+  const initials = top.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+
+  const thead = document.querySelector('#thead');
+  const tbody = document.querySelector('#tbody');
+
+  if (thead) thead.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
+  if (tbody) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" style="padding:26px 18px;">
+          <div style="display:flex;align-items:center;gap:18px;">
+            ${
+              photo
+                ? `<img src="${photo}" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
+                : `<div style="width:92px;height:92px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
+            }
+            <div style="flex:1;">
+              <div style="font-size:22px;font-weight:700;">${top.name}</div>
+              <div style="margin-top:4px;opacity:.85;">Weekly Submitted AV • ${fmtMoney(top.av)}</div>
+              <div style="margin-top:2px;opacity:.55;">Deals this week • ${(top.deals || 0).toLocaleString()}</div>
+              <div style="margin-top:2px;opacity:.55;">YTD AV • ${fmtMoney(ytdVal)}</div>
+              <div style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.4);border-radius:999px;padding:4px 16px;font-size:12px;letter-spacing:.04em;">
+                <span style="font-size:16px;">🥇</span>
+                <span>Agent of the Week Belt</span>
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>
+    `;
+  }
+}
 
   // --- VENDORS BOARD (uses rolling 45d)
   function renderVendorsBoard({ vendorRows }) {
