@@ -71,34 +71,40 @@
   ]);
 
   // --------- Canonical names (this is where we STOP making up Fabricio names)
-  const NAME_ALIASES = new Map([
-    // Fabricio — all roads → "f n"
-    ['fabricio a navarrete', 'f n'],
-    ['fabricio navarrete', 'f n'],
-    ['fabricio navarrete cervantes', 'f n'],
-    ['fabricio cervantes', 'f n'],
-    ['fabricio', 'f n'],
-    ['fab', 'f n'],
-    ['f n', 'f n'],
+const NAME_ALIASES = new Map([
+  // Fabricio → "F N"
+  ['fabricio a navarrete', 'f n'],
+  ['fabricio navarrete', 'f n'],
+  ['fabricio navarrete cervantes', 'f n'],
+  ['fabricio cervantes', 'f n'],
+  ['fabricio', 'f n'],
+  ['fab', 'f n'],
+  ['f n', 'f n'],
 
-    // Ajani — all roads → "a s"
-    ['ajani senior', 'a s'],
-    ['ajani s', 'a s'],
-    ['a s', 'a s'],
+  // Ajani → "A S"
+  ['ajani senior', 'a s'],
+  ['a s', 'a s'],
 
-    // rest exactly as in roster
-    ['marie saint cyr', 'marie saint cyr'],
-    ['eli thermilus', 'eli thermilus'],
-    ['philip baxter', 'philip baxter'],
-    ['robert adams', 'robert adams'],
-    ['nathan johnson', 'nathan johnson'],
-    ['anna gleason', 'anna'],
-    ['sebastian beltran', 'sebastian beltran'],
-    ['michelle landis', 'michelle landis'],
-    ['elizabeth snyder', 'elizabeth snyder'],
-    ['marie', 'marie saint cyr']
-  ]);
-  const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
+  // Fraitzline
+  ['fraitzline gustave', 'fraitzline'],
+  ['fraitzline', 'fraitzline'],
+
+  // Rest of team
+  ['marie saint cyr', 'marie saint cyr'],
+  ['eli thermilus', 'eli thermilus'],
+  ['philip baxter', 'philip baxter'],
+  ['robert adams', 'robert adams'],
+  ['nathan johnson', 'nathan johnson'],
+  ['anna gleason', 'anna'],
+  ['sebastian beltran', 'sebastian beltran'],
+  ['michelle landis', 'michelle landis'],
+  ['elizabeth snyder', 'elizabeth snyder'],
+  ['marie', 'marie saint cyr'],
+]);
+
+const canonicalName = (name) => NAME_ALIASES.get(
+  String(name || '').trim().toLowerCase()
+) || name;
 
   // --------- Headshot resolver (with photoURL helper)
   function buildHeadshotResolver(roster) {
