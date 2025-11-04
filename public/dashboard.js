@@ -100,54 +100,49 @@ const NAME_ALIASES = new Map([
 ]);
 const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
-// --------- Headshot resolver (with photoURL helper)
-function buildHeadshotResolver(roster) {
-  const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
+  // --------- Headshot resolver (with photoURL helper)
+  function buildHeadshotResolver(roster) {
+    const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
 
-  const initialsOf = (full = '') => full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+    const initialsOf = (full = '') => full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
 
-  const photoURL = (p) => {
-    if (!p) return null;
-    const s = String(p);
-    return (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
-  };
+    const photoURL = (p) => {
+      if (!p) return null;
+      const s = String(p);
+      return (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
+    };
 
-  for (const p of roster || []) {
-    const cName = norm(canonicalName(p.name));
-    const email = String(p.email || '').trim().toLowerCase();
-    const photo = photoURL(p.photo);
-    if (cName) byName.set(cName, photo);
-    if (email) byEmail.set(email, photo);
-    if (Array.isArray(p.phones)) {
-      for (const raw of p.phones) {
-        const phone = String(raw || '').replace(/\D+/g,'');
-        if (phone) byPhone.set(phone, photo);
+    for (const p of roster || []) {
+      const cName = norm(canonicalName(p.name));
+      const email = String(p.email || '').trim().toLowerCase();
+      const photo = photoURL(p.photo);
+      if (cName) byName.set(cName, photo);
+      if (email) byEmail.set(email, photo);
+      if (Array.isArray(p.phones)) {
+        for (const raw of p.phones) {
+          const phone = String(raw || '').replace(/\D+/g,'');
+          if (phone) byPhone.set(phone, photo);
+        }
       }
+      const ini = initialsOf(p.name || '');
+      if (ini) byInitial.set(ini, photo);
     }
-    const ini = initialsOf(p.name || '');
-    if (ini) byInitial.set(ini, photo);
+
+    return (agent = {}) => {
+      const cName = norm(canonicalName(agent.name));
+      const email = String(agent.email || '').trim().toLowerCase();
+      const phone = String(agent.phone || '').replace(/\D+/g,'');
+      const ini   = (agent.name ? agent.name : '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+      return (
+        byName.get(cName) ??
+        byEmail.get(email) ??
+        (phone ? byPhone.get(phone) : null) ??
+        byInitial.get(ini) ??
+        null
+      );
+    };
   }
 
-  return (agent = {}) => {
-    const cName = norm(canonicalName(agent.name));
-    const email = String(agent.email || '').trim().toLowerCase();
-    const phone = String(agent.phone || '').replace(/\D+/g,'');
-    const ini   = (agent.name ? agent.name : '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-    return (
-      byName.get(cName) ??
-      byEmail.get(email) ??
-      (phone ? byPhone.get(phone) : null) ??
-      byInitial.get(ini) ??
-      null
-    );
-  };
-}
-
-  // helper so PAR can lock display name/headshot by email
-  const personByEmail = (email) => byEmail.get(String(email || '').toLowerCase()) || null;
-
-  return { resolvePhoto, personByEmail };
-}
   // --------- Layout anchors (match your index.html)
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
