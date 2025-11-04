@@ -100,10 +100,15 @@ const NAME_ALIASES = new Map([
 ]);
 const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
-// ---------- Headshot resolver (email = source of truth)
+// ---------- Headshot resolver (email = source of truth, old API preserved)
 function buildHeadshotResolver(roster) {
-  const byEmail = new Map();
-  const byName  = new Map();
+  const byName    = new Map();
+  const byEmail   = new Map();
+  const byPhone   = new Map();
+  const byInitial = new Map();
+
+  const initialOf = (full = '') =>
+    full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
 
   const photoURL = (p) => {
     if (!p) return null;
@@ -114,20 +119,37 @@ function buildHeadshotResolver(roster) {
   for (const p of (roster || [])) {
     const name  = (p.name || '').trim();
     const email = String(p.email || '').trim().toLowerCase();
-    const photo = photoURL(p.photo);
-    const person = { ...p, name, email, photoURL: photo };
-    if (email) byEmail.set(email, person);
+    const phone = String(p.phone || '').replace(/\D+/g, '');
+    const ini   = initialOf(name);
+    const person = { ...p, name, email, phone, initials: ini, photoURL: photoURL(p.photo) };
+
     if (name)  byName.set(name.toLowerCase(), person);
+    if (email) byEmail.set(email, person);
+    if (phone) byPhone.set(phone, person);
+    if (ini)   byInitial.set(ini, person);
   }
 
-  return {
-    personByEmail: (email) =>
-      byEmail.get(String(email || '').toLowerCase()) || null,
-    photoByName: (name) =>
-      (byName.get(String(name || '').toLowerCase())?.photoURL) || null,
-  };
-}
+  // keep the old call-site happy
+  const resolvePhoto = (agent = {}) => {
+    const name  = String(agent.name || '').trim();
+    const email = String(agent.email || '').trim().toLowerCase();
+    const phone = String(agent.phone || '').replace(/\D+/g, '');
+    const ini   = name ? initialOf(name) : '';
 
+    return (
+      byEmail.get(email)?.photoURL ||
+      byName.get(name.toLowerCase())?.photoURL ||
+      (phone ? byPhone.get(phone)?.photoURL : null) ||
+      (ini ? byInitial.get(ini)?.photoURL : null) ||
+      null
+    );
+  };
+
+  // helper so PAR can lock display name/headshot by email
+  const personByEmail = (email) => byEmail.get(String(email || '').toLowerCase()) || null;
+
+  return { resolvePhoto, personByEmail };
+}
   // --------- Layout anchors (match your index.html)
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
