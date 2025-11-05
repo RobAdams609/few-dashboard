@@ -1,15 +1,15 @@
 {
   "robert@rkainsuranceadvisors.com": {
     "calls": 500,
-    "talkMin": 137,
-    "loggedMin": 659,
+    "talkMin": 260,
+    "loggedMin": 899,
     "leads": 44,
     "sold": 8
   },
   "fabricio.a.navarete@gmail.com": {
     "calls": 1,
     "talkMin": 0,
-    "loggedMin": 422,
+    "loggedMin": 518,
     "leads": 41,
     "sold": 10
   },
@@ -23,35 +23,35 @@
   "ajanisenior.healthadvisor@gmail.com": {
     "calls": 83,
     "talkMin": 30,
-    "loggedMin": 505,
+    "loggedMin": 589,
     "leads": 92,
     "sold": 3
   },
   "phil@americanpathinsurance.com": {
     "calls": 14,
     "talkMin": 5,
-    "loggedMin": 391,
+    "loggedMin": 449,
     "leads": 36,
     "sold": 2
   },
   "anna.ushealthadvisors@gmail.com": {
     "calls": 508,
     "talkMin": 87,
-    "loggedMin": 857,
+    "loggedMin": 1560,
     "leads": 25,
     "sold": 5
   },
   "eli.thermilushealthadvisor@gmail.com": {
     "calls": 0,
     "talkMin": 0,
-    "loggedMin": 342,
+    "loggedMin": 769,
     "leads": 15,
     "sold": 6
   },
   "maries.healthadvisor@gmail.com": {
     "calls": 47,
     "talkMin": 36,
-    "loggedMin": 474,
+    "loggedMin": 640,
     "leads": 38,
     "sold": 11
   },
@@ -65,14 +65,14 @@
   "nathanjohnson.healthadvisor@gmail.com": {
     "calls": 0,
     "talkMin": 0,
-    "loggedMin": 523,
+    "loggedMin": 645,
     "leads": 26,
     "sold": 7
   },
   "sebastianbeltran.healthadvisor@gmail.com": {
     "calls": 475,
     "talkMin": 55,
-    "loggedMin": 520,
+    "loggedMin": 546,
     "leads": 59,
     "sold": 4
   },
