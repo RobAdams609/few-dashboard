@@ -269,7 +269,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     setView('This Week — Roster');
     const per = new Map();
     for (const a of (sold?.perAgent || [])) {
-      const key = norm(canonicalName(a.name));
+    const key = norm(displayNameFrom(a));
       per.set(key, {
         av: +a.av12x || +a.av12X || +a.amount || 0,
         deals: +a.sales || 0
@@ -277,7 +277,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     }
     const rows = [];
     for (const p of roster || []) {
-      const key = norm(canonicalName(p.name));
+     const key = norm(((p.email || '').toLowerCase() === 'fabricio.a.navarrete@gmail.com') ? 'F N' : (p.name || ''));
       const d = per.get(key) || { av:0, deals:0 };
       const photo = resolvePhoto({ name: p.name, email: p.email });
       const initials = (p.name || '').trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
