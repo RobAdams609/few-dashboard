@@ -670,11 +670,9 @@ async function renderAgentOfWeekAuto(data) {
       setInterval(() => { i++; apply(); }, 12*60*60*1000);
     }
   }
-
   // ---------- BACKFILL (your 45d block, as given)
-  // I am keeping it EXACTLY like you dumped it in the chat — long, ugly, but yours.
+  // Keep your raw 45-day text here exactly as you pasted it.
   const BACKFILL_TEXT = `
-${/* your entire 45-day dump from your message goes here, unchanged. keep it in the file. */''}
 Jake Willis
 Lamy Dynasty Specials - $1
 ACA: 1
@@ -686,14 +684,16 @@ F N	10-30-2025 3:53 pm
 ... (KEEP THE REST OF YOUR 45-DAY BACKFILL TEXT HERE EXACTLY AS YOU PASTED IT) ...
 `;
 
-  // If you really want literally all 182 lines in here, keep them in the file.
-  // The parser below will ignore stuff that isn’t a vendor or a “agent datetime” line.
-
   function parseBackfill(text) {
     const out = [];
-    const lines = String(text).split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const lines = String(text)
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(Boolean);
 
+    // "Vendor - $123" (vendor must be in VENDOR_SET)
     const vendorRe = /^([A-Za-z0-9 $!\/&:+.'-]+?)\s*-\s*\$([\d,]+(?:\.\d+)?)$/;
+    // "Agent Name 10-30-2025 6:57 pm"
     const agentRe  = /^([A-Za-z .'-]+?)\s+(\d{2}-\d{2}-\d{4}\s+\d{1,2}:\d{2}\s*(?:am|pm))$/i;
 
     let pending = null;
@@ -702,14 +702,19 @@ F N	10-30-2025 3:53 pm
       const v = vendorRe.exec(ln);
       if (v) {
         const vendor = v[1].trim();
-        if (!VENDOR_SET.has(vendor)) {
-          continue;
-        }
-        const amount = +v[2].replace(/,/g,'');
-        pending = { soldProductName: vendor, amount, date: '', agent: '' };
+        if (!VENDOR_SET.has(vendor)) continue; // ignore junk / non-canonical vendors
+
+        const amount = Number(v[2].replace(/,/g, '')) || 0;
+        pending = {
+          soldProductName: vendor,
+          amount,
+          date: '',
+          agent: ''
+        };
         out.push(pending);
         continue;
       }
+
       const a = agentRe.exec(ln);
       if (a && pending) {
         pending.agent = a[1].trim();
@@ -717,97 +722,189 @@ F N	10-30-2025 3:53 pm
         pending = null;
       }
     }
-    return out.map(o => ({ ...o, dateSold: o.date }));
+
+    return out.map(o => ({
+      ...o,
+      dateSold: o.date
+    }));
   }
 
   const BACKFILL_SALES = parseBackfill(BACKFILL_TEXT);
 
-  // ---------- Data load ----------
+  // ---------- Load & normalize everything
   async function loadAll() {
-    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
+    const [
+      rules,
+      roster,
+      calls,
+      sold,
+      ytdList,
+      ytdTotalJson,
+      par,
+    ] = await Promise.all([
       fetchJSON(ENDPOINTS.rules),
       fetchJSON(ENDPOINTS.roster),
       fetchJSON(ENDPOINTS.callsByAgent),
       fetchJSON(ENDPOINTS.teamSold),
       fetchJSON(ENDPOINTS.ytdAv),
       fetchJSON(ENDPOINTS.ytdTotal),
-      fetchJSON(ENDPOINTS.par)
+      fetchJSON(ENDPOINTS.par),
     ]);
 
-    const soldSafe = sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] };
+    const rulesSafe = rules || { rules: [] };
+    const rosterSafe = Array.isArray(roster) ? roster : [];
+    const callsSafe = calls || { team: { calls: 0 }, perAgent: [] };
+
+    const soldSafe = sold || {
+      team: { totalSales: 0, totalAV12X: 0 },
+      perAgent: [],
+      allSales: [],
+    };
     if (!Array.isArray(soldSafe.perAgent)) soldSafe.perAgent = [];
+    if (!Array.isArray(soldSafe.allSales)) soldSafe.allSales = [];
 
-    const resolvePhoto = buildHeadshotResolver(roster || []);
+    const ytdListSafe = Array.isArray(ytdList) ? ytdList : [];
+    const ytdTotalSafe = (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0;
+    const parSafe = par || { pace_target: 0, agents: [] };
 
-    // merge live + backfill → then roll to 45d
-    const liveAllSales = Array.isArray(sold?.allSales) ? sold.allSales : [];
+    const resolvePhoto = buildHeadshotResolver(rosterSafe);
+
+    // Live + backfill merged, then trimmed to rolling 45d for vendor view
+    const liveAllSales = Array.isArray(soldSafe.allSales)
+      ? soldSafe.allSales
+      : [];
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
 
-    // ROLLING 45d FILTER HERE
     const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
     const rolledAllSales = mergedAllSales.filter(s => {
       const t = Date.parse(s.dateSold || s.date || '');
       return Number.isFinite(t) && t >= cutoff;
     });
 
+    // Build vendor summary strictly from 45d window
     const vendorRows = summarizeVendors(rolledAllSales);
 
-    // seed seen IDs from rolled data
+    // Seed seen IDs from what we already know about (for live ticker)
     for (const s of rolledAllSales) {
       seenLeadIds.add(saleId(s));
     }
 
     return {
-      rules: rules || { rules: [] },
-      roster: roster || [],
-      calls: calls || { team: { calls: 0 }, perAgent: [] },
+      rules: rulesSafe,
+      roster: rosterSafe,
+      calls: callsSafe,
       sold: {
         ...soldSafe,
-        allSales: rolledAllSales   // important: board reads from this
+        allSales: rolledAllSales, // all boards use this normalized list
       },
       vendorRows,
-      ytdList: ytdList || [],
-      ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
-      par: par || { pace_target: 0, agents: [] },
-      resolvePhoto
+      ytdList: ytdListSafe,
+      ytdTotal: ytdTotalSafe,
+      par: parSafe,
+      resolvePhoto,
     };
   }
 
-  // --------- Board rotation (30s each) — NOW includes Agent of the Week
+  // ---------- Lead Vendors board (45d rolling only)
+  function renderVendorsBoard(input) {
+    // Accept either data object (with vendorRows) or plain rows
+    let rows = [];
+    if (Array.isArray(input)) {
+      rows = input;
+    } else if (Array.isArray(input.vendorRows)) {
+      rows = input.vendorRows;
+    } else if (Array.isArray(input.rows)) {
+      rows = input.rows;
+    }
+
+    const totalDeals = rows.reduce((sum, r) => sum + (r.deals || 0), 0);
+
+    setView('Lead Vendors — Last 45 Days');
+
+    if (!rows.length) {
+      if (headEL) headEL.innerHTML = '';
+      if (bodyEL) {
+        bodyEL.innerHTML =
+          '<tr><td style="padding:18px;color:#5c6c82;">No vendor sales in last 45 days.</td></tr>';
+      }
+      return;
+    }
+
+    if (headEL) {
+      headEL.innerHTML = `
+        <tr>
+          <th>Vendor</th>
+          <th class="right">Deals</th>
+          <th class="right">% of total</th>
+        </tr>
+      `;
+    }
+
+    const pct = (n) =>
+      totalDeals ? ((n / totalDeals) * 100).toFixed(1) + '%' : '0%';
+
+    if (bodyEL) {
+      bodyEL.innerHTML = rows
+        .map(
+          (r) => `
+        <tr>
+          <td>${r.vendor}</td>
+          <td class="right">${r.deals || 0}</td>
+          <td class="right">${pct(r.deals || 0)}</td>
+        </tr>
+      `
+        )
+        .join('');
+    }
+  }
+
+  // ---------- Board rotation (30s each)
   function startBoardRotation(data) {
     const order = [
       () => renderRosterBoard(data),
       () => renderYtdBoard(data),
       () => renderWeeklyActivity(data),
-      () => renderVendorsBoard(data),
+      () => renderVendorsBoard(data.vendorRows),
       () => renderParBoard(data),
-      () => renderAgentOfWeekAuto(data)
+      () => renderAgentOfWeekAuto(data),
     ];
+
     let i = 0;
-    const paint = () => order[i % order.length]();
+    const paint = () => {
+      try {
+        order[i % order.length]();
+      } catch (e) {
+        console.error('Board render error', e);
+      }
+    };
+
     paint();
-    setInterval(() => { i++; paint(); }, 30_000);
+    setInterval(() => {
+      i += 1;
+      paint();
+    }, 30_000);
   }
 
-  // --------- Live sale polling (still 45d window)
+  // ---------- Live sale polling (keeps 45d vendor board fresh)
   function startLiveSalePolling(initialData) {
     const POLL_MS = 12_000;
-    const cutoffWindow = 45 * 24 * 3600 * 1000;
+    const windowMs = 45 * 24 * 3600 * 1000;
 
-    const tick = async () => {
+    setInterval(async () => {
       const sold = await fetchJSON(ENDPOINTS.teamSold);
-      if (!sold) return;
+      if (!sold || !Array.isArray(sold.allSales)) return;
 
-      const liveAllSales = Array.isArray(sold.allSales) ? sold.allSales : [];
-      const nowCutoff = Date.now() - cutoffWindow;
+      const nowCutoff = Date.now() - windowMs;
+      const liveAllSales = sold.allSales;
 
       let newSalesFound = false;
-      const rolled = [];
+      const recent = [];
 
       for (const s of liveAllSales) {
         const t = Date.parse(s.dateSold || s.date || '');
         if (!Number.isFinite(t) || t < nowCutoff) continue;
-        rolled.push(s);
+
+        recent.push(s);
 
         const id = saleId(s);
         if (!seenLeadIds.has(id)) {
@@ -816,13 +913,13 @@ F N	10-30-2025 3:53 pm
           showSplash({
             name: s.agent || 'Agent',
             amount: s.amount || 0,
-            soldProductName: s.soldProductName || ''
+            soldProductName: s.soldProductName || '',
           });
         }
       }
 
-      // merge with backfill again so 45d continues forward
-      const merged = [...rolled, ...BACKFILL_SALES].filter(s => {
+      // Merge with static backfill and keep to 45d
+      const merged = [...recent, ...BACKFILL_SALES].filter((s) => {
         const t = Date.parse(s.dateSold || s.date || '');
         return Number.isFinite(t) && t >= nowCutoff;
       });
@@ -830,15 +927,17 @@ F N	10-30-2025 3:53 pm
       const vendorRows = summarizeVendors(merged);
 
       if (newSalesFound) {
-        renderCards({ calls: initialData.calls, sold: { ...sold, allSales: merged } });
-        renderVendorsBoard({ vendorRows });
+        // Re-render top cards & vendors using new merged sales
+        renderCards({
+          ...initialData,
+          sold: { ...(sold || {}), allSales: merged },
+        });
+        renderVendorsBoard(vendorRows);
       }
-    };
-
-    setInterval(tick, POLL_MS);
+    }, POLL_MS);
   }
 
-  // --------- Boot
+  // ---------- Boot
   (async () => {
     try {
       const data = await loadAll();
@@ -848,12 +947,18 @@ F N	10-30-2025 3:53 pm
       startLiveSalePolling(data);
     } catch (err) {
       console.error(err);
-      setBanner('THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT', 'Error loading data.');
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
+      setBanner(
+        'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT',
+        'Error loading data.'
+      );
+      if (bodyEL) {
+        bodyEL.innerHTML =
+          '<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>';
+      }
     }
   })();
 })();
-
+ 
 // ---------- OE Countdown ----------
 // you said: “I want it to count down to the deadline of OE, which is Dec 15th, 11:59PM EST.”
 (function () {
