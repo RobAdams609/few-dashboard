@@ -789,21 +789,17 @@ F N	10-30-2025 3:53 pm
       seenLeadIds.add(saleId(s));
     }
 
-    return {
-      rules: rulesSafe,
-      roster: rosterSafe,
-      calls: callsSafe,
-      sold: {
-        ...soldSafe,
-        allSales: rolledAllSales, // all boards use this normalized list
-      },
-      vendorRows,
-      ytdList: ytdListSafe,
-      ytdTotal: ytdTotalSafe,
-      par: parSafe,
-      resolvePhoto,
-    };
-  }
+   return {
+  rules: rules || { rules: [] },
+  roster: roster || [],
+  calls: calls || { team: { calls: 0 }, perAgent: [] },
+  sold: soldSafe,
+  vendorRows,
+  ytdList: ytdList || [],
+  ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
+  par: par || { pace_target: 0, agents: [] },
+  resolvePhoto
+};
 
   // ---------- Lead Vendors board (45d rolling only)
   function renderVendorsBoard(input) {
