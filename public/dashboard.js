@@ -789,10 +789,10 @@ F N	10-30-2025 3:53 pm
       seenLeadIds.add(saleId(s));
     }
 
-   return {
-  rules: rules || { rules: [] },
-  roster: roster || [],
-  calls: calls || { team: { calls: 0 }, perAgent: [] },
+return {
+  rules: rulesSafe,
+  roster: rosterSafe,
+  calls: callsSafe,
   sold: soldSafe,
   vendorRows,
   ytdList: ytdList || [],
