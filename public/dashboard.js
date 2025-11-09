@@ -1,20 +1,21 @@
-/* FEW Dashboard — Single File (Full Rewrite, 45d rolling, 18 vendors, full backfill, OE deadline)
+/* FEW Dashboard — Single File (45d rolling vendors, EST weeks, OE countdown)
    Boards (30s rotate):
      1. This Week — Roster
      2. YTD — Team
      3. Weekly Activity (calls_week_override.json, with headshots)
-     4. Lead Vendors — Last 45 Days
-     5. PAR — Tracking  (NOT principle banner)
-     6. Agent of the Week (auto from weekly API, not manual)
+     4. Lead Vendors — Last 45 Days (rolling, no weekly reset)
+     5. PAR — Tracking
+     6. Agent of the Week (auto from weekly data)
 
    Extras:
      - Center splash on new sale (60s)
      - Vendor donut + legend
      - Headshots w/ canonical names (Ajani → "a s", Fabricio → "f n")
-     - Rules rotation every 12h (kept): “THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT”
+     - Rules rotation every 12h
      - 45d rolling vendor aggregation, backfill + live merge
-     - OE Countdown → Dec 15, 2025 11:59 PM EST, shows “LIVE!” after
+     - OE Countdown → Dec 15, 2025 11:59 PM EST
 */
+
 (() => {
   // --------- Endpoints
   const ENDPOINTS = {
@@ -45,22 +46,94 @@
     }
   };
 
-  // All sale-date math forced into Eastern so late deals don’t leak weeks.
+  // --------- Time helpers (force everything to EST)
+
+  // Parse a sale date string as EST (for 45d + weekly windows)
   function parseSaleDateEST(raw) {
     if (!raw) return NaN;
     const s = String(raw).trim();
-    // If already has explicit offset or Z, trust it.
+
+    // If already has offset or Z, trust it.
     if (/[+-]\d{2}:?\d{2}$/.test(s) || s.endsWith('Z')) {
       const t = Date.parse(s);
       return Number.isFinite(t) ? t : NaN;
     }
-    // Otherwise treat as Eastern Time.
+
+    // Otherwise treat as Eastern Time (handles your "11-07-2025 7:05 pm" style)
     const tEST = Date.parse(s + ' EST');
     if (Number.isFinite(tEST)) return tEST;
+
     const tET = Date.parse(s + ' ET');
     if (Number.isFinite(tET)) return tET;
+
     const tFallback = Date.parse(s);
     return Number.isFinite(tFallback) ? tFallback : NaN;
+  }
+
+  // Current time in America/New_York as a Date
+  function nowInEST() {
+    const now = new Date();
+    const estStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
+    return new Date(estStr);
+  }
+
+  // Get [start,end) of the current week in EST.
+  // Here: week starts MONDAY 00:00 EST, ends next MONDAY 00:00 EST.
+  function getWeekRangeEST() {
+    const d = nowInEST();
+    const day = d.getDay(); // 0=Sun..6=Sat
+    const diffToMonday = (day + 6) % 7;
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - diffToMonday);
+    const start = d.getTime();
+    const endDate = new Date(d);
+    endDate.setDate(endDate.getDate() + 7);
+    const end = endDate.getTime();
+    return { start, end };
+  }
+
+  // Compute "this week" (EST) per-agent + team from a list of raw sales.
+  // Treat s.amount as MONTHLY; store AV12X = amount * 12.
+  function computeWeeklyFromAllSales(allSales = []) {
+    const { start, end } = getWeekRangeEST();
+    const per = new Map();
+    let totalSales = 0;
+    let totalAV12X = 0;
+
+    for (const s of allSales) {
+      const t = parseSaleDateEST(s.dateSold || s.date || '');
+      if (!Number.isFinite(t) || t < start || t >= end) continue;
+
+      const amount = +s.amount || 0;
+      if (!amount) continue;
+
+      const av12 = amount * 12;
+      const name = canonicalName(
+        s.agent ||
+        s.writer ||
+        s.closer ||
+        s.name ||
+        ''
+      );
+      if (!name) continue;
+
+      const key = norm(name);
+      const row = per.get(key) || { name, sales: 0, av12x: 0 };
+      row.sales += 1;
+      row.av12x += av12;
+      per.set(key, row);
+
+      totalSales += 1;
+      totalAV12X += av12;
+    }
+
+    return {
+      team: {
+        totalSales,
+        totalAV12X
+      },
+      perAgent: Array.from(per.values())
+    };
   }
 
   // --------- Allowed vendor labels (canonical, permanent) — 18 total
@@ -224,14 +297,16 @@
   function renderCards({ calls, sold }) {
     const callsVal = safe(calls?.team?.calls, 0);
 
-    let avVal = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
+    const team = sold?.team || {};
+    let avVal = safe(team.totalAV12X, 0);
     if (!avVal && Array.isArray(sold?.perAgent)) {
       avVal = sold.perAgent.reduce(
-        (a,p)=> a + (+p.av12x || +p.av12X || +p.amount || 0), 0
+        (a,p)=> a + (+p.av12x || +p.av12X || +p.amount || 0),
+        0
       );
     }
 
-    let dealsVal = safe(sold?.team?.totalSales, 0);
+    let dealsVal = safe(team.totalSales, 0);
     if (!dealsVal && Array.isArray(sold?.perAgent)) {
       dealsVal = sold.perAgent.reduce((a,p)=> a + (+p.sales || 0), 0);
     }
@@ -289,6 +364,7 @@
   }
 
   // --------- Boards
+
   function renderRosterBoard({ roster, sold, resolvePhoto }) {
     setView('This Week — Roster');
 
@@ -481,7 +557,7 @@
     }
   }
 
-  // --- AGENT OF THE WEEK (AUTO)
+  // --- AGENT OF THE WEEK (AUTO, from EST-week perAgent)
   async function renderAgentOfWeekAuto(data) {
     setView('Agent of the Week');
 
@@ -500,6 +576,7 @@
       return;
     }
 
+    // Pick top by AV
     let top = null;
     for (const row of perAgent) {
       const nameRaw = row.name || row.agent || '';
@@ -520,6 +597,7 @@
       return;
     }
 
+    // Find YTD AV for this agent
     const wantName = norm(top.name);
     let ytdVal = 0;
 
@@ -588,7 +666,7 @@
     }
   }
 
-  // --- VENDORS BOARD (uses rolling 45d)
+  // --- VENDORS BOARD (45d rolling, from rolledAllSales)
   function renderVendorsBoard({ vendorRows }) {
     const data = Array.isArray(vendorRows?.rows)
       ? vendorRows
@@ -758,10 +836,11 @@
     }
   }
 
-  // ---------- BACKFILL (keep your 45d text EXACTLY as is in your file)
+  // ---------- BACKFILL
+  // Keep your existing 45-day backfill text EXACTLY as you already have it.
   const BACKFILL_TEXT = `
-YOUR EXISTING 45-DAY BACKFILL TEXT GOES HERE, UNCHANGED.
-`;
+  /* PASTE YOUR REAL 45-DAY BACKFILL BLOCK HERE (unchanged) */
+  `;
 
   function parseBackfill(text) {
     const out = [];
@@ -825,14 +904,15 @@ YOUR EXISTING 45-DAY BACKFILL TEXT GOES HERE, UNCHANGED.
 
     const resolvePhoto = buildHeadshotResolver(roster || []);
 
-    // merge live + backfill → rolling 45d list
+    // merge live + backfill
     const liveAllSales = Array.isArray(sold?.allSales) ? sold.allSales : [];
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
 
-    const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
+    // rolling 45d for vendors & seen IDs
+    const cutoff45 = Date.now() - 45 * 24 * 3600 * 1000;
     const rolledAllSales = mergedAllSales.filter(s => {
       const t = parseSaleDateEST(s.dateSold || s.date || '');
-      return Number.isFinite(t) && t >= cutoff;
+      return Number.isFinite(t) && t >= cutoff45;
     });
 
     const vendorRows = summarizeVendors(rolledAllSales);
@@ -841,14 +921,24 @@ YOUR EXISTING 45-DAY BACKFILL TEXT GOES HERE, UNCHANGED.
       seenLeadIds.add(saleId(s));
     }
 
+    // weekly (EST) perAgent + team from ALL sales (not just 45d)
+    const weekly = computeWeeklyFromAllSales(mergedAllSales);
+
+    const soldOut = {
+      ...soldSafe,
+      team: {
+        totalSales: weekly.team.totalSales || soldSafe.team.totalSales || 0,
+        totalAV12X: weekly.team.totalAV12X || soldSafe.team.totalAV12X || 0
+      },
+      perAgent: weekly.perAgent.length ? weekly.perAgent : soldSafe.perAgent,
+      allSales: rolledAllSales  // boards that need transactions read from this
+    };
+
     return {
       rules: rules || { rules: [] },
       roster: roster || [],
       calls: calls || { team: { calls: 0 }, perAgent: [] },
-      sold: {
-        ...soldSafe,
-        allSales: rolledAllSales
-      },
+      sold: soldOut,
       vendorRows,
       ytdList: ytdList || [],
       ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
@@ -874,10 +964,12 @@ YOUR EXISTING 45-DAY BACKFILL TEXT GOES HERE, UNCHANGED.
     setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // --------- Live sale polling (still 45d window, Eastern)
+  // --------- Live sale polling (45d window + EST weekly recompute)
   function startLiveSalePolling(initialData) {
     const POLL_MS = 12_000;
     const cutoffWindow = 45 * 24 * 3600 * 1000;
+
+    let data = initialData;
 
     const tick = async () => {
       const sold = await fetchJSON(ENDPOINTS.teamSold);
@@ -907,15 +999,29 @@ YOUR EXISTING 45-DAY BACKFILL TEXT GOES HERE, UNCHANGED.
         }
       }
 
+      // merge with backfill again for consistent 45d + weekly EST
       const merged = [...rolled, ...BACKFILL_SALES].filter(s => {
         const t = parseSaleDateEST(s.dateSold || s.date || '');
         return Number.isFinite(t) && t >= nowCutoff;
       });
 
       const vendorRows = summarizeVendors(merged);
+      const weekly = computeWeeklyFromAllSales(merged);
 
       if (newSalesFound) {
-        renderCards({ calls: initialData.calls, sold: { ...sold, allSales: merged } });
+        const soldOut = {
+          ...sold,
+          team: {
+            totalSales: weekly.team.totalSales || sold.team?.totalSales || 0,
+            totalAV12X: weekly.team.totalAV12X || sold.team?.totalAV12X || 0
+          },
+          perAgent: weekly.perAgent.length ? weekly.perAgent : (sold.perAgent || []),
+          allSales: merged
+        };
+
+        data = { ...data, sold: soldOut, vendorRows };
+
+        renderCards({ calls: data.calls, sold: soldOut });
         renderVendorsBoard({ vendorRows });
       }
     };
