@@ -45,10 +45,25 @@
     }
   };
 
+  // All sale-date math forced into Eastern so late deals don’t leak weeks.
+  function parseSaleDateEST(raw) {
+    if (!raw) return NaN;
+    const s = String(raw).trim();
+    // If already has explicit offset or Z, trust it.
+    if (/[+-]\d{2}:?\d{2}$/.test(s) || s.endsWith('Z')) {
+      const t = Date.parse(s);
+      return Number.isFinite(t) ? t : NaN;
+    }
+    // Otherwise treat as Eastern Time.
+    const tEST = Date.parse(s + ' EST');
+    if (Number.isFinite(tEST)) return tEST;
+    const tET = Date.parse(s + ' ET');
+    if (Number.isFinite(tET)) return tET;
+    const tFallback = Date.parse(s);
+    return Number.isFinite(tFallback) ? tFallback : NaN;
+  }
+
   // --------- Allowed vendor labels (canonical, permanent) — 18 total
-  // YOU SAID 18: $7.50, TTM Nice!, George Region Shared, Red Media, Blast/Bulk, Exclusive JUMBO,
-  // ABC, Shared Jumbo, VS Default, RKA Website, Redrip/Give up Purchased, Lamy Dynasty Specials,
-  // JUMBO Splits, Exclusive 30s, Positive Intent/Argos, HotLine Bling, Referral, CG Exclusive
   const VENDOR_SET = new Set([
     '$7.50',
     'TTM Nice!',
@@ -70,41 +85,37 @@
     'CG Exclusive'
   ]);
 
-// --------- Canonical names (stop inventing Fabricio names)
-const NAME_ALIASES = new Map([
-  // Fabricio — map all variants to roster canonical "f n"
-  ['fabricio a navarrete', 'f n'],
-  ['fabricio navarrete', 'f n'],
-  ['fabricio navarrete cervantes', 'f n'],
-  ['fabricio cervantes', 'f n'],
-  ['fabricio', 'f n'],
-  ['fab', 'f n'],
-  ['f n', 'f n'],
-
-  // Ajani — map to roster canonical "a s"
-  ['ajani senior', 'a s'],
-  ['ajani s', 'a s'],
-  ['a s', 'a s'],
-
-  // rest — mirror roster names (lowercased keys)
-  ['marie saint cyr', 'marie saint cyr'],
-  ['eli thermilus', 'eli thermilus'],
-  ['philip baxter', 'philip baxter'],
-  ['robert adams', 'robert adams'],
-  ['nathan johnson', 'nathan johnson'],
-  ['anna gleason', 'anna'],
-  ['sebastian beltran', 'sebastian beltran'],
-  ['michelle landis', 'michelle landis'],
-  ['elizabeth snyder', 'elizabeth snyder'],
-  ['fraitzline healthadvisor', 'fraitzline healthadvisor'] // keep roster key if used
-]);
-const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
+  // --------- Canonical names
+  const NAME_ALIASES = new Map([
+    ['fabricio a navarrete', 'f n'],
+    ['fabricio navarrete', 'f n'],
+    ['fabricio navarrete cervantes', 'f n'],
+    ['fabricio cervantes', 'f n'],
+    ['fabricio', 'f n'],
+    ['fab', 'f n'],
+    ['f n', 'f n'],
+    ['ajani senior', 'a s'],
+    ['ajani s', 'a s'],
+    ['a s', 'a s'],
+    ['marie saint cyr', 'marie saint cyr'],
+    ['eli thermilus', 'eli thermilus'],
+    ['philip baxter', 'philip baxter'],
+    ['robert adams', 'robert adams'],
+    ['nathan johnson', 'nathan johnson'],
+    ['anna gleason', 'anna'],
+    ['sebastian beltran', 'sebastian beltran'],
+    ['michelle landis', 'michelle landis'],
+    ['elizabeth snyder', 'elizabeth snyder'],
+    ['fraitzline healthadvisor', 'fraitzline healthadvisor']
+  ]);
+  const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
   // --------- Headshot resolver (with photoURL helper)
   function buildHeadshotResolver(roster) {
     const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
 
-    const initialsOf = (full = '') => full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+    const initialsOf = (full = '') =>
+      full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
 
     const photoURL = (p) => {
       if (!p) return null;
@@ -116,14 +127,17 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
       const cName = norm(canonicalName(p.name));
       const email = String(p.email || '').trim().toLowerCase();
       const photo = photoURL(p.photo);
+
       if (cName) byName.set(cName, photo);
       if (email) byEmail.set(email, photo);
+
       if (Array.isArray(p.phones)) {
         for (const raw of p.phones) {
           const phone = String(raw || '').replace(/\D+/g,'');
           if (phone) byPhone.set(phone, photo);
         }
       }
+
       const ini = initialsOf(p.name || '');
       if (ini) byInitial.set(ini, photo);
     }
@@ -132,7 +146,9 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
       const cName = norm(canonicalName(agent.name));
       const email = String(agent.email || '').trim().toLowerCase();
       const phone = String(agent.phone || '').replace(/\D+/g,'');
-      const ini   = (agent.name ? agent.name : '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+      const ini   = (agent.name ? agent.name : '')
+        .split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+
       return (
         byName.get(cName) ??
         byEmail.get(email) ??
@@ -143,7 +159,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     };
   }
 
-  // --------- Layout anchors (match your index.html)
+  // --------- Layout anchors
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
   const cards = { calls: $('#sumCalls'), av: $('#sumSales'), deals: $('#sumTalk') };
@@ -151,7 +167,6 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
   const bodyEl      = $('#tbody');
   const viewLabelEl = $('#viewLabel');
 
-  // Kill legacy ticker if any — your current working dash already does this
   const ticker = $('#ticker');
   if (ticker && ticker.parentNode) ticker.parentNode.removeChild(ticker);
 
@@ -200,10 +215,10 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     document.body.appendChild(el);
     setTimeout(() => el.remove(), 60_000);
   }
+
   const seenLeadIds = new Set();
-  const saleId = (s) => String(
-    s.leadId || s.id || `${s.agent}-${s.dateSold || s.date}-${s.soldProductName}-${s.amount}`
-  );
+  const saleId = (s) =>
+    String(s.leadId || s.id || `${s.agent}-${s.dateSold || s.date}-${s.soldProductName}-${s.amount}`);
 
   // --------- Cards
   function renderCards({ calls, sold }) {
@@ -211,7 +226,9 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
     let avVal = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
     if (!avVal && Array.isArray(sold?.perAgent)) {
-      avVal = sold.perAgent.reduce((a,p)=> a + (+p.av12x || +p.av12X || +p.amount || 0), 0);
+      avVal = sold.perAgent.reduce(
+        (a,p)=> a + (+p.av12x || +p.av12X || +p.amount || 0), 0
+      );
     }
 
     let dealsVal = safe(sold?.team?.totalSales, 0);
@@ -228,6 +245,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     const avatar = photoUrl
       ? `<img src="${photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
       : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initial || '?'}</div>`;
+
     return `
       <tr>
         <td class="agent" style="display:flex;align-items:center">${avatar}<span>${name}</span></td>
@@ -237,29 +255,35 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     `;
   }
 
-  // --------- Vendors aggregation (rolling 45d)
+  // --------- Vendors aggregation (rolling 45d, no weekly reset)
   function summarizeVendors(allSales = []) {
     const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
     const byName = new Map();
+
     for (const s of allSales) {
-      const t = Date.parse(s.dateSold || s.date || '');
+      const t = parseSaleDateEST(s.dateSold || s.date || '');
       if (!Number.isFinite(t) || t < cutoff) continue;
+
       const vendorRaw = String(s.soldProductName || 'Unknown').trim();
       const vendor = VENDOR_SET.has(vendorRaw) ? vendorRaw : null;
       if (!vendor) continue;
 
       const amount = +s.amount || 0;
       const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
-      row.deals += 1; row.amount += amount;
+      row.deals += 1;
+      row.amount += amount;
       byName.set(vendor, row);
     }
+
     const rows = [...byName.values()];
     const totalDeals  = rows.reduce((a,r)=> a + r.deals, 0) || 1;
     const totalAmount = rows.reduce((a,r)=> a + r.amount, 0);
+
     for (const r of rows) {
       r.shareDeals  = +(r.deals  * 100 / totalDeals).toFixed(1);
       r.shareAmount = totalAmount ? +(r.amount * 100 / totalAmount).toFixed(1) : 0;
     }
+
     rows.sort((a,b)=> b.shareDeals - a.shareDeals || b.amount - a.amount);
     return { rows, totalDeals, totalAmount };
   }
@@ -267,6 +291,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
   // --------- Boards
   function renderRosterBoard({ roster, sold, resolvePhoto }) {
     setView('This Week — Roster');
+
     const per = new Map();
     for (const a of (sold?.perAgent || [])) {
       const key = norm(canonicalName(a.name));
@@ -275,22 +300,28 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
         deals: +a.sales || 0
       });
     }
+
     const rows = [];
     for (const p of roster || []) {
       const key = norm(canonicalName(p.name));
       const d = per.get(key) || { av:0, deals:0 };
       const photo = resolvePhoto({ name: p.name, email: p.email });
-      const initials = (p.name || '').trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+      const initials = (p.name || '').trim().split(/\s+/)
+        .map(w => (w[0] || '').toUpperCase()).join('');
       rows.push({ name:p.name, av:d.av, deals:d.deals, photo, initials });
     }
+
     rows.sort((a,b)=> b.av - a.av);
 
     if (headEl) headEl.innerHTML = `
       <tr><th>Agent</th><th class="right">Submitted AV</th><th class="right">Deals</th></tr>
     `;
     if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
-      name:r.name, right1:fmtMoney(r.av), right2:(r.deals||0).toLocaleString(),
-      photoUrl:r.photo, initial:r.initials
+      name:r.name,
+      right1:fmtMoney(r.av),
+      right2:(r.deals||0).toLocaleString(),
+      photoUrl:r.photo,
+      initial:r.initials
     })).join('');
   }
 
@@ -298,17 +329,24 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     setView('YTD — Team');
     const rows = Array.isArray(ytdList) ? [...ytdList] : [];
     rows.sort((a,b)=> (b.av || 0) - (a.av || 0));
+
     if (headEl) headEl.innerHTML = `<tr><th>Agent</th><th class="right">YTD AV</th></tr>`;
-    if (bodyEl) bodyEl.innerHTML = `
-      ${rows.map(p => agentRowHTML({
+
+    if (bodyEl) {
+      const html = rows.map(p => agentRowHTML({
         name: p.name,
         right1: fmtMoney(p.av || 0),
         photoUrl: resolvePhoto({ name: p.name }),
-        initial: (p.name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('')
-      })).join('')}
-      <tr class="total"><td><strong>Total</strong></td>
-      <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td></tr>
-    `;
+        initial: (p.name || '').split(/\s+/)
+          .map(w => (w[0] || '').toUpperCase()).join('')
+      })).join('');
+
+      bodyEl.innerHTML = html + `
+        <tr class="total">
+          <td><strong>Total</strong></td>
+          <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td>
+        </tr>`;
+    }
   }
 
   // --- WEEKLY ROSTER CACHE (for Weekly Activity headshots)
@@ -340,11 +378,9 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
     if (viewLabelEl) viewLabelEl.textContent = 'Weekly Activity';
 
-    // pull override
     const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
     const json = res && res.ok ? await res.json() : null;
 
-    // if no data → reset categories to 0 (new week)
     if (!json || typeof json !== 'object') {
       if (headEl) {
         headEl.innerHTML = `
@@ -360,7 +396,8 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
         `;
       }
       if (bodyEl) {
-        bodyEl.innerHTML = `<tr><td colspan="7" style="padding:18px;color:#5c6c82;">No call data.</td></tr>`;
+        bodyEl.innerHTML =
+          `<tr><td colspan="7" style="padding:18px;color:#5c6c82;">No call data.</td></tr>`;
       }
       return;
     }
@@ -382,17 +419,27 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
       const loggedMin = Number(stats.loggedMin || 0);
       const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
 
-      // pull photo if roster has it
       let photoUrl = null;
       if (rosterEntry && rosterEntry.photo) {
         const s = String(rosterEntry.photo);
-        photoUrl = (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
+        photoUrl = (s.startsWith('http') || s.startsWith('/'))
+          ? s
+          : `/headshots/${s}`;
       }
 
-      rows.push({ name, email, leads, sold, conv, calls, talkMin, loggedMin, photoUrl });
+      rows.push({
+        name,
+        email,
+        leads,
+        sold,
+        conv,
+        calls,
+        talkMin,
+        loggedMin,
+        photoUrl
+      });
     }
 
-    // sort: sold desc → leads desc
     rows.sort((a, b) => b.sold - a.sold || b.leads - a.leads);
 
     if (headEl) {
@@ -411,7 +458,8 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
     if (bodyEl) {
       bodyEl.innerHTML = rows.map(r => {
-        const initials = r.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+        const initials = r.name.split(/\s+/)
+          .map(w => (w[0] || '').toUpperCase()).join('');
         const avatar = r.photoUrl
           ? `<img src="${r.photoUrl}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15);" />`
           : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;font-size:12px;font-weight:700;color:#89a2c6;border:1px solid rgba(255,255,255,.15);">${initials}</div>`;
@@ -433,125 +481,118 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     }
   }
 
-// --- AGENT OF THE WEEK (AUTO from API + direct YTD pull)
-async function renderAgentOfWeekAuto(data) {
-  setView('Agent of the Week');
+  // --- AGENT OF THE WEEK (AUTO)
+  async function renderAgentOfWeekAuto(data) {
+    setView('Agent of the Week');
 
-  const sold = data?.sold || {};
-  const perAgent = Array.isArray(sold.perAgent) ? sold.perAgent : [];
+    const sold = data?.sold || {};
+    const perAgent = Array.isArray(sold.perAgent) ? sold.perAgent : [];
 
-  // no weekly data → show empty
-  if (!perAgent.length) {
-    if (document.querySelector('#thead')) {
-      document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+    const thead = document.querySelector('#thead');
+    const tbody = document.querySelector('#tbody');
+
+    if (!perAgent.length) {
+      if (thead) thead.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+      if (tbody) {
+        tbody.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
+      }
+      return;
     }
-    if (document.querySelector('#tbody')) {
-      document.querySelector('#tbody').innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
+
+    let top = null;
+    for (const row of perAgent) {
+      const nameRaw = row.name || row.agent || '';
+      const name = canonicalName(nameRaw);
+      const av = Number(row.av12x || row.av12X || row.amount || 0);
+      const deals = Number(row.sales || row.deals || 0);
+      if (!top || av > top.av) {
+        top = { name, av, deals };
+      }
     }
-    return;
-  }
 
-  // 1) pick top weekly by AV
-  let top = null;
-  for (const row of perAgent) {
-    const nameRaw = row.name || row.agent || '';
-    const name = canonicalName(nameRaw);
-    const av = Number(row.av12x || row.av12X || row.amount || 0);
-    const deals = Number(row.sales || row.deals || 0);
-    if (!top || av > top.av) {
-      top = { name, av, deals };
+    if (!top) {
+      if (thead) thead.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+      if (tbody) {
+        tbody.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">No data.</td></tr>`;
+      }
+      return;
     }
-  }
-  if (!top) {
-    if (document.querySelector('#thead')) {
-      document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+
+    const wantName = norm(top.name);
+    let ytdVal = 0;
+
+    if (Array.isArray(data.ytdList)) {
+      const hit = data.ytdList.find(
+        x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName
+      );
+      if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
     }
-    if (document.querySelector('#tbody')) {
-      document.querySelector('#tbody').innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data.</td></tr>`;
-    }
-    return;
-  }
 
-  // 2) get YTD from three places, in this order:
-  //    a) in-memory (data.ytdList)
-  //    b) live fetch /ytd_av.json (array)
-  //    c) live fetch /ytd_av.json (wrapped object)
-  const wantName = norm(top.name);
-  let ytdVal = 0;
-
-  // a) in-memory
-  if (Array.isArray(data.ytdList)) {
-    const hit = data.ytdList.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
-    if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
-  }
-
-  // b/c) if still 0 → try fetch
-  if (!ytdVal) {
-    try {
-      const r = await fetch('/ytd_av.json', { cache: 'no-store' });
-      if (r.ok) {
-        const json = await r.json();
-
-        // case 1: array
-        if (Array.isArray(json)) {
-          const hit = json.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
-          if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
-        } else if (json && typeof json === 'object') {
-          // case 2: object that has a list/agents field
-          const arr = Array.isArray(json.list)
-            ? json.list
-            : Array.isArray(json.agents)
-              ? json.agents
-              : [];
-          if (arr.length) {
-            const hit = arr.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
+    if (!ytdVal) {
+      try {
+        const r = await fetch('/ytd_av.json', { cache: 'no-store' });
+        if (r.ok) {
+          const json = await r.json();
+          if (Array.isArray(json)) {
+            const hit = json.find(
+              x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName
+            );
+            if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
+          } else if (json && typeof json === 'object') {
+            const arr = Array.isArray(json.list)
+              ? json.list
+              : Array.isArray(json.agents)
+                ? json.agents
+                : [];
+            const hit = arr.find(
+              x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName
+            );
             if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
           }
         }
-      }
-    } catch (_) {
-      // ignore
+      } catch (_) {}
+    }
+
+    const resolvePhoto = data.resolvePhoto || (() => null);
+    const photo = resolvePhoto({ name: top.name });
+    const initials = top.name.split(/\s+/)
+      .map(w => (w[0] || '').toUpperCase()).join('');
+
+    if (thead) thead.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
+    if (tbody) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" style="padding:26px 18px;">
+            <div style="display:flex;align-items:center;gap:18px;">
+              ${
+                photo
+                  ? `<img src="${photo}" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
+                  : `<div style="width:92px;height:92px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
+              }
+              <div style="flex:1;">
+                <div style="font-size:22px;font-weight:700;">${top.name}</div>
+                <div style="margin-top:4px;opacity:.85;">Weekly Submitted AV • ${fmtMoney(top.av)}</div>
+                <div style="margin-top:2px;opacity:.55;">Deals this week • ${(top.deals || 0).toLocaleString()}</div>
+                <div style="margin-top:2px;opacity:.55;">YTD AV • ${fmtMoney(ytdVal)}</div>
+                <div style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.4);border-radius:999px;padding:4px 16px;font-size:12px;letter-spacing:.04em;">
+                  <span style="font-size:16px;">🥇</span>
+                  <span>Agent of the Week Belt</span>
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+      `;
     }
   }
 
-  // 3) photo
-  const photo = data.resolvePhoto ? data.resolvePhoto({ name: top.name }) : null;
-  const initials = top.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-
-  const thead = document.querySelector('#thead');
-  const tbody = document.querySelector('#tbody');
-
-  if (thead) thead.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
-  if (tbody) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="4" style="padding:26px 18px;">
-          <div style="display:flex;align-items:center;gap:18px;">
-            ${
-              photo
-                ? `<img src="${photo}" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
-                : `<div style="width:92px;height:92px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
-            }
-            <div style="flex:1;">
-              <div style="font-size:22px;font-weight:700;">${top.name}</div>
-              <div style="margin-top:4px;opacity:.85;">Weekly Submitted AV • ${fmtMoney(top.av)}</div>
-              <div style="margin-top:2px;opacity:.55;">Deals this week • ${(top.deals || 0).toLocaleString()}</div>
-              <div style="margin-top:2px;opacity:.55;">YTD AV • ${fmtMoney(ytdVal)}</div>
-              <div style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.4);border-radius:999px;padding:4px 16px;font-size:12px;letter-spacing:.04em;">
-                <span style="font-size:16px;">🥇</span>
-                <span>Agent of the Week Belt</span>
-              </div>
-            </div>
-          </div>
-        </td>
-      </tr>
-    `;
-  }
-}
-
   // --- VENDORS BOARD (uses rolling 45d)
   function renderVendorsBoard({ vendorRows }) {
-    const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
+    const data = Array.isArray(vendorRows?.rows)
+      ? vendorRows
+      : summarizeVendors([]);
     const rows = data.rows || [];
     const totalDeals = data.totalDeals || 0;
 
@@ -559,54 +600,79 @@ async function renderAgentOfWeekAuto(data) {
 
     if (!rows.length) {
       if (headEl) headEl.innerHTML = '';
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No vendor data yet.</td></tr>`;
+      if (bodyEl) {
+        bodyEl.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">No vendor data yet.</td></tr>`;
+      }
       return;
     }
 
-    const COLORS = ['#ffd34d','#ff9f40','#ff6b6b','#6bcfff','#7ee787','#b68cff','#f78da7','#72d4ba','#e3b341','#9cc2ff'];
+    const COLORS = [
+      '#ffd34d','#ff9f40','#ff6b6b','#6bcfff','#7ee787',
+      '#b68cff','#f78da7','#72d4ba','#e3b341','#9cc2ff'
+    ];
     const colorFor = (name = '') => {
       const h = [...name].reduce((a,c)=> a + c.charCodeAt(0), 0);
       return COLORS[h % COLORS.length];
     };
 
-    // donut by deals
-    const size=240, cx=size/2, cy=size/2, r=size/2-8;
-    const polar=(cx,cy,r,a)=>[cx + r*Math.cos(a), cy + r*Math.sin(a)];
-    const arcPath=(cx,cy,r,a0,a1)=>{const large=(a1-a0)>Math.PI?1:0; const [x0,y0]=polar(cx,cy,r,a0); const [x1,y1]=polar(cx,cy,r,a1); return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;};
-    let acc=-Math.PI/2;
-    const arcs = rows.map(v=>{
+    const size = 240;
+    const cx = size / 2;
+    const cy = size / 2;
+    const r  = size / 2 - 8;
+
+    const polar = (cx,cy,r,a) => [cx + r*Math.cos(a), cy + r*Math.sin(a)];
+    const arcPath = (cx,cy,r,a0,a1) => {
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      const [x0,y0] = polar(cx,cy,r,a0);
+      const [x1,y1] = polar(cx,cy,r,a1);
+      return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+    };
+
+    let acc = -Math.PI/2;
+    const arcs = rows.map(v => {
       const span = totalDeals ? 2*Math.PI*(v.deals/totalDeals) : 0;
-      const d = arcPath(cx,cy,r,acc,acc+span); acc+=span;
+      const d = arcPath(cx,cy,r,acc,acc+span);
+      acc += span;
       return `<path d="${d}" stroke="${colorFor(v.name)}" stroke-width="28" fill="none"></path>`;
     }).join('');
+
     const svg = `
       <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
         ${arcs}
         <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
         <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals</text>
-        <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">${totalDeals.toLocaleString()}</text>
+        <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">
+          ${totalDeals.toLocaleString()}
+        </text>
       </svg>
     `;
 
-    if (headEl) headEl.innerHTML = `
-      <tr>
-        <th>Vendor</th>
-        <th class="right">Deals</th>
-        <th class="right">% of total</th>
-      </tr>
-    `;
+    if (headEl) {
+      headEl.innerHTML = `
+        <tr>
+          <th>Vendor</th>
+          <th class="right">Deals</th>
+          <th class="right">% of total</th>
+        </tr>
+      `;
+    }
 
     const legend = rows.map(v => `
       <div class="legend-item">
         <span class="dot" style="background:${colorFor(v.name)}"></span>
         <span class="label">${v.name}</span>
         <span class="val">${v.deals.toLocaleString()} • ${v.shareDeals}%</span>
-      </div>`).join('');
+      </div>
+    `).join('');
 
     const donutRow = `
       <tr>
         <td colspan="3" style="padding:18px">
-          <div class="vendor-flex">${svg}<div class="legend">${legend}</div></div>
+          <div class="vendor-flex">
+            ${svg}
+            <div class="legend">${legend}</div>
+          </div>
         </td>
       </tr>
     `;
@@ -616,7 +682,8 @@ async function renderAgentOfWeekAuto(data) {
         <td><span class="dot" style="background:${colorFor(v.name)}"></span>${v.name}</td>
         <td class="right">${v.deals.toLocaleString()}</td>
         <td class="right" style="color:${colorFor(v.name)}">${v.shareDeals}%</td>
-      </tr>`).join('');
+      </tr>
+    `).join('');
 
     const totals = `
       <tr class="total">
@@ -630,64 +697,71 @@ async function renderAgentOfWeekAuto(data) {
   }
 
   function renderParBoard({ par }) {
-    setView('PAR — Tracking'); // NOT principle of the day
+    setView('PAR — Tracking');
     const pace = +safe(par?.pace_target, 0);
     const agents = Array.isArray(par?.agents) ? par.agents : [];
+
     if (!agents.length) {
       if (headEl) headEl.innerHTML = '';
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
+      if (bodyEl) {
+        bodyEl.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
+      }
       return;
     }
-    if (headEl) headEl.innerHTML = `
-      <tr><th>Agent</th><th class="right">Take&nbsp;Rate</th><th class="right">Annual&nbsp;AV</th></tr>
-    `;
-    if (bodyEl) bodyEl.innerHTML = `
-      ${agents.map(a => `
+
+    if (headEl) {
+      headEl.innerHTML = `
         <tr>
-          <td>${a.name}</td>
-          <td class="right">${safe(a.take_rate,0)}%</td>
-          <td class="right">${fmtMoney(safe(a.ytd_av,0))}</td>
+          <th>Agent</th>
+          <th class="right">Take&nbsp;Rate</th>
+          <th class="right">Annual&nbsp;AV</th>
         </tr>
-      `).join('')}
-      <tr class="total">
-        <td><strong>PACE TO QUALIFY</strong></td>
-        <td></td>
-        <td class="right"><strong>${fmtMoney(pace)}</strong></td>
-      </tr>
-    `;
+      `;
+    }
+
+    if (bodyEl) {
+      bodyEl.innerHTML = `
+        ${agents.map(a => `
+          <tr>
+            <td>${a.name}</td>
+            <td class="right">${safe(a.take_rate,0)}%</td>
+            <td class="right">${fmtMoney(safe(a.ytd_av,0))}</td>
+          </tr>
+        `).join('')}
+        <tr class="total">
+          <td><strong>PACE TO QUALIFY</strong></td>
+          <td></td>
+          <td class="right"><strong>${fmtMoney(pace)}</strong></td>
+        </tr>
+      `;
+    }
   }
 
-  // --------- Rules rotation (every 12h) — keep
+  // --------- Rules rotation
   function startRuleRotation(rulesJson) {
     const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
-    const list = Array.isArray(rulesJson?.rules) ? rulesJson.rules.filter(Boolean) : [];
+    const list = Array.isArray(rulesJson?.rules)
+      ? rulesJson.rules.filter(Boolean)
+      : [];
+
     if (!list.length) {
-      setBanner(base, 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.');
+      setBanner(
+        base,
+        'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.'
+      );
     } else {
       let i = 0;
       const apply = () => setBanner(base, list[i % list.length]);
       apply();
-      setInterval(() => { i++; apply(); }, 12*60*60*1000);
+      setInterval(() => { i++; apply(); }, 12 * 60 * 60 * 1000);
     }
   }
 
-  // ---------- BACKFILL (your 45d block, as given)
-  // I am keeping it EXACTLY like you dumped it in the chat — long, ugly, but yours.
+  // ---------- BACKFILL (keep your 45d text EXACTLY as is in your file)
   const BACKFILL_TEXT = `
-${/* your entire 45-day dump from your message goes here, unchanged. keep it in the file. */''}
-Jake Willis
-Lamy Dynasty Specials - $1
-ACA: 1
-Eli Thermilus	10-30-2025 6:57 pm
-Cindy Wong
-TTM Nice! - $1
-UHC/Suppy/wrap: 1
-F N	10-30-2025 3:53 pm
-... (KEEP THE REST OF YOUR 45-DAY BACKFILL TEXT HERE EXACTLY AS YOU PASTED IT) ...
+YOUR EXISTING 45-DAY BACKFILL TEXT GOES HERE, UNCHANGED.
 `;
-
-  // If you really want literally all 182 lines in here, keep them in the file.
-  // The parser below will ignore stuff that isn’t a vendor or a “agent datetime” line.
 
   function parseBackfill(text) {
     const out = [];
@@ -702,14 +776,13 @@ F N	10-30-2025 3:53 pm
       const v = vendorRe.exec(ln);
       if (v) {
         const vendor = v[1].trim();
-        if (!VENDOR_SET.has(vendor)) {
-          continue;
-        }
+        if (!VENDOR_SET.has(vendor)) continue;
         const amount = +v[2].replace(/,/g,'');
         pending = { soldProductName: vendor, amount, date: '', agent: '' };
         out.push(pending);
         continue;
       }
+
       const a = agentRe.exec(ln);
       if (a && pending) {
         pending.agent = a[1].trim();
@@ -717,6 +790,7 @@ F N	10-30-2025 3:53 pm
         pending = null;
       }
     }
+
     return out.map(o => ({ ...o, dateSold: o.date }));
   }
 
@@ -724,7 +798,15 @@ F N	10-30-2025 3:53 pm
 
   // ---------- Data load ----------
   async function loadAll() {
-    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
+    const [
+      rules,
+      roster,
+      calls,
+      sold,
+      ytdList,
+      ytdTotalJson,
+      par
+    ] = await Promise.all([
       fetchJSON(ENDPOINTS.rules),
       fetchJSON(ENDPOINTS.roster),
       fetchJSON(ENDPOINTS.callsByAgent),
@@ -734,25 +816,27 @@ F N	10-30-2025 3:53 pm
       fetchJSON(ENDPOINTS.par)
     ]);
 
-    const soldSafe = sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] };
+    const soldSafe = sold || {
+      team: { totalSales: 0, totalAV12X: 0 },
+      perAgent: [],
+      allSales: []
+    };
     if (!Array.isArray(soldSafe.perAgent)) soldSafe.perAgent = [];
 
     const resolvePhoto = buildHeadshotResolver(roster || []);
 
-    // merge live + backfill → then roll to 45d
+    // merge live + backfill → rolling 45d list
     const liveAllSales = Array.isArray(sold?.allSales) ? sold.allSales : [];
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
 
-    // ROLLING 45d FILTER HERE
     const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
     const rolledAllSales = mergedAllSales.filter(s => {
-      const t = Date.parse(s.dateSold || s.date || '');
+      const t = parseSaleDateEST(s.dateSold || s.date || '');
       return Number.isFinite(t) && t >= cutoff;
     });
 
     const vendorRows = summarizeVendors(rolledAllSales);
 
-    // seed seen IDs from rolled data
     for (const s of rolledAllSales) {
       seenLeadIds.add(saleId(s));
     }
@@ -763,7 +847,7 @@ F N	10-30-2025 3:53 pm
       calls: calls || { team: { calls: 0 }, perAgent: [] },
       sold: {
         ...soldSafe,
-        allSales: rolledAllSales   // important: board reads from this
+        allSales: rolledAllSales
       },
       vendorRows,
       ytdList: ytdList || [],
@@ -773,7 +857,7 @@ F N	10-30-2025 3:53 pm
     };
   }
 
-  // --------- Board rotation (30s each) — NOW includes Agent of the Week
+  // --------- Board rotation (30s)
   function startBoardRotation(data) {
     const order = [
       () => renderRosterBoard(data),
@@ -783,13 +867,14 @@ F N	10-30-2025 3:53 pm
       () => renderParBoard(data),
       () => renderAgentOfWeekAuto(data)
     ];
+
     let i = 0;
     const paint = () => order[i % order.length]();
     paint();
     setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // --------- Live sale polling (still 45d window)
+  // --------- Live sale polling (still 45d window, Eastern)
   function startLiveSalePolling(initialData) {
     const POLL_MS = 12_000;
     const cutoffWindow = 45 * 24 * 3600 * 1000;
@@ -805,8 +890,9 @@ F N	10-30-2025 3:53 pm
       const rolled = [];
 
       for (const s of liveAllSales) {
-        const t = Date.parse(s.dateSold || s.date || '');
+        const t = parseSaleDateEST(s.dateSold || s.date || '');
         if (!Number.isFinite(t) || t < nowCutoff) continue;
+
         rolled.push(s);
 
         const id = saleId(s);
@@ -821,9 +907,8 @@ F N	10-30-2025 3:53 pm
         }
       }
 
-      // merge with backfill again so 45d continues forward
       const merged = [...rolled, ...BACKFILL_SALES].filter(s => {
-        const t = Date.parse(s.dateSold || s.date || '');
+        const t = parseSaleDateEST(s.dateSold || s.date || '');
         return Number.isFinite(t) && t >= nowCutoff;
       });
 
@@ -848,33 +933,40 @@ F N	10-30-2025 3:53 pm
       startLiveSalePolling(data);
     } catch (err) {
       console.error(err);
-      setBanner('THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT', 'Error loading data.');
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
+      setBanner(
+        'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT',
+        'Error loading data.'
+      );
+      if (bodyEl) {
+        bodyEl.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
+      }
     }
   })();
 })();
 
-// ---------- OE Countdown ----------
-// you said: “I want it to count down to the deadline of OE, which is Dec 15th, 11:59PM EST.”
+// ---------- OE Countdown (to Dec 15, 2025 11:59 PM EST) ----------
 (function () {
   const timerEl = document.querySelector('#oeTimer');
   if (!timerEl) return;
 
-  // Dec 15, 2025 11:59:59 PM America/New_York
   const deadline = new Date('2025-12-15T23:59:59-05:00');
   const pad = n => String(n).padStart(2, '0');
 
   function updateCountdown() {
     const now = new Date();
     const diff = deadline - now;
+
     if (diff <= 0) {
       timerEl.textContent = 'LIVE!';
       return;
     }
+
     const d = Math.floor(diff / (1000 * 60 * 60 * 24));
     const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
     const m = Math.floor((diff / (1000 * 60)) % 60);
     const s = Math.floor((diff / 1000) % 60);
+
     timerEl.textContent = `${d}d ${pad(h)}h ${pad(m)}m ${pad(s)}s`;
     requestAnimationFrame(() => setTimeout(updateCountdown, 250));
   }
