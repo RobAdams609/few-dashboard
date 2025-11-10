@@ -1,19 +1,10 @@
 /* FEW Dashboard — Single File
-   Boards (30s rotate):
-     1. This Week — Roster   (Fri–Thu EST week, AV = amount * 12 when needed)
-     2. YTD — Team
-     3. Weekly Activity (calls_week_override.json, with headshots)
-     4. Lead Vendors — Last 45 Days (rolling, no weekly reset, from allSales)
-     5. PAR — Tracking
-     6. Agent of the Week (auto from sales week data, not manual)
-
-   Extras:
-     - Center splash on new sale (60s)
-     - Vendor donut + legend
-     - Headshots w/ canonical names (Ajani → "a s", Fabricio → "f n")
-     - Rules rotation every 12h (kept): “THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT”
-     - 45d rolling vendor aggregation, live from API
-     - OE Countdown → Dec 15, 2025 11:59 PM EST, shows “LIVE!” after
+   - Fri→Thu EST sales week
+   - Lead Vendors: rolling last 45 days (no weekly reset)
+   - 18 approved vendors only
+   - Auto Agent of the Week
+   - Weekly Activity from calls_week_override.json
+   - OE countdown to Dec 15, 2025 11:59 PM EST
 */
 
 (() => {
@@ -30,7 +21,6 @@
 
   // --------- Tiny utils
   const $  = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const fmtMoney = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
   const safe = (v, d) => (v === undefined || v === null ? d : v);
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -46,42 +36,50 @@
     }
   };
 
-  // ---- EST helpers (everything time-based uses America/New_York)
-  function nowInEST() {
-    const now = new Date();
-    const estStr = now.toLocaleString('en-US', { timeZone: 'America/New_York' });
-    return new Date(estStr);
-  }
+  // --------- EST helpers
 
-  function parseToEST(raw) {
+  // Parse any sale date as EST for consistent week / 45d logic.
+  function parseSaleDateEST(raw) {
     if (!raw) return NaN;
     const s = String(raw).trim();
-    // If input already has offset or Z, trust it.
+
     if (/[+-]\d{2}:?\d{2}$/.test(s) || s.endsWith('Z')) {
       const t = Date.parse(s);
       return Number.isFinite(t) ? t : NaN;
     }
-    const t1 = Date.parse(s + ' EST');
-    if (Number.isFinite(t1)) return t1;
-    const t2 = Date.parse(s);
-    return Number.isFinite(t2) ? t2 : NaN;
+
+    const tEST = Date.parse(s + ' EST');
+    if (Number.isFinite(tEST)) return tEST;
+
+    const tET = Date.parse(s + ' ET');
+    if (Number.isFinite(tET)) return tET;
+
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? t : NaN;
   }
 
-  // FEW week: Friday 00:00 EST → next Friday 00:00 EST
-  function getSalesWeekRangeEST() {
-    const d = nowInEST();
-    const day = d.getDay();          // 0=Sun..6=Sat
-    const sinceFriday = (day - 5 + 7) % 7;
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - sinceFriday);
-    const start = d.getTime();
-    const endDate = new Date(d);
-    endDate.setDate(endDate.getDate() + 7);
-    const end = endDate.getTime();
-    return { start, end };
+  // Fri 00:00 EST → next Fri 00:00 EST (Thu 23:59:59 inclusive)
+  function getWeekRangeEST() {
+    const now = new Date();
+    const estOffset = 5 * 60; // base EST minutes
+    const localOffset = now.getTimezoneOffset();
+    const estNow = new Date(now.getTime() + (localOffset - estOffset) * 60000);
+
+    const day = estNow.getDay(); // 0=Sun..6=Sat
+    // Map to "days since Friday"
+    const daysSinceFri = (day + 2) % 7; // Fri(5)->0, Sat(6)->1, Sun(0)->2, ..., Thu(4)->6
+
+    const start = new Date(estNow);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - daysSinceFri);
+
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+
+    return { start: start.getTime(), end: end.getTime() };
   }
 
-  // --------- Allowed vendor labels — 18 total
+  // --------- Vendor set
   const VENDOR_SET = new Set([
     '$7.50',
     'TTM Nice!',
@@ -103,7 +101,7 @@
     'CG Exclusive'
   ]);
 
-  // --------- Canonical names
+  // --------- Canonical names (Ajani/Fabricio + others)
   const NAME_ALIASES = new Map([
     ['fabricio a navarrete', 'f n'],
     ['fabricio navarrete', 'f n'],
@@ -120,16 +118,15 @@
     ['philip baxter', 'philip baxter'],
     ['robert adams', 'robert adams'],
     ['nathan johnson', 'nathan johnson'],
-    ['anna gleason', 'anna'],
+    ['anna gleason', 'anna gleason'],
     ['sebastian beltran', 'sebastian beltran'],
     ['michelle landis', 'michelle landis'],
     ['elizabeth snyder', 'elizabeth snyder'],
     ['fraitzline healthadvisor', 'fraitzline healthadvisor']
   ]);
-  const canonicalName = (name) =>
-    NAME_ALIASES.get(norm(name)) || (name || '').trim();
+  const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
 
-  // --------- Headshot resolver
+  // --------- Headshots
   function buildHeadshotResolver(roster) {
     const byName = new Map();
     const byEmail = new Map();
@@ -181,7 +178,7 @@
     };
   }
 
-  // --------- Layout anchors
+  // --------- Layout
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
   const cards = {
@@ -193,7 +190,6 @@
   const bodyEl      = $('#tbody');
   const viewLabelEl = $('#viewLabel');
 
-  // Kill legacy ticker if present
   const ticker = $('#ticker');
   if (ticker && ticker.parentNode) ticker.parentNode.removeChild(ticker);
 
@@ -203,7 +199,7 @@
     if (bannerSub) bannerSub.textContent = s || '';
   };
 
-  // --------- Inject minimal CSS
+  // --------- CSS
   (function injectCSS(){
     if (document.getElementById('few-inline-css')) return;
     const css = `
@@ -230,7 +226,7 @@
     document.head.appendChild(tag);
   })();
 
-  // --------- Splash on new sale (60s)
+  // --------- Splash
   function showSplash({ name, amount, soldProductName }) {
     const el = document.createElement('div');
     el.className = 'splash';
@@ -245,107 +241,35 @@
 
   const seenLeadIds = new Set();
   const saleId = (s) =>
-    String(s.leadId || s.id || `${s.agent || s.owner}-${s.dateSold || s.date}-${s.soldProductName}-${s.amount}`);
+    String(s.leadId || s.id || `${s.agent}-${s.dateSold || s.date}-${s.soldProductName}-${s.amount}`);
 
-  // --------- Amount → 12x AV helper
-  function getAv12x(s) {
-    const direct = Number(s.av12x || s.av12X);
-    if (direct && Number.isFinite(direct)) return direct;
-    const base =
-      Number(s.amount) ||
-      Number(s.AV) ||
-      Number(s.premium) ||
-      0;
-    return base * 12;
-  }
+  // --------- Cards (weekly baseline)
+  function renderCardsWeekly({ calls, sold }) {
+    const callsVal = safe(calls?.team?.calls, 0);
 
-  // --------- Build weekly per-agent from allSales (Fri–Thu, EST)
-  function buildWeeklyFromAllSales(allSales) {
-    const { start, end } = getSalesWeekRangeEST();
-    const per = new Map();
-    let totalAv = 0;
-    let totalDeals = 0;
-
-    for (const s of allSales || []) {
-      const t = parseToEST(s.dateSold || s.date || s.soldDate);
-      if (!Number.isFinite(t) || t < start || t >= end) continue;
-
-      const name = canonicalName(s.agent || s.owner || s.user || s.producer || '');
-      if (!name) continue;
-
-      const av = getAv12x(s);
-      if (!av) continue;
-
-      let row = per.get(name);
-      if (!row) {
-        row = { name, av: 0, deals: 0 };
-        per.set(name, row);
-      }
-      row.av += av;
-      row.deals += 1;
-      totalAv += av;
-      totalDeals += 1;
+    let avVal = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
+    if (!avVal && Array.isArray(sold?.perAgent)) {
+      avVal = sold.perAgent.reduce(
+        (a, p) => a + (+p.av12x || +p.av12X || +p.amount || 0), 0
+      );
     }
 
-    const perAgent = Array.from(per.values()).sort((a,b)=> b.av - a.av);
-    return { perAgent, totalAv, totalDeals };
-  }
-
-  // --------- Vendors aggregation (rolling 45d, EST)
-  function buildVendors45d(allSales) {
-    const now = nowInEST().getTime();
-    const cutoff = now - 45 * 24 * 60 * 60 * 1000;
-    const byName = new Map();
-    let totalDeals = 0;
-
-    for (const s of allSales || []) {
-      const t = parseToEST(s.dateSold || s.date || s.soldDate);
-      if (!Number.isFinite(t) || t < cutoff) continue;
-
-      const vendorRaw = String(s.soldProductName || s.vendor || '').trim();
-      if (!VENDOR_SET.has(vendorRaw)) continue;
-
-      const av = getAv12x(s);
-      const row = byName.get(vendorRaw) || { name: vendorRaw, deals: 0, av: 0 };
-      row.deals += 1;
-      row.av += av;
-      byName.set(vendorRaw, row);
-      totalDeals += 1;
+    let dealsVal = safe(sold?.team?.totalSales, 0);
+    if (!dealsVal && Array.isArray(sold?.perAgent)) {
+      dealsVal = sold.perAgent.reduce((a, p) => a + (+p.sales || 0), 0);
     }
-
-    const rows = Array.from(byName.values());
-    const totalAv = rows.reduce((a,r)=> a + r.av, 0) || 0;
-
-    for (const r of rows) {
-      r.shareDeals = totalDeals ? +(r.deals * 100 / totalDeals).toFixed(1) : 0;
-      r.shareAv    = totalAv    ? +(r.av    * 100 / totalAv   ).toFixed(1) : 0;
-    }
-
-    rows.sort((a,b)=> b.deals - a.deals || b.av - a.av);
-
-    return { rows, totalDeals, totalAv };
-  }
-
-  // --------- Cards (use weekly summary + calls API)
-  function renderCards({ weekly, calls }) {
-    const callsVal =
-      safe(calls?.team?.calls, 0) ||
-      (Array.isArray(calls?.perAgent)
-        ? calls.perAgent.reduce((a,c)=> a + (Number(c.calls) || 0), 0)
-        : 0);
-
-    const avVal    = weekly.totalAv || 0;
-    const dealsVal = weekly.totalDeals || 0;
 
     if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
     if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
     if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
   }
 
+  // --------- Agent row helper
   function agentRowHTML({ name, right1, right2, photoUrl, initial }) {
     const avatar = photoUrl
       ? `<img src="${photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
       : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initial || '?'}</div>`;
+
     return `
       <tr>
         <td class="agent" style="display:flex;align-items:center">${avatar}<span>${name}</span></td>
@@ -355,37 +279,67 @@
     `;
   }
 
+  // --------- 45d vendor summarizer (core fix)
+  function summarizeVendors45d(allSales = []) {
+    const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
+    const byName = new Map();
+
+    for (const s of allSales) {
+      const t = parseSaleDateEST(s.dateSold || s.date || '');
+      if (!Number.isFinite(t) || t < cutoff) continue;
+
+      const raw = String(s.soldProductName || '').trim();
+      const vendor = VENDOR_SET.has(raw) ? raw : null;
+      if (!vendor) continue;
+
+      const amount = +s.amount || 0;
+      const prev = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
+      prev.deals += 1;
+      prev.amount += amount;
+      byName.set(vendor, prev);
+    }
+
+    const rows = [...byName.values()];
+    const totalDeals  = rows.reduce((a, r) => a + r.deals, 0);
+    const totalAmount = rows.reduce((a, r) => a + r.amount, 0);
+
+    if (!totalDeals) return { rows: [], totalDeals: 0, totalAmount: 0 };
+
+    for (const r of rows) {
+      r.shareDeals = +(r.deals * 100 / totalDeals).toFixed(1);
+    }
+
+    rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
+
+    return { rows, totalDeals, totalAmount };
+  }
+
   // --------- Boards
 
-  // This Week — Roster (from weekly summary)
-  function renderRosterBoard({ roster, weekly, resolvePhoto }) {
+  function renderRosterBoard(data) {
     setView('This Week — Roster');
+    renderCardsWeekly(data);
 
-    const perMap = new Map();
-    for (const row of weekly.perAgent || []) {
-      perMap.set(norm(canonicalName(row.name)), {
-        av: row.av || 0,
-        deals: row.deals || 0
+    const per = new Map();
+    for (const a of (data.sold.perAgent || [])) {
+      const key = norm(canonicalName(a.name));
+      per.set(key, {
+        av: +a.av12x || +a.av12X || +a.amount || 0,
+        deals: +a.sales || 0
       });
     }
 
     const rows = [];
-    for (const p of roster || []) {
+    for (const p of data.roster || []) {
       const key = norm(canonicalName(p.name));
-      const d = perMap.get(key) || { av: 0, deals: 0 };
-      const photo = resolvePhoto({ name: p.name, email: p.email });
+      const d = per.get(key) || { av: 0, deals: 0 };
+      const photo = data.resolvePhoto({ name: p.name, email: p.email });
       const initials = (p.name || '').trim().split(/\s+/)
         .map(w => (w[0] || '').toUpperCase()).join('');
-      rows.push({
-        name: p.name,
-        av: d.av,
-        deals: d.deals,
-        photo,
-        initials
-      });
+      rows.push({ name: p.name, av: d.av, deals: d.deals, photo, initials });
     }
 
-    rows.sort((a,b)=> b.av - a.av);
+    rows.sort((a, b) => b.av - a.av);
 
     if (headEl) {
       headEl.innerHTML = `
@@ -393,9 +347,9 @@
           <th>Agent</th>
           <th class="right">Submitted AV</th>
           <th class="right">Deals</th>
-        </tr>`;
+        </tr>
+      `;
     }
-
     if (bodyEl) {
       bodyEl.innerHTML = rows.map(r => agentRowHTML({
         name: r.name,
@@ -407,67 +361,49 @@
     }
   }
 
-  // YTD — Team (unchanged: from ytd_av.json + total)
-  function renderYtdBoard({ ytdList, ytdTotal, resolvePhoto }) {
+  function renderYtdBoard(data) {
     setView('YTD — Team');
-    const rows = Array.isArray(ytdList) ? [...ytdList] : [];
-    rows.sort((a,b)=> (b.av || 0) - (a.av || 0));
+    renderCardsWeekly(data);
+
+    const rows = Array.isArray(data.ytdList) ? [...data.ytdList] : [];
+    rows.sort((a, b) => (b.av || 0) - (a.av || 0));
 
     if (headEl) {
-      headEl.innerHTML =
-        `<tr><th>Agent</th><th class="right">YTD AV</th></tr>`;
+      headEl.innerHTML = `
+        <tr>
+          <th>Agent</th>
+          <th class="right">YTD AV</th>
+        </tr>
+      `;
     }
 
     if (bodyEl) {
-      const html = rows.map(p => agentRowHTML({
+      bodyEl.innerHTML = rows.map(p => agentRowHTML({
         name: p.name,
         right1: fmtMoney(p.av || 0),
-        photoUrl: resolvePhoto({ name: p.name }),
+        photoUrl: data.resolvePhoto({ name: p.name }),
         initial: (p.name || '').split(/\s+/)
           .map(w => (w[0] || '').toUpperCase()).join('')
-      })).join('');
-
-      bodyEl.innerHTML = html + `
+      })).join('') + `
         <tr class="total">
           <td><strong>Total</strong></td>
-          <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td>
-        </tr>`;
+          <td class="right"><strong>${fmtMoney(data.ytdTotal || 0)}</strong></td>
+        </tr>
+      `;
     }
   }
 
-  // Weekly Activity (calls_week_override.json), with headshots
-  let WEEKLY_ROSTER_CACHE = null;
-  async function getRosterByEmail() {
-    if (WEEKLY_ROSTER_CACHE) return WEEKLY_ROSTER_CACHE;
-    try {
-      const r = await fetch('/headshots/roster.json', { cache: 'no-store' });
-      if (r.ok) {
-        const arr = await r.json();
-        const map = new Map();
-        for (const p of arr || []) {
-          const em = (p.email || '').trim().toLowerCase();
-          if (em) map.set(em, p);
-        }
-        WEEKLY_ROSTER_CACHE = map;
-        return map;
-      }
-    } catch (e) {}
-    WEEKLY_ROSTER_CACHE = new Map();
-    return WEEKLY_ROSTER_CACHE;
-  }
-
-  async function renderWeeklyActivity() {
+  // Weekly Activity from calls_week_override.json
+  async function renderWeeklyActivity(data) {
     setView('Weekly Activity');
+    renderCardsWeekly(data);
 
-    const head = $('#thead');
-    const body = $('#tbody');
-
-    const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(()=>null);
+    const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
     const json = res && res.ok ? await res.json() : null;
 
     if (!json || typeof json !== 'object') {
-      if (head) {
-        head.innerHTML = `
+      if (headEl) {
+        headEl.innerHTML = `
           <tr>
             <th>Agent</th>
             <th class="right">Leads</th>
@@ -476,17 +412,21 @@
             <th class="right">Calls</th>
             <th class="right">Talk&nbsp;min</th>
             <th class="right">Log&nbsp;min</th>
-          </tr>`;
+          </tr>
+        `;
       }
-      if (body) {
-        body.innerHTML =
+      if (bodyEl) {
+        bodyEl.innerHTML =
           `<tr><td colspan="7" style="padding:18px;color:#5c6c82;">No call data.</td></tr>`;
       }
       return;
     }
 
     const rows = [];
-    const rosterMap = await getRosterByEmail();
+    const rosterMap = new Map((data.roster || []).map(p => [
+      (p.email || '').trim().toLowerCase(),
+      p
+    ]));
 
     for (const [email, stats] of Object.entries(json)) {
       const em = (email || '').toLowerCase();
@@ -496,11 +436,11 @@
       const name = dispName.replace(/\b\w/g, c => c.toUpperCase());
 
       const leads = Number(stats.leads || 0);
-      const sold = Number(stats.sold || 0);
+      const soldC = Number(stats.sold || 0);
       const calls = Number(stats.calls || 0);
       const talkMin = Number(stats.talkMin || 0);
       const loggedMin = Number(stats.loggedMin || 0);
-      const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
+      const conv = leads ? +(soldC * 100 / leads).toFixed(1) : 0;
 
       let photoUrl = null;
       if (rosterEntry && rosterEntry.photo) {
@@ -513,19 +453,19 @@
       rows.push({
         name,
         leads,
-        sold,
-        conv,
+        sold: soldC,
         calls,
         talkMin,
         loggedMin,
+        conv,
         photoUrl
       });
     }
 
-    rows.sort((a,b)=> b.sold - a.sold || b.leads - a.leads);
+    rows.sort((a, b) => b.sold - a.sold || b.calls - a.calls);
 
-    if (head) {
-      head.innerHTML = `
+    if (headEl) {
+      headEl.innerHTML = `
         <tr>
           <th>Agent</th>
           <th class="right">Leads</th>
@@ -534,11 +474,12 @@
           <th class="right">Calls</th>
           <th class="right">Talk&nbsp;min</th>
           <th class="right">Log&nbsp;min</th>
-        </tr>`;
+        </tr>
+      `;
     }
 
-    if (body) {
-      body.innerHTML = rows.map(r => {
+    if (bodyEl) {
+      bodyEl.innerHTML = rows.map(r => {
         const initials = r.name.split(/\s+/)
           .map(w => (w[0] || '').toUpperCase()).join('');
         const avatar = r.photoUrl
@@ -547,8 +488,7 @@
         return `
           <tr>
             <td style="display:flex;align-items:center;">
-              ${avatar}
-              ${r.name}
+              ${avatar}${r.name}
             </td>
             <td class="right">${r.leads}</td>
             <td class="right">${r.sold}</td>
@@ -556,20 +496,175 @@
             <td class="right">${r.calls}</td>
             <td class="right">${r.talkMin}</td>
             <td class="right">${r.loggedMin}</td>
-          </tr>`;
+          </tr>
+        `;
       }).join('');
     }
   }
 
-  // Agent of the Week — from weekly summary + YTD
+  // Lead Vendors — Last 45 Days (rolling)
+  function renderVendorsBoard(data) {
+    setView('Lead Vendors — Last 45 Days');
+
+    const v = data.vendor45d;
+    const rows = v.rows || [];
+
+    // Top cards: keep calls weekly, set AV/deals to 45d so donut + card align.
+    if (cards.calls) {
+      const callsVal = safe(data.calls?.team?.calls, 0);
+      cards.calls.textContent = (callsVal || 0).toLocaleString();
+    }
+    if (cards.av)    cards.av.textContent    = fmtMoney(v.totalAmount || 0);
+    if (cards.deals) cards.deals.textContent = (v.totalDeals || 0).toLocaleString();
+
+    if (!rows.length) {
+      if (headEl) headEl.innerHTML = `
+        <tr>
+          <th>Vendor</th>
+          <th class="right">Deals (45d)</th>
+          <th class="right">% of total</th>
+        </tr>
+      `;
+      if (bodyEl) {
+        bodyEl.innerHTML =
+          `<tr><td colspan="3" style="padding:18px;color:#5c6c82;">No vendor data in last 45 days.</td></tr>`;
+      }
+      return;
+    }
+
+    const COLORS = [
+      '#ffd34d','#ff9f40','#ff6b6b','#6bcfff','#7ee787',
+      '#b68cff','#f78da7','#72d4ba','#e3b341','#9cc2ff'
+    ];
+    const colorFor = (name = '') => {
+      const h = [...name].reduce((a, c) => a + c.charCodeAt(0), 0);
+      return COLORS[h % COLORS.length];
+    };
+
+    const size = 240, cx = size / 2, cy = size / 2, r = size / 2 - 8;
+    const polar = (cx, cy, r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    const arcPath = (cx, cy, r, a0, a1) => {
+      const large = (a1 - a0) > Math.PI ? 1 : 0;
+      const [x0, y0] = polar(cx, cy, r, a0);
+      const [x1, y1] = polar(cx, cy, r, a1);
+      return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+    };
+
+    let acc = -Math.PI / 2;
+    const arcs = rows.map(vr => {
+      const span = v.totalDeals ? 2 * Math.PI * (vr.deals / v.totalDeals) : 0;
+      const d = arcPath(cx, cy, r, acc, acc + span);
+      acc += span;
+      return `<path d="${d}" stroke="${colorFor(vr.name)}" stroke-width="28" fill="none"></path>`;
+    }).join('');
+
+    const svg = `
+      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        ${arcs}
+        <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
+        <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals (45d)</text>
+        <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">
+          ${v.totalDeals.toLocaleString()}
+        </text>
+      </svg>
+    `;
+
+    if (headEl) {
+      headEl.innerHTML = `
+        <tr>
+          <th>Vendor</th>
+          <th class="right">Deals (45d)</th>
+          <th class="right">% of total</th>
+        </tr>
+      `;
+    }
+
+    const legend = rows.map(vr => `
+      <div class="legend-item">
+        <span class="dot" style="background:${colorFor(vr.name)}"></span>
+        <span class="label">${vr.name}</span>
+        <span class="val">${vr.deals.toLocaleString()} • ${vr.shareDeals}%</span>
+      </div>
+    `).join('');
+
+    const donutRow = `
+      <tr>
+        <td colspan="3" style="padding:18px">
+          <div class="vendor-flex">
+            ${svg}
+            <div class="legend">${legend}</div>
+          </div>
+        </td>
+      </tr>
+    `;
+
+    const rowsHTML = rows.map(vr => `
+      <tr>
+        <td><span class="dot" style="background:${colorFor(vr.name)}"></span>${vr.name}</td>
+        <td class="right">${vr.deals.toLocaleString()}</td>
+        <td class="right">${vr.shareDeals}%</td>
+      </tr>
+    `).join('');
+
+    if (bodyEl) {
+      bodyEl.innerHTML = donutRow + rowsHTML;
+    }
+  }
+
+  function renderParBoard(data) {
+    setView('PAR — Tracking');
+    renderCardsWeekly(data);
+
+    const pace = +safe(data.par?.pace_target, 0);
+    const agents = Array.isArray(data.par?.agents) ? data.par.agents : [];
+
+    if (!agents.length) {
+      if (headEl) headEl.innerHTML = '';
+      if (bodyEl) {
+        bodyEl.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
+      }
+      return;
+    }
+
+    if (headEl) {
+      headEl.innerHTML = `
+        <tr>
+          <th>Agent</th>
+          <th class="right">Take&nbsp;Rate</th>
+          <th class="right">Annual&nbsp;AV</th>
+        </tr>
+      `;
+    }
+
+    if (bodyEl) {
+      bodyEl.innerHTML = `
+        ${agents.map(a => `
+          <tr>
+            <td>${a.name}</td>
+            <td class="right">${safe(a.take_rate,0)}%</td>
+            <td class="right">${fmtMoney(safe(a.ytd_av,0))}</td>
+          </tr>
+        `).join('')}
+        <tr class="total">
+          <td><strong>PACE TO QUALIFY</strong></td>
+          <td></td>
+          <td class="right"><strong>${fmtMoney(pace)}</strong></td>
+        </tr>
+      `;
+    }
+  }
+
+  // Agent of the Week (auto from weekly perAgent + YTD)
   async function renderAgentOfWeekAuto(data) {
     setView('Agent of the Week');
+    renderCardsWeekly(data);
 
+    const perAgent = Array.isArray(data.sold.perAgent) ? data.sold.perAgent : [];
     const thead = $('#thead');
     const tbody = $('#tbody');
 
-    const list = data.weekly.perAgent || [];
-    if (!list.length) {
+    if (!perAgent.length) {
       if (thead) thead.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
       if (tbody) {
         tbody.innerHTML =
@@ -578,40 +673,38 @@
       return;
     }
 
-    const top = list[0]; // already sorted desc by AV
-    const wantName = norm(canonicalName(top.name));
+    let top = null;
+    for (const row of perAgent) {
+      const nameRaw = row.name || row.agent || '';
+      const name = canonicalName(nameRaw);
+      const av = Number(row.av12x || row.av12X || row.amount || 0);
+      const deals = Number(row.sales || row.deals || 0);
+      if (!top || av > top.av) {
+        top = { name, av, deals };
+      }
+    }
+
+    if (!top) {
+      if (thead) thead.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+      if (tbody) {
+        tbody.innerHTML =
+          `<tr><td style="padding:18px;color:#5c6c82;">No data.</td></tr>`;
+      }
+      return;
+    }
+
+    const want = norm(top.name);
     let ytdVal = 0;
-
-    if (Array.isArray(data.ytdList)) {
-      const hit = data.ytdList.find(x =>
-        norm(canonicalName(x.name)) === wantName
-      );
-      if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
+    for (const x of (data.ytdList || [])) {
+      const nm = norm(canonicalName(x.name));
+      if (nm === want) {
+        ytdVal = Number(x.av || x.ytd_av || 0);
+        break;
+      }
     }
 
-    if (!ytdVal) {
-      try {
-        const r = await fetch('/ytd_av.json', { cache: 'no-store' });
-        if (r.ok) {
-          const json = await r.json();
-          const arr = Array.isArray(json)
-            ? json
-            : Array.isArray(json?.list)
-              ? json.list
-              : Array.isArray(json?.agents)
-                ? json.agents
-                : [];
-          const hit = arr.find(x =>
-            norm(canonicalName(x.name)) === wantName
-          );
-          if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
-        }
-      } catch (e) {}
-    }
-
-    const resolvePhoto = data.resolvePhoto || (() => null);
-    const photo = resolvePhoto({ name: top.name });
-    const initials = (top.name || '').split(/\s+/)
+    const photo = data.resolvePhoto({ name: top.name });
+    const initials = top.name.split(/\s+/)
       .map(w => (w[0] || '').toUpperCase()).join('');
 
     if (thead) thead.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
@@ -637,151 +730,8 @@
               </div>
             </div>
           </td>
-        </tr>`;
-    }
-  }
-
-  // Lead Vendors — Last 45 Days (rolling, EST)
-  function renderVendorsBoard({ vendorRows }) {
-    const data = vendorRows || { rows: [], totalDeals: 0, totalAv: 0 };
-    const rows = data.rows || [];
-    const totalDeals = data.totalDeals || 0;
-
-    setView('Lead Vendors — Last 45 Days');
-
-    if (!rows.length) {
-      if (headEl) headEl.innerHTML = `
-        <tr>
-          <th>Vendor</th>
-          <th class="right">Deals</th>
-          <th class="right">% of total</th>
-        </tr>`;
-      if (bodyEl) {
-        bodyEl.innerHTML =
-          `<tr><td colspan="3" style="padding:18px;color:#5c6c82;">No vendor data in last 45 days.</td></tr>`;
-      }
-      return;
-    }
-
-    const COLORS = [
-      '#ffd34d','#ff9f40','#ff6b6b','#6bcfff','#7ee787',
-      '#b68cff','#f78da7','#72d4ba','#e3b341','#9cc2ff'
-    ];
-    const colorFor = (name = '') => {
-      const h = [...name].reduce((a,c)=> a + c.charCodeAt(0), 0);
-      return COLORS[h % COLORS.length];
-    };
-
-    const size = 240;
-    const cx = size / 2;
-    const cy = size / 2;
-    const r  = size / 2 - 8;
-    const polar = (cx,cy,r,a) => [cx + r*Math.cos(a), cy + r*Math.sin(a)];
-    const arcPath = (cx,cy,r,a0,a1) => {
-      const large = (a1 - a0) > Math.PI ? 1 : 0;
-      const [x0,y0] = polar(cx,cy,r,a0);
-      const [x1,y1] = polar(cx,cy,r,a1);
-      return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
-    };
-
-    let acc = -Math.PI / 2;
-    const arcs = rows.map(v => {
-      const span = totalDeals ? 2*Math.PI*(v.deals / totalDeals) : 0;
-      const d = arcPath(cx,cy,r,acc,acc+span);
-      acc += span;
-      return `<path d="${d}" stroke="${colorFor(v.name)}" stroke-width="28" fill="none"></path>`;
-    }).join('');
-
-    const svg = `
-      <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
-        ${arcs}
-        <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
-        <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals (45d)</text>
-        <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">
-          ${totalDeals.toLocaleString()}
-        </text>
-      </svg>`;
-
-    if (headEl) {
-      headEl.innerHTML = `
-        <tr>
-          <th>Vendor</th>
-          <th class="right">Deals (45d)</th>
-          <th class="right">% of total</th>
-        </tr>`;
-    }
-
-    const legend = rows.map(v => `
-      <div class="legend-item">
-        <span class="dot" style="background:${colorFor(v.name)}"></span>
-        <span class="label">${v.name}</span>
-        <span class="val">${v.deals.toLocaleString()} • ${v.shareDeals}%</span>
-      </div>`).join('');
-
-    const donutRow = `
-      <tr>
-        <td colspan="3" style="padding:18px">
-          <div class="vendor-flex">
-            ${svg}
-            <div class="legend">${legend}</div>
-          </div>
-        </td>
-      </tr>`;
-
-    const rowsHTML = rows.map(v => `
-      <tr>
-        <td><span class="dot" style="background:${colorFor(v.name)}"></span>${v.name}</td>
-        <td class="right">${v.deals.toLocaleString()}</td>
-        <td class="right" style="color:${colorFor(v.name)}">${v.shareDeals}%</td>
-      </tr>`).join('');
-
-    const totals = `
-      <tr class="total">
-        <td><strong>Total (45d)</strong></td>
-        <td class="right"><strong>${totalDeals.toLocaleString()}</strong></td>
-        <td></td>
-      </tr>`;
-
-    if (bodyEl) bodyEl.innerHTML = donutRow + rowsHTML + totals;
-  }
-
-  // PAR — Tracking
-  function renderParBoard({ par }) {
-    setView('PAR — Tracking');
-    const pace = +safe(par?.pace_target, 0);
-    const agents = Array.isArray(par?.agents) ? par.agents : [];
-
-    if (!agents.length) {
-      if (headEl) headEl.innerHTML = '';
-      if (bodyEl) {
-        bodyEl.innerHTML =
-          `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
-      }
-      return;
-    }
-
-    if (headEl) {
-      headEl.innerHTML = `
-        <tr>
-          <th>Agent</th>
-          <th class="right">Take&nbsp;Rate</th>
-          <th class="right">Annual&nbsp;AV</th>
-        </tr>`;
-    }
-
-    if (bodyEl) {
-      bodyEl.innerHTML = `
-        ${agents.map(a => `
-          <tr>
-            <td>${a.name}</td>
-            <td class="right">${safe(a.take_rate,0)}%</td>
-            <td class="right">${fmtMoney(safe(a.ytd_av,0))}</td>
-          </tr>`).join('')}
-        <tr class="total">
-          <td><strong>PACE TO QUALIFY</strong></td>
-          <td></td>
-          <td class="right"><strong>${fmtMoney(pace)}</strong></td>
-        </tr>`;
+        </tr>
+      `;
     }
   }
 
@@ -805,13 +755,13 @@
     }
   }
 
-  // --------- Data load
+  // --------- Load all
   async function loadAll() {
     const [
       rules,
       roster,
       calls,
-      sold,
+      soldRaw,
       ytdList,
       ytdTotalJson,
       par
@@ -825,26 +775,31 @@
       fetchJSON(ENDPOINTS.par)
     ]);
 
+    const sold = soldRaw || {
+      team: { totalSales: 0, totalAV12X: 0 },
+      perAgent: [],
+      allSales: []
+    };
+    if (!Array.isArray(sold.perAgent)) sold.perAgent = [];
+    if (!Array.isArray(sold.allSales)) sold.allSales = [];
+
     const resolvePhoto = buildHeadshotResolver(roster || []);
+    const vendor45d = summarizeVendors45d(sold.allSales);
 
-    const allSales = Array.isArray(sold?.allSales) ? sold.allSales : [];
-
-    // Weekly + 45d from allSales (no manual backfill)
-    const weekly = buildWeeklyFromAllSales(allSales);
-    const vendorRows = buildVendors45d(allSales);
-
-    // Seed seen ids so old sales don't splash
-    for (const s of allSales) {
-      seenLeadIds.add(saleId(s));
+    // seed splash IDs based on all known sales in 45d window
+    for (const s of sold.allSales || []) {
+      const t = parseSaleDateEST(s.dateSold || s.date || '');
+      if (Number.isFinite(t) && t >= Date.now() - 45 * 24 * 3600 * 1000) {
+        seenLeadIds.add(saleId(s));
+      }
     }
 
     return {
       rules: rules || { rules: [] },
       roster: roster || [],
       calls: calls || { team: { calls: 0 }, perAgent: [] },
-      weekly,
-      allSales,
-      vendorRows,
+      sold,
+      vendor45d,
       ytdList: ytdList || [],
       ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
       par: par || { pace_target: 0, agents: [] },
@@ -854,7 +809,7 @@
 
   // --------- Board rotation (30s)
   function startBoardRotation(data) {
-    const order = [
+    const sequence = [
       () => renderRosterBoard(data),
       () => renderYtdBoard(data),
       () => renderWeeklyActivity(data),
@@ -862,50 +817,48 @@
       () => renderParBoard(data),
       () => renderAgentOfWeekAuto(data)
     ];
+
     let i = 0;
-    const paint = () => order[i % order.length]();
+    const paint = () => sequence[i % sequence.length]();
     paint();
     setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // --------- Live sale polling (updates weekly + vendors)
-  function startLiveSalePolling(initialData) {
+  // --------- Live sale polling (keeps splash + 45d vendors live)
+  function startLiveSalePolling(shared) {
     const POLL_MS = 12_000;
+    const windowMs = 45 * 24 * 3600 * 1000;
 
     const tick = async () => {
       const sold = await fetchJSON(ENDPOINTS.teamSold);
-      if (!sold) return;
+      if (!sold || !Array.isArray(sold.allSales)) return;
 
-      const allSales = Array.isArray(sold.allSales) ? sold.allSales : [];
-      const weekly = buildWeeklyFromAllSales(allSales);
-      const vendorRows = buildVendors45d(allSales);
+      // new sales + splash
+      let changed = false;
+      for (const s of sold.allSales) {
+        const t = parseSaleDateEST(s.dateSold || s.date || '');
+        if (!Number.isFinite(t) || t < Date.now() - windowMs) continue;
 
-      let newFound = false;
-      for (const s of allSales) {
         const id = saleId(s);
         if (!seenLeadIds.has(id)) {
           seenLeadIds.add(id);
-          newFound = true;
+          changed = true;
           showSplash({
-            name: canonicalName(s.agent || s.owner || 'Agent'),
-            amount: getAv12x(s),
+            name: s.agent || 'Agent',
+            amount: s.amount || 0,
             soldProductName: s.soldProductName || ''
           });
         }
       }
 
-      // Always keep cards current
-      renderCards({ weekly, calls: initialData.calls });
+      if (!changed) return;
 
-      // If new, rerender vendor board (it is 45d rolling)
-      if (newFound) {
-        renderVendorsBoard({ vendorRows });
+      shared.sold = { ...shared.sold, allSales: sold.allSales };
+      shared.vendor45d = summarizeVendors45d(sold.allSales);
+
+      if (viewLabelEl && viewLabelEl.textContent.includes('Lead Vendors — Last 45 Days')) {
+        renderVendorsBoard(shared);
       }
-
-      // Also keep weekly data for Agent of Week / Roster in rotation fresh
-      initialData.weekly = weekly;
-      initialData.vendorRows = vendorRows;
-      initialData.allSales = allSales;
     };
 
     setInterval(tick, POLL_MS);
@@ -915,7 +868,7 @@
   (async () => {
     try {
       const data = await loadAll();
-      renderCards({ weekly: data.weekly, calls: data.calls });
+      renderCardsWeekly(data);
       startRuleRotation(data.rules);
       startBoardRotation(data);
       startLiveSalePolling(data);
@@ -925,15 +878,16 @@
         'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT',
         'Error loading data.'
       );
-      if (bodyEl) {
-        bodyEl.innerHTML =
+      const body = $('#tbody');
+      if (body) {
+        body.innerHTML =
           `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
       }
     }
   })();
 })();
 
-// ---------- OE Countdown (Dec 15, 2025 11:59 PM EST) ----------
+// ---------- OE Countdown ----------
 (function () {
   const timerEl = document.querySelector('#oeTimer');
   if (!timerEl) return;
