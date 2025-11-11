@@ -1,4 +1,4 @@
-/* FEW Dashboard — Single File
+293?/* FEW Dashboard — Single File
 
    Boards (30s rotate) — ORDER:
      1. YTD — Team
@@ -263,41 +263,37 @@
     `;
   }
 
-  // --------- Vendor summary (rolling 45d, allowed vendors only)
-  function summarizeVendors(allSales) {
-    const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
-    const byName = new Map();
+// -------- Vendor summary (rolling 45d, ONLY your 18 vendors — no exclusions)
+function summarizeVendors(allSales = []) {
+  const cutoff = Date.now() - 45 * 24 * 60 * 60 * 1000; // last 45 days
+  const byName = new Map();
 
-    for (const s of allSales || []) {
-      const t = parseApiDate(s.dateSold || s.date);
-      if (!Number.isFinite(t)) continue;
-      if (t < cutoff) continue;
+  for (const s of allSales) {
+    const when = Date.parse(s.dateSold || s.date || '');
+    if (!Number.isFinite(when) || when < cutoff) continue;   // 45d window only
 
-      const rawVendor = String(s.soldProductName || '').trim();
-      if (!VENDOR_SET.has(rawVendor)) continue;
+    const vendorRaw = String(s.soldProductName || '').trim();
+    if (!VENDOR_SET.has(vendorRaw)) continue;                // only your 18 vendors
 
-      const agentKey = norm(canonicalName(s.agent || s.owner || ''));
-      if (EXCLUDED_AGENTS.has(agentKey)) continue;
+    const vendor = vendorRaw;
+    const amount = Number(s.amount) || 0;
 
-      const amount = +s.amount || +s.av12x || 0;
-      const row = byName.get(rawVendor) || { name: rawVendor, deals: 0, amount: 0 };
-      row.deals += 1;
-      row.amount += amount;
-      byName.set(rawVendor, row);
-    }
-
-    const rows = [...byName.values()];
-    const totalDeals  = rows.reduce((a,r)=> a + r.deals, 0) || 0;
-    const totalAmount = rows.reduce((a,r)=> a + r.amount, 0) || 0;
-
-    for (const r of rows) {
-      r.shareDeals  = totalDeals ? +(r.deals  * 100 / totalDeals).toFixed(1) : 0;
-      r.shareAmount = totalAmount ? +(r.amount * 100 / totalAmount).toFixed(1) : 0;
-    }
-    rows.sort((a,b)=> b.deals - a.deals || b.amount - a.amount);
-
-    return { rows, totalDeals, totalAmount };
+    const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
+    row.deals += 1;
+    row.amount += amount;
+    byName.set(vendor, row);
   }
+
+  const rows = [...byName.values()];
+  const totalDeals = rows.reduce((sum, r) => sum + r.deals, 0) || 0;
+
+  for (const r of rows) {
+    r.shareDeals = totalDeals ? +(r.deals * 100 / totalDeals).toFixed(1) : 0;
+  }
+
+  rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
+  return { rows, totalDeals };
+}
 
   // --------- Compute weekly stats from allSales (Fri–Thu EST)
   function computeWeeklyStats(allSales) {
