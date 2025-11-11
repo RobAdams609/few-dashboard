@@ -263,12 +263,12 @@
     `;
   }
 
-// -------- Vendor summary (rolling 45d, ONLY your 18 vendors — no exclusions)
+   // -------- Vendor summary (rolling 45d, ONLY your 18 vendors — no exclusions)
 function summarizeVendors(allSales = []) {
   const cutoff = Date.now() - 45 * 24 * 60 * 60 * 1000; // last 45 days
   const byName = new Map();
 
-  for (const s of allSales) {
+  for (const s of allSales || []) {
     const when = Date.parse(s.dateSold || s.date || '');
     if (!Number.isFinite(when) || when < cutoff) continue;   // 45d window only
 
@@ -285,13 +285,14 @@ function summarizeVendors(allSales = []) {
   }
 
   const rows = [...byName.values()];
-  const totalDeals = rows.reduce((sum, r) => sum + r.deals, 0) || 0;
+  const totalDeals = rows.reduce((sum, r) => sum + r.deals, 0);
 
   for (const r of rows) {
     r.shareDeals = totalDeals ? +(r.deals * 100 / totalDeals).toFixed(1) : 0;
   }
 
   rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
+
   return { rows, totalDeals };
 }
 
