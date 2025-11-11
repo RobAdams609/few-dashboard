@@ -4,14 +4,14 @@
     "talkMin":100,
     "loggedMin": 370,
     "leads": 9,
-    "sold": 2
+    "sold": 4
   },
   "fabricio.a.navarete@gmail.com": {
     "calls": 1,
     "talkMin": 0,
     "loggedMin": 151,
     "leads": 18,
-    "sold": 1
+    "sold": 2
   },
   "landisagency@gmail.com": {
     "calls": 0,
@@ -25,7 +25,7 @@
     "talkMin": 2,
     "loggedMin": 127,
     "leads": 6,
-    "sold": 2
+    "sold": 6
   },
   "phil@americanpathinsurance.com": {
     "calls": 19,
@@ -46,14 +46,14 @@
     "talkMin": 0,
     "loggedMin": 117,
     "leads": 3,
-    "sold": 5
+    "sold": 7
   },
   "maries.healthadvisor@gmail.com": {
     "calls": 25,
     "talkMin": 4,
     "loggedMin": 279,
     "leads": 21,
-    "sold": 4
+    "sold": 5
   },
   "fraitzline.healthadvisor@gmail.com": {
     "calls": 0,
