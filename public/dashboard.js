@@ -1,4 +1,4 @@
-293?/* FEW Dashboard — Single File
+/* FEW Dashboard — Single File
 
    Boards (30s rotate) — ORDER:
      1. YTD — Team
@@ -111,7 +111,7 @@
   function parseApiDate(raw) {
     if (!raw) return NaN;
     let s = String(raw).trim();
-    // handle "YYYY-MM-DD HH:mm:ss" or already ISO
+    // handle "YYYY-MM-DD HH:mm:ss" style by treating it as UTC
     if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !s.endsWith('Z')) {
       s = s.replace(' ', 'T') + 'Z';
     }
@@ -120,7 +120,6 @@
   }
 
   function toESTms(utcMs) {
-    // Browser-local trick: create EST string then parse back
     const utc = new Date(utcMs);
     const estStr = utc.toLocaleString('en-US', { timeZone: 'America/New_York' });
     return new Date(estStr).getTime();
@@ -131,10 +130,9 @@
       new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
     );
     const day = nowEst.getDay(); // 0=Sun..6=Sat
-    // days since last Friday:
-    const sinceFri = (day + 7 - 5) % 7;
+    const sinceFri = (day + 7 - 5) % 7; // days since last Friday
     const start = new Date(nowEst);
-    start.setHours(0,0,0,0);
+    start.setHours(0, 0, 0, 0);
     start.setDate(start.getDate() - sinceFri);
     const end = new Date(start);
     end.setDate(end.getDate() + 7);
@@ -194,7 +192,7 @@
     if (bannerSub) bannerSub.textContent = s || '';
   };
 
-  // --------- Inline CSS (minimal)
+  // --------- Inline CSS
   (function injectCSS(){
     if (document.getElementById('few-inline-css')) return;
     const css = `
@@ -263,38 +261,37 @@
     `;
   }
 
-   // -------- Vendor summary (rolling 45d, ONLY your 18 vendors — no exclusions)
-function summarizeVendors(allSales = []) {
-  const cutoff = Date.now() - 45 * 24 * 60 * 60 * 1000; // last 45 days
-  const byName = new Map();
+  // -------- Vendor summary (rolling 45d, ONLY your 18 vendors — no exclusions)
+  function summarizeVendors(allSales = []) {
+    const cutoff = Date.now() - 45 * 24 * 60 * 60 * 1000; // last 45 days
+    const byName = new Map();
 
-  for (const s of allSales || []) {
-    const when = Date.parse(s.dateSold || s.date || '');
-    if (!Number.isFinite(when) || when < cutoff) continue;   // 45d window only
+    for (const s of allSales) {
+      const when = Date.parse(s.dateSold || s.date || '');
+      if (!Number.isFinite(when) || when < cutoff) continue;   // 45d window only
 
-    const vendorRaw = String(s.soldProductName || '').trim();
-    if (!VENDOR_SET.has(vendorRaw)) continue;                // only your 18 vendors
+      const vendorRaw = String(s.soldProductName || '').trim();
+      if (!VENDOR_SET.has(vendorRaw)) continue;                // only your 18 vendors
 
-    const vendor = vendorRaw;
-    const amount = Number(s.amount) || 0;
+      const vendor = vendorRaw;
+      const amount = Number(s.amount) || 0;
 
-    const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
-    row.deals += 1;
-    row.amount += amount;
-    byName.set(vendor, row);
+      const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
+      row.deals += 1;
+      row.amount += amount;
+      byName.set(vendor, row);
+    }
+
+    const rows = [...byName.values()];
+    const totalDeals = rows.reduce((sum, r) => sum + r.deals, 0) || 0;
+
+    for (const r of rows) {
+      r.shareDeals = totalDeals ? +(r.deals * 100 / totalDeals).toFixed(1) : 0;
+    }
+
+    rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
+    return { rows, totalDeals };
   }
-
-  const rows = [...byName.values()];
-  const totalDeals = rows.reduce((sum, r) => sum + r.deals, 0);
-
-  for (const r of rows) {
-    r.shareDeals = totalDeals ? +(r.deals * 100 / totalDeals).toFixed(1) : 0;
-  }
-
-  rows.sort((a, b) => b.deals - a.deals || b.amount - a.amount);
-
-  return { rows, totalDeals };
-}
 
   // --------- Compute weekly stats from allSales (Fri–Thu EST)
   function computeWeeklyStats(allSales) {
@@ -310,13 +307,13 @@ function summarizeVendors(allSales = []) {
       if (tEST < startMs || tEST > endMs) continue;
 
       const rawVendor = String(s.soldProductName || '').trim();
-      if (!VENDOR_SET.has(rawVendor)) continue; // every deal has vendor; this keeps garbage out
+      if (!VENDOR_SET.has(rawVendor)) continue;
 
       const canon = canonicalName(s.agent || s.owner || '');
       const key = norm(canon);
       if (!canon || canon === '__EXCLUDED__' || !key || EXCLUDED_AGENTS.has(key)) continue;
 
-      const amount = +s.amount || +s.av12x || 0; // you’ve said your AV feed is already 12x
+      const amount = +s.amount || +s.av12x || 0;
       totalAV += amount;
       totalDeals += 1;
 
@@ -406,8 +403,6 @@ function summarizeVendors(allSales = []) {
 
   async function renderWeeklyActivity() {
     setView('Weekly Activity');
-    const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
-    const json = res && res.ok ? await res.json() : null;
 
     if (headEl) {
       headEl.innerHTML = `
@@ -422,6 +417,9 @@ function summarizeVendors(allSales = []) {
         </tr>
       `;
     }
+
+    const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
+    const json = res && res.ok ? await res.json() : null;
 
     if (!json || typeof json !== 'object') {
       if (bodyEl) {
@@ -447,24 +445,26 @@ function summarizeVendors(allSales = []) {
       const loggedMin = +stats.loggedMin || 0;
       const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
 
-      let photo = null;
+      let photoUrl = null;
       if (rosterEntry && rosterEntry.photo) {
         const s = String(rosterEntry.photo);
-        photo = (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
+        photoUrl = (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
       }
 
-      rows.push({ name, leads, sold, calls, talkMin, loggedMin, conv, photoUrl: photo });
+      rows.push({ name, leads, sold, calls, talkMin, loggedMin, conv, photoUrl });
     }
 
     rows.sort((a,b)=> b.sold - a.sold || b.leads - a.leads);
 
     if (bodyEl) {
       bodyEl.innerHTML = rows.map(r => {
+        const initials = (r.name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+        const avatar = r.photoUrl
+          ? `<img src="${r.photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
+          : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initials || '?'}</div>`;
         return `
           <tr>
-            ${agentRowHTML({ name: r.name, right1: '', photoUrl: r.photoUrl }).replace(
-              /<td class="right">.*?<\/td>/, ''
-            )}
+            <td class="agent" style="display:flex;align-items:center">${avatar}<span>${r.name}</span></td>
             <td class="right">${r.leads}</td>
             <td class="right">${r.sold}</td>
             <td class="right">${r.conv}%</td>
@@ -490,7 +490,6 @@ function summarizeVendors(allSales = []) {
     const top = per.reduce((a,b)=> b.av > a.av ? b : a, per[0]);
     const want = norm(top.name);
 
-    // YTD lookup
     let ytdVal = 0;
     if (Array.isArray(data.ytdList)) {
       const hit = data.ytdList.find(x => norm(x.name) === want);
@@ -658,10 +657,9 @@ function summarizeVendors(allSales = []) {
   }
 
   // ---------- BACKFILL
-  // IMPORTANT:
-  // Replace the placeholder text below with your FULL 45-day backfill block EXACTLY as you maintain it.
+  // Paste your full 45-day backfill block between the backticks:
   const BACKFILL_TEXT = `
-  `; // <-- paste your real backfill between these backticks. No ellipsis.
+  `;
 
   function parseBackfill(text) {
     const out = [];
@@ -716,13 +714,9 @@ function summarizeVendors(allSales = []) {
     const liveAllSales = Array.isArray(sold.allSales) ? sold.allSales : [];
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
 
-    // Rolling 45d vendor base
     const vendorRows = summarizeVendors(mergedAllSales);
-
-    // Weekly stats from same merged sales
     const week = computeWeeklyStats(mergedAllSales);
 
-    // seed splash IDs from current 45d universe
     for (const s of mergedAllSales) {
       seenLeadIds.add(saleId(s));
     }
@@ -757,7 +751,7 @@ function summarizeVendors(allSales = []) {
     setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // --------- Live sale polling (keeps 45d + week & vendors in sync, no extra UX)
+  // --------- Live sale polling
   function startLiveSalePolling(initialData) {
     const POLL_MS = 12_000;
     const cutoffWindow = 45 * 24 * 3600 * 1000;
