@@ -1,20 +1,23 @@
-/* FEW Dashboard — Single File (Full Rewrite, 45d rolling, 18 vendors, full backfill, OE deadline)
-   Boards (30s rotate):
-     1. This Week — Roster
-     2. YTD — Team
-     3. Weekly Activity (calls_week_override.json, with headshots)
-     4. Lead Vendors — Last 45 Days
-     5. PAR — Tracking  (NOT principle banner)
-     6. Agent of the Week (auto from weekly API, not manual)
+/* FEW Dashboard — Single File
 
-   Extras:
-     - Center splash on new sale (60s)
-     - Vendor donut + legend
-     - Headshots w/ canonical names (Ajani → "a s", Fabricio → "f n")
-     - Rules rotation every 12h (kept): “THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT”
-     - 45d rolling vendor aggregation, backfill + live merge
-     - OE Countdown → Dec 15, 2025 11:59 PM EST, shows “LIVE!” after
+   Boards (30s rotate) — ORDER:
+     1. YTD — Team
+     2. PAR — Tracking
+     3. Lead Vendors — Last 45 Days (rolling)
+     4. This Week — Roster
+     5. Weekly Activity (calls_week_override.json)
+     6. Agent of the Week
+
+   Rules:
+     - Week = Fri 12:00am EST → Thu 11:59:59pm EST
+     - This Week cards / roster / AOTW all use SAME filtered sales set
+     - Lead Vendors = allowed 18 vendors, rolling last 45 days from same sales universe
+     - Weekly Activity = ONLY calls_week_override.json override; always shows if file exists
+     - No random renaming. Only explicit NAME_ALIASES.
+     - Exclude A C + Abigail Austin from sales metrics.
+     - AV is treated as already 12x (as per your API / instructions).
 */
+
 (() => {
   // --------- Endpoints
   const ENDPOINTS = {
@@ -29,7 +32,6 @@
 
   // --------- Tiny utils
   const $  = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const fmtMoney = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
   const safe = (v, d) => (v === undefined || v === null ? d : v);
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -45,10 +47,7 @@
     }
   };
 
-  // --------- Allowed vendor labels (canonical, permanent) — 18 total
-  // YOU SAID 18: $7.50, TTM Nice!, George Region Shared, Red Media, Blast/Bulk, Exclusive JUMBO,
-  // ABC, Shared Jumbo, VS Default, RKA Website, Redrip/Give up Purchased, Lamy Dynasty Specials,
-  // JUMBO Splits, Exclusive 30s, Positive Intent/Argos, HotLine Bling, Referral, CG Exclusive
+  // --------- Vendors (18 allowed)
   const VENDOR_SET = new Set([
     '$7.50',
     'TTM Nice!',
@@ -70,41 +69,83 @@
     'CG Exclusive'
   ]);
 
-// --------- Canonical names (stop inventing Fabricio names)
-const NAME_ALIASES = new Map([
-  // Fabricio — map all variants to roster canonical "f n"
-  ['fabricio a navarrete', 'f n'],
-  ['fabricio navarrete', 'f n'],
-  ['fabricio navarrete cervantes', 'f n'],
-  ['fabricio cervantes', 'f n'],
-  ['fabricio', 'f n'],
-  ['fab', 'f n'],
-  ['f n', 'f n'],
+  // --------- Name canon + exclusions
+  const NAME_ALIASES = new Map([
+    ['fabricio a navarrete', 'Fabricio Navarrete Cervantes'],
+    ['fabricio navarrete', 'Fabricio Navarrete Cervantes'],
+    ['fabricio navarrete cervantes', 'Fabricio Navarrete Cervantes'],
+    ['fabricio cervantes', 'Fabricio Navarrete Cervantes'],
+    ['fab', 'Fabricio Navarrete Cervantes'],
+    ['f n', 'Fabricio Navarrete Cervantes'],
 
-  // Ajani — map to roster canonical "a s"
-  ['ajani senior', 'a s'],
-  ['ajani s', 'a s'],
-  ['a s', 'a s'],
+    ['ajani senior', 'Ajani Senior'],
+    ['ajani s', 'Ajani Senior'],
+    ['a s', 'Ajani Senior'],
 
-  // rest — mirror roster names (lowercased keys)
-  ['marie saint cyr', 'marie saint cyr'],
-  ['eli thermilus', 'eli thermilus'],
-  ['philip baxter', 'philip baxter'],
-  ['robert adams', 'robert adams'],
-  ['nathan johnson', 'nathan johnson'],
-  ['anna gleason', 'anna'],
-  ['sebastian beltran', 'sebastian beltran'],
-  ['michelle landis', 'michelle landis'],
-  ['elizabeth snyder', 'elizabeth snyder'],
-  ['fraitzline healthadvisor', 'fraitzline healthadvisor'] // keep roster key if used
-]);
-const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
+    // others map to themselves canonically
+    ['marie saint cyr', 'Marie Saint Cyr'],
+    ['eli thermilus', 'Eli Thermilus'],
+    ['philip baxter', 'Philip Baxter'],
+    ['robert adams', 'Robert Adams'],
+    ['nathan johnson', 'Nathan Johnson'],
+    ['anna gleason', 'Anna Gleason'],
+    ['sebastian beltran', 'Sebastian Beltran'],
+    ['michelle landis', 'Michelle Landis'],
+    ['elizabeth snyder', 'Elizabeth Snyder'],
+    ['fraitzline gustave', 'Fraitzline Gustave']
+  ]);
 
-  // --------- Headshot resolver (with photoURL helper)
+  const EXCLUDED_AGENTS = new Set([
+    'a c',
+    'abigail austin'
+  ]);
+
+  const canonicalName = (name) => {
+    const key = norm(name);
+    if (!key) return '';
+    if (EXCLUDED_AGENTS.has(key)) return '__EXCLUDED__';
+    return NAME_ALIASES.get(key) || name;
+  };
+
+  // --------- Date helpers (Ringy UTC → EST, Fri–Thu week)
+  function parseApiDate(raw) {
+    if (!raw) return NaN;
+    let s = String(raw).trim();
+    // handle "YYYY-MM-DD HH:mm:ss" or already ISO
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s) && !s.endsWith('Z')) {
+      s = s.replace(' ', 'T') + 'Z';
+    }
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? NaN : t;
+  }
+
+  function toESTms(utcMs) {
+    // Browser-local trick: create EST string then parse back
+    const utc = new Date(utcMs);
+    const estStr = utc.toLocaleString('en-US', { timeZone: 'America/New_York' });
+    return new Date(estStr).getTime();
+  }
+
+  function currentWeekWindowEST() {
+    const nowEst = new Date(
+      new Date().toLocaleString('en-US', { timeZone: 'America/New_York' })
+    );
+    const day = nowEst.getDay(); // 0=Sun..6=Sat
+    // days since last Friday:
+    const sinceFri = (day + 7 - 5) % 7;
+    const start = new Date(nowEst);
+    start.setHours(0,0,0,0);
+    start.setDate(start.getDate() - sinceFri);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 7);
+    end.setMilliseconds(-1);
+    return { startMs: start.getTime(), endMs: end.getTime() };
+  }
+
+  // --------- Headshots
   function buildHeadshotResolver(roster) {
-    const byName = new Map(), byEmail = new Map(), byPhone = new Map(), byInitial = new Map();
-
-    const initialsOf = (full = '') => full.trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+    const byName = new Map();
+    const byEmail = new Map();
 
     const photoURL = (p) => {
       if (!p) return null;
@@ -116,44 +157,36 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
       const cName = norm(canonicalName(p.name));
       const email = String(p.email || '').trim().toLowerCase();
       const photo = photoURL(p.photo);
-      if (cName) byName.set(cName, photo);
-      if (email) byEmail.set(email, photo);
-      if (Array.isArray(p.phones)) {
-        for (const raw of p.phones) {
-          const phone = String(raw || '').replace(/\D+/g,'');
-          if (phone) byPhone.set(phone, photo);
-        }
-      }
-      const ini = initialsOf(p.name || '');
-      if (ini) byInitial.set(ini, photo);
+      if (cName && !byName.has(cName)) byName.set(cName, photo);
+      if (email && !byEmail.has(email)) byEmail.set(email, photo);
     }
 
-    return (agent = {}) => {
-      const cName = norm(canonicalName(agent.name));
-      const email = String(agent.email || '').trim().toLowerCase();
-      const phone = String(agent.phone || '').replace(/\D+/g,'');
-      const ini   = (agent.name ? agent.name : '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
+    return ({ name, email }) => {
+      const cName = norm(canonicalName(name));
+      const em = String(email || '').trim().toLowerCase();
       return (
         byName.get(cName) ??
-        byEmail.get(email) ??
-        (phone ? byPhone.get(phone) : null) ??
-        byInitial.get(ini) ??
+        byEmail.get(em) ??
         null
       );
     };
   }
 
-  // --------- Layout anchors (match your index.html)
+  // --------- Layout anchors
   const bannerTitle = $('.banner .title');
   const bannerSub   = $('.banner .subtitle');
-  const cards = { calls: $('#sumCalls'), av: $('#sumSales'), deals: $('#sumTalk') };
+  const cards = {
+    calls: $('#sumCalls'),
+    av:    $('#sumSales'),
+    deals: $('#sumTalk')
+  };
   const headEl      = $('#thead');
   const bodyEl      = $('#tbody');
   const viewLabelEl = $('#viewLabel');
 
-  // Kill legacy ticker if any — your current working dash already does this
-  const ticker = $('#ticker');
-  if (ticker && ticker.parentNode) ticker.parentNode.removeChild(ticker);
+  // remove any old ticker node if present
+  const oldTicker = $('#ticker');
+  if (oldTicker && oldTicker.parentNode) oldTicker.parentNode.removeChild(oldTicker);
 
   const setView = (t) => { if (viewLabelEl) viewLabelEl.textContent = t; };
   const setBanner = (h, s = '') => {
@@ -161,7 +194,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     if (bannerSub) bannerSub.textContent = s || '';
   };
 
-  // --------- Inject minimal CSS
+  // --------- Inline CSS (minimal)
   (function injectCSS(){
     if (document.getElementById('few-inline-css')) return;
     const css = `
@@ -188,7 +221,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     document.head.appendChild(tag);
   })();
 
-  // --------- Gold center splash for new sale (60s)
+  // --------- Splash
   function showSplash({ name, amount, soldProductName }) {
     const el = document.createElement('div');
     el.className = 'splash';
@@ -205,29 +238,22 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     s.leadId || s.id || `${s.agent}-${s.dateSold || s.date}-${s.soldProductName}-${s.amount}`
   );
 
-  // --------- Cards
-  function renderCards({ calls, sold }) {
-    const callsVal = safe(calls?.team?.calls, 0);
-
-    let avVal = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
-    if (!avVal && Array.isArray(sold?.perAgent)) {
-      avVal = sold.perAgent.reduce((a,p)=> a + (+p.av12x || +p.av12X || +p.amount || 0), 0);
-    }
-
-    let dealsVal = safe(sold?.team?.totalSales, 0);
-    if (!dealsVal && Array.isArray(sold?.perAgent)) {
-      dealsVal = sold.perAgent.reduce((a,p)=> a + (+p.sales || 0), 0);
-    }
+  // --------- Cards (use computed weekly stats)
+  function renderCards({ calls, week }) {
+    const callsVal  = safe(calls?.team?.calls, 0);
+    const avVal     = safe(week?.totalAV, 0);
+    const dealsVal  = safe(week?.totalDeals, 0);
 
     if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
     if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
     if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
   }
 
-  function agentRowHTML({ name, right1, right2, photoUrl, initial }) {
+  function agentRowHTML({ name, right1, right2, photoUrl }) {
+    const initials = (name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
     const avatar = photoUrl
       ? `<img src="${photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
-      : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initial || '?'}</div>`;
+      : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initials || '?'}</div>`;
     return `
       <tr>
         <td class="agent" style="display:flex;align-items:center">${avatar}<span>${name}</span></td>
@@ -237,61 +263,110 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     `;
   }
 
-  // --------- Vendors aggregation (rolling 45d)
-  function summarizeVendors(allSales = []) {
+  // --------- Vendor summary (rolling 45d, allowed vendors only)
+  function summarizeVendors(allSales) {
     const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
     const byName = new Map();
-    for (const s of allSales) {
-      const t = Date.parse(s.dateSold || s.date || '');
-      if (!Number.isFinite(t) || t < cutoff) continue;
-      const vendorRaw = String(s.soldProductName || 'Unknown').trim();
-      const vendor = VENDOR_SET.has(vendorRaw) ? vendorRaw : null;
-      if (!vendor) continue;
 
-      const amount = +s.amount || 0;
-      const row = byName.get(vendor) || { name: vendor, deals: 0, amount: 0 };
-      row.deals += 1; row.amount += amount;
-      byName.set(vendor, row);
+    for (const s of allSales || []) {
+      const t = parseApiDate(s.dateSold || s.date);
+      if (!Number.isFinite(t)) continue;
+      if (t < cutoff) continue;
+
+      const rawVendor = String(s.soldProductName || '').trim();
+      if (!VENDOR_SET.has(rawVendor)) continue;
+
+      const agentKey = norm(canonicalName(s.agent || s.owner || ''));
+      if (EXCLUDED_AGENTS.has(agentKey)) continue;
+
+      const amount = +s.amount || +s.av12x || 0;
+      const row = byName.get(rawVendor) || { name: rawVendor, deals: 0, amount: 0 };
+      row.deals += 1;
+      row.amount += amount;
+      byName.set(rawVendor, row);
     }
+
     const rows = [...byName.values()];
-    const totalDeals  = rows.reduce((a,r)=> a + r.deals, 0) || 1;
-    const totalAmount = rows.reduce((a,r)=> a + r.amount, 0);
+    const totalDeals  = rows.reduce((a,r)=> a + r.deals, 0) || 0;
+    const totalAmount = rows.reduce((a,r)=> a + r.amount, 0) || 0;
+
     for (const r of rows) {
-      r.shareDeals  = +(r.deals  * 100 / totalDeals).toFixed(1);
+      r.shareDeals  = totalDeals ? +(r.deals  * 100 / totalDeals).toFixed(1) : 0;
       r.shareAmount = totalAmount ? +(r.amount * 100 / totalAmount).toFixed(1) : 0;
     }
-    rows.sort((a,b)=> b.shareDeals - a.shareDeals || b.amount - a.amount);
+    rows.sort((a,b)=> b.deals - a.deals || b.amount - a.amount);
+
     return { rows, totalDeals, totalAmount };
   }
 
+  // --------- Compute weekly stats from allSales (Fri–Thu EST)
+  function computeWeeklyStats(allSales) {
+    const { startMs, endMs } = currentWeekWindowEST();
+    const perMap = new Map();
+    let totalAV = 0;
+    let totalDeals = 0;
+
+    for (const s of allSales || []) {
+      const tUTC = parseApiDate(s.dateSold || s.date);
+      if (!Number.isFinite(tUTC)) continue;
+      const tEST = toESTms(tUTC);
+      if (tEST < startMs || tEST > endMs) continue;
+
+      const rawVendor = String(s.soldProductName || '').trim();
+      if (!VENDOR_SET.has(rawVendor)) continue; // every deal has vendor; this keeps garbage out
+
+      const canon = canonicalName(s.agent || s.owner || '');
+      const key = norm(canon);
+      if (!canon || canon === '__EXCLUDED__' || !key || EXCLUDED_AGENTS.has(key)) continue;
+
+      const amount = +s.amount || +s.av12x || 0; // you’ve said your AV feed is already 12x
+      totalAV += amount;
+      totalDeals += 1;
+
+      const cur = perMap.get(canon) || { name: canon, av: 0, deals: 0 };
+      cur.av += amount;
+      cur.deals += 1;
+      perMap.set(canon, cur);
+    }
+
+    return {
+      totalAV,
+      totalDeals,
+      perAgent: [...perMap.values()].sort((a,b)=> b.av - a.av)
+    };
+  }
+
   // --------- Boards
-  function renderRosterBoard({ roster, sold, resolvePhoto }) {
+
+  function renderRosterBoard({ roster, week, resolvePhoto }) {
     setView('This Week — Roster');
-    const per = new Map();
-    for (const a of (sold?.perAgent || [])) {
-      const key = norm(canonicalName(a.name));
-      per.set(key, {
-        av: +a.av12x || +a.av12X || +a.amount || 0,
-        deals: +a.sales || 0
-      });
-    }
     const rows = [];
+
     for (const p of roster || []) {
-      const key = norm(canonicalName(p.name));
-      const d = per.get(key) || { av:0, deals:0 };
+      const canon = canonicalName(p.name);
+      if (canon === '__EXCLUDED__') continue;
+
+      const wk = (week?.perAgent || []).find(a => norm(a.name) === norm(canon));
+      const av = wk ? wk.av : 0;
+      const deals = wk ? wk.deals : 0;
+
       const photo = resolvePhoto({ name: p.name, email: p.email });
-      const initials = (p.name || '').trim().split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-      rows.push({ name:p.name, av:d.av, deals:d.deals, photo, initials });
+      rows.push({ name: canon || p.name, av, deals, photo });
     }
+
     rows.sort((a,b)=> b.av - a.av);
 
     if (headEl) headEl.innerHTML = `
       <tr><th>Agent</th><th class="right">Submitted AV</th><th class="right">Deals</th></tr>
     `;
-    if (bodyEl) bodyEl.innerHTML = rows.map(r => agentRowHTML({
-      name:r.name, right1:fmtMoney(r.av), right2:(r.deals||0).toLocaleString(),
-      photoUrl:r.photo, initial:r.initials
-    })).join('');
+    if (bodyEl) bodyEl.innerHTML = rows.map(r =>
+      agentRowHTML({
+        name: r.name,
+        right1: fmtMoney(r.av),
+        right2: (r.deals || 0).toLocaleString(),
+        photoUrl: r.photo
+      })
+    ).join('');
   }
 
   function renderYtdBoard({ ytdList, ytdTotal, resolvePhoto }) {
@@ -303,97 +378,39 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
       ${rows.map(p => agentRowHTML({
         name: p.name,
         right1: fmtMoney(p.av || 0),
-        photoUrl: resolvePhoto({ name: p.name }),
-        initial: (p.name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('')
+        photoUrl: resolvePhoto({ name: p.name, email: p.email })
       })).join('')}
-      <tr class="total"><td><strong>Total</strong></td>
-      <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td></tr>
+      <tr class="total">
+        <td><strong>Total</strong></td>
+        <td class="right"><strong>${fmtMoney(ytdTotal || 0)}</strong></td>
+      </tr>
     `;
   }
 
-  // --- WEEKLY ROSTER CACHE (for Weekly Activity headshots)
+  // --- WEEKLY ACTIVITY (calls_week_override.json)
   let WEEKLY_ROSTER_CACHE = null;
   async function getRosterByEmail() {
     if (WEEKLY_ROSTER_CACHE) return WEEKLY_ROSTER_CACHE;
     try {
       const r = await fetch('/headshots/roster.json', { cache: 'no-store' });
-      if (r.ok) {
-        const arr = await r.json();
-        const map = new Map();
-        for (const p of arr || []) {
-          const em = (p.email || '').trim().toLowerCase();
-          if (em) map.set(em, p);
-        }
-        WEEKLY_ROSTER_CACHE = map;
-        return map;
+      if (!r.ok) throw 0;
+      const arr = await r.json();
+      const map = new Map();
+      for (const p of arr || []) {
+        const em = (p.email || '').trim().toLowerCase();
+        if (em) map.set(em, p);
       }
-    } catch (e) {}
-    WEEKLY_ROSTER_CACHE = new Map();
+      WEEKLY_ROSTER_CACHE = map;
+    } catch {
+      WEEKLY_ROSTER_CACHE = new Map();
+    }
     return WEEKLY_ROSTER_CACHE;
   }
 
-  // --- WEEKLY ACTIVITY (calls_week_override.json)
   async function renderWeeklyActivity() {
-    const headEl = document.querySelector('#thead');
-    const bodyEl = document.querySelector('#tbody');
-    const viewLabelEl = document.querySelector('#viewLabel');
-
-    if (viewLabelEl) viewLabelEl.textContent = 'Weekly Activity';
-
-    // pull override
+    setView('Weekly Activity');
     const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
     const json = res && res.ok ? await res.json() : null;
-
-    // if no data → reset categories to 0 (new week)
-    if (!json || typeof json !== 'object') {
-      if (headEl) {
-        headEl.innerHTML = `
-          <tr>
-            <th>Agent</th>
-            <th class="right">Leads</th>
-            <th class="right">Sold</th>
-            <th class="right">Conv%</th>
-            <th class="right">Calls</th>
-            <th class="right">Talk&nbsp;min</th>
-            <th class="right">Log&nbsp;min</th>
-          </tr>
-        `;
-      }
-      if (bodyEl) {
-        bodyEl.innerHTML = `<tr><td colspan="7" style="padding:18px;color:#5c6c82;">No call data.</td></tr>`;
-      }
-      return;
-    }
-
-    const rows = [];
-    const rosterMap = await getRosterByEmail();
-
-    for (const [email, stats] of Object.entries(json)) {
-      const em = (email || '').toLowerCase();
-      const rosterEntry = rosterMap.get(em);
-      const nameFromEmail = (email || '').split('@')[0].replace(/\./g, ' ');
-      const dispName = rosterEntry ? rosterEntry.name : (stats.name || nameFromEmail);
-      const name = dispName.replace(/\b\w/g, c => c.toUpperCase());
-
-      const leads = Number(stats.leads || 0);
-      const sold = Number(stats.sold || 0);
-      const calls = Number(stats.calls || 0);
-      const talkMin = Number(stats.talkMin || 0);
-      const loggedMin = Number(stats.loggedMin || 0);
-      const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
-
-      // pull photo if roster has it
-      let photoUrl = null;
-      if (rosterEntry && rosterEntry.photo) {
-        const s = String(rosterEntry.photo);
-        photoUrl = (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
-      }
-
-      rows.push({ name, email, leads, sold, conv, calls, talkMin, loggedMin, photoUrl });
-    }
-
-    // sort: sold desc → leads desc
-    rows.sort((a, b) => b.sold - a.sold || b.leads - a.leads);
 
     if (headEl) {
       headEl.innerHTML = `
@@ -409,153 +426,117 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
       `;
     }
 
+    if (!json || typeof json !== 'object') {
+      if (bodyEl) {
+        bodyEl.innerHTML = `<tr><td colspan="7" style="padding:18px;color:#5c6c82;">No weekly activity override loaded.</td></tr>`;
+      }
+      return;
+    }
+
+    const rosterMap = await getRosterByEmail();
+    const rows = [];
+
+    for (const [email, stats] of Object.entries(json)) {
+      const em = (email || '').toLowerCase();
+      const rosterEntry = rosterMap.get(em);
+      const baseName = rosterEntry?.name || (stats.name || (email || '').split('@')[0].replace(/\./g,' '));
+      const name = canonicalName(baseName);
+      if (name === '__EXCLUDED__') continue;
+
+      const leads = +stats.leads || 0;
+      const sold = +stats.sold || 0;
+      const calls = +stats.calls || 0;
+      const talkMin = +stats.talkMin || 0;
+      const loggedMin = +stats.loggedMin || 0;
+      const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
+
+      let photo = null;
+      if (rosterEntry && rosterEntry.photo) {
+        const s = String(rosterEntry.photo);
+        photo = (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
+      }
+
+      rows.push({ name, leads, sold, calls, talkMin, loggedMin, conv, photoUrl: photo });
+    }
+
+    rows.sort((a,b)=> b.sold - a.sold || b.leads - a.leads);
+
     if (bodyEl) {
       bodyEl.innerHTML = rows.map(r => {
-        const initials = r.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-        const avatar = r.photoUrl
-          ? `<img src="${r.photoUrl}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15);" />`
-          : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;font-size:12px;font-weight:700;color:#89a2c6;border:1px solid rgba(255,255,255,.15);">${initials}</div>`;
         return `
           <tr>
-            <td style="display:flex;align-items:center;">
-              ${avatar}
-              ${r.name}
-            </td>
-            <td class="right">${r.leads.toLocaleString()}</td>
-            <td class="right">${r.sold.toLocaleString()}</td>
+            ${agentRowHTML({ name: r.name, right1: '', photoUrl: r.photoUrl }).replace(
+              /<td class="right">.*?<\/td>/, ''
+            )}
+            <td class="right">${r.leads}</td>
+            <td class="right">${r.sold}</td>
             <td class="right">${r.conv}%</td>
-            <td class="right">${r.calls.toLocaleString()}</td>
-            <td class="right">${r.talkMin.toLocaleString()}</td>
-            <td class="right">${r.loggedMin.toLocaleString()}</td>
+            <td class="right">${r.calls}</td>
+            <td class="right">${r.talkMin}</td>
+            <td class="right">${r.loggedMin}</td>
           </tr>
         `;
       }).join('');
     }
   }
 
-// --- AGENT OF THE WEEK (AUTO from API + direct YTD pull)
-async function renderAgentOfWeekAuto(data) {
-  setView('Agent of the Week');
-
-  const sold = data?.sold || {};
-  const perAgent = Array.isArray(sold.perAgent) ? sold.perAgent : [];
-
-  // no weekly data → show empty
-  if (!perAgent.length) {
-    if (document.querySelector('#thead')) {
-      document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+  // --- Agent of the Week (from weekly stats)
+  async function renderAgentOfWeekAuto(data) {
+    setView('Agent of the Week');
+    const per = Array.isArray(data.week?.perAgent) ? data.week.perAgent : [];
+    if (!per.length) {
+      if (headEl) headEl.innerHTML = `<tr><th>Agent of the Week</th></tr>`;
+      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
+      return;
     }
-    if (document.querySelector('#tbody')) {
-      document.querySelector('#tbody').innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No weekly AV submitted.</td></tr>`;
+
+    const top = per.reduce((a,b)=> b.av > a.av ? b : a, per[0]);
+    const want = norm(top.name);
+
+    // YTD lookup
+    let ytdVal = 0;
+    if (Array.isArray(data.ytdList)) {
+      const hit = data.ytdList.find(x => norm(x.name) === want);
+      if (hit) ytdVal = +hit.av || +hit.ytd_av || 0;
     }
-    return;
-  }
 
-  // 1) pick top weekly by AV
-  let top = null;
-  for (const row of perAgent) {
-    const nameRaw = row.name || row.agent || '';
-    const name = canonicalName(nameRaw);
-    const av = Number(row.av12x || row.av12X || row.amount || 0);
-    const deals = Number(row.sales || row.deals || 0);
-    if (!top || av > top.av) {
-      top = { name, av, deals };
-    }
-  }
-  if (!top) {
-    if (document.querySelector('#thead')) {
-      document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
-    }
-    if (document.querySelector('#tbody')) {
-      document.querySelector('#tbody').innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No data.</td></tr>`;
-    }
-    return;
-  }
+    const photo = data.resolvePhoto({ name: top.name });
+    const initials = (top.name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
 
-  // 2) get YTD from three places, in this order:
-  //    a) in-memory (data.ytdList)
-  //    b) live fetch /ytd_av.json (array)
-  //    c) live fetch /ytd_av.json (wrapped object)
-  const wantName = norm(top.name);
-  let ytdVal = 0;
-
-  // a) in-memory
-  if (Array.isArray(data.ytdList)) {
-    const hit = data.ytdList.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
-    if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
-  }
-
-  // b/c) if still 0 → try fetch
-  if (!ytdVal) {
-    try {
-      const r = await fetch('/ytd_av.json', { cache: 'no-store' });
-      if (r.ok) {
-        const json = await r.json();
-
-        // case 1: array
-        if (Array.isArray(json)) {
-          const hit = json.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
-          if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
-        } else if (json && typeof json === 'object') {
-          // case 2: object that has a list/agents field
-          const arr = Array.isArray(json.list)
-            ? json.list
-            : Array.isArray(json.agents)
-              ? json.agents
-              : [];
-          if (arr.length) {
-            const hit = arr.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
-            if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
-          }
-        }
-      }
-    } catch (_) {
-      // ignore
-    }
-  }
-
-  // 3) photo
-  const photo = data.resolvePhoto ? data.resolvePhoto({ name: top.name }) : null;
-  const initials = top.name.split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-
-  const thead = document.querySelector('#thead');
-  const tbody = document.querySelector('#tbody');
-
-  if (thead) thead.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
-  if (tbody) {
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="4" style="padding:26px 18px;">
-          <div style="display:flex;align-items:center;gap:18px;">
-            ${
-              photo
-                ? `<img src="${photo}" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
-                : `<div style="width:92px;height:92px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
-            }
-            <div style="flex:1;">
-              <div style="font-size:22px;font-weight:700;">${top.name}</div>
-              <div style="margin-top:4px;opacity:.85;">Weekly Submitted AV • ${fmtMoney(top.av)}</div>
-              <div style="margin-top:2px;opacity:.55;">Deals this week • ${(top.deals || 0).toLocaleString()}</div>
-              <div style="margin-top:2px;opacity:.55;">YTD AV • ${fmtMoney(ytdVal)}</div>
-              <div style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.4);border-radius:999px;padding:4px 16px;font-size:12px;letter-spacing:.04em;">
-                <span style="font-size:16px;">🥇</span>
-                <span>Agent of the Week Belt</span>
+    if (headEl) headEl.innerHTML = `<tr><th colspan="4">AGENT OF THE WEEK</th></tr>`;
+    if (bodyEl) {
+      bodyEl.innerHTML = `
+        <tr>
+          <td colspan="4" style="padding:26px 18px;">
+            <div style="display:flex;align-items:center;gap:18px;">
+              ${
+                photo
+                  ? `<img src="${photo}" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.3);" />`
+                  : `<div style="width:92px;height:92px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:800;border:2px solid rgba(255,255,255,.3);">${initials}</div>`
+              }
+              <div style="flex:1;">
+                <div style="font-size:22px;font-weight:700;">${top.name}</div>
+                <div style="margin-top:4px;opacity:.85;">Weekly Submitted AV • ${fmtMoney(top.av)}</div>
+                <div style="margin-top:2px;opacity:.55;">Deals this week • ${(top.deals || 0).toLocaleString()}</div>
+                <div style="margin-top:2px;opacity:.55;">YTD AV • ${fmtMoney(ytdVal)}</div>
+                <div style="margin-top:10px;display:inline-flex;align-items:center;gap:6px;background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.4);border-radius:999px;padding:4px 16px;font-size:12px;letter-spacing:.04em;">
+                  <span style="font-size:16px;">🥇</span>
+                  <span>Agent of the Week Belt</span>
+                </div>
               </div>
             </div>
-          </div>
-        </td>
-      </tr>
-    `;
+          </td>
+        </tr>
+      `;
+    }
   }
-}
 
-  // --- VENDORS BOARD (uses rolling 45d)
+  // --- Vendors board
   function renderVendorsBoard({ vendorRows }) {
-    const data = Array.isArray(vendorRows?.rows) ? vendorRows : summarizeVendors([]);
+    setView('Lead Vendors — Last 45 Days');
+    const data = vendorRows || { rows: [], totalDeals: 0 };
     const rows = data.rows || [];
     const totalDeals = data.totalDeals || 0;
-
-    setView('Lead Vendors — Last 45 Days');
 
     if (!rows.length) {
       if (headEl) headEl.innerHTML = '';
@@ -569,10 +550,15 @@ async function renderAgentOfWeekAuto(data) {
       return COLORS[h % COLORS.length];
     };
 
-    // donut by deals
+    // donut
     const size=240, cx=size/2, cy=size/2, r=size/2-8;
     const polar=(cx,cy,r,a)=>[cx + r*Math.cos(a), cy + r*Math.sin(a)];
-    const arcPath=(cx,cy,r,a0,a1)=>{const large=(a1-a0)>Math.PI?1:0; const [x0,y0]=polar(cx,cy,r,a0); const [x1,y1]=polar(cx,cy,r,a1); return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;};
+    const arcPath=(cx,cy,r,a0,a1)=>{
+      const large=(a1-a0)>Math.PI?1:0;
+      const [x0,y0]=polar(cx,cy,r,a0);
+      const [x1,y1]=polar(cx,cy,r,a1);
+      return `M ${x0} ${y0} A ${r} ${r} 0 ${large} 1 ${x1} ${y1}`;
+    };
     let acc=-Math.PI/2;
     const arcs = rows.map(v=>{
       const span = totalDeals ? 2*Math.PI*(v.deals/totalDeals) : 0;
@@ -583,7 +569,7 @@ async function renderAgentOfWeekAuto(data) {
       <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
         ${arcs}
         <circle cx="${cx}" cy="${cy}" r="${r-16}" fill="#0f141c"></circle>
-        <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals</text>
+        <text x="${cx}" y="${cy-6}" text-anchor="middle" font-size="13" fill="#9fb0c8">Deals (45d)</text>
         <text x="${cx}" y="${cy+16}" text-anchor="middle" font-size="20" font-weight="700" fill="#ffd36a">${totalDeals.toLocaleString()}</text>
       </svg>
     `;
@@ -591,7 +577,7 @@ async function renderAgentOfWeekAuto(data) {
     if (headEl) headEl.innerHTML = `
       <tr>
         <th>Vendor</th>
-        <th class="right">Deals</th>
+        <th class="right">Deals (45d)</th>
         <th class="right">% of total</th>
       </tr>
     `;
@@ -629,15 +615,18 @@ async function renderAgentOfWeekAuto(data) {
     if (bodyEl) bodyEl.innerHTML = donutRow + rowsHTML + totals;
   }
 
+  // --- PAR Board
   function renderParBoard({ par }) {
-    setView('PAR — Tracking'); // NOT principle of the day
+    setView('PAR — Tracking');
     const pace = +safe(par?.pace_target, 0);
     const agents = Array.isArray(par?.agents) ? par.agents : [];
+
     if (!agents.length) {
       if (headEl) headEl.innerHTML = '';
       if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">No PAR list provided.</td></tr>`;
       return;
     }
+
     if (headEl) headEl.innerHTML = `
       <tr><th>Agent</th><th class="right">Take&nbsp;Rate</th><th class="right">Annual&nbsp;AV</th></tr>
     `;
@@ -657,37 +646,25 @@ async function renderAgentOfWeekAuto(data) {
     `;
   }
 
-  // --------- Rules rotation (every 12h) — keep
+  // --- Rules rotation
   function startRuleRotation(rulesJson) {
     const base = 'THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT';
     const list = Array.isArray(rulesJson?.rules) ? rulesJson.rules.filter(Boolean) : [];
     if (!list.length) {
       setBanner(base, 'Bonus: You are who you hunt with. Everybody wants to eat, but FEW will hunt.');
-    } else {
-      let i = 0;
-      const apply = () => setBanner(base, list[i % list.length]);
-      apply();
-      setInterval(() => { i++; apply(); }, 12*60*60*1000);
+      return;
     }
+    let i = 0;
+    const apply = () => setBanner(base, list[i % list.length]);
+    apply();
+    setInterval(() => { i++; apply(); }, 12 * 60 * 60 * 1000);
   }
 
-  // ---------- BACKFILL (your 45d block, as given)
-  // I am keeping it EXACTLY like you dumped it in the chat — long, ugly, but yours.
+  // ---------- BACKFILL
+  // IMPORTANT:
+  // Replace the placeholder text below with your FULL 45-day backfill block EXACTLY as you maintain it.
   const BACKFILL_TEXT = `
-${/* your entire 45-day dump from your message goes here, unchanged. keep it in the file. */''}
-Jake Willis
-Lamy Dynasty Specials - $1
-ACA: 1
-Eli Thermilus	10-30-2025 6:57 pm
-Cindy Wong
-TTM Nice! - $1
-UHC/Suppy/wrap: 1
-F N	10-30-2025 3:53 pm
-... (KEEP THE REST OF YOUR 45-DAY BACKFILL TEXT HERE EXACTLY AS YOU PASTED IT) ...
-`;
-
-  // If you really want literally all 182 lines in here, keep them in the file.
-  // The parser below will ignore stuff that isn’t a vendor or a “agent datetime” line.
+  `; // <-- paste your real backfill between these backticks. No ellipsis.
 
   function parseBackfill(text) {
     const out = [];
@@ -702,9 +679,7 @@ F N	10-30-2025 3:53 pm
       const v = vendorRe.exec(ln);
       if (v) {
         const vendor = v[1].trim();
-        if (!VENDOR_SET.has(vendor)) {
-          continue;
-        }
+        if (!VENDOR_SET.has(vendor)) { pending = null; continue; }
         const amount = +v[2].replace(/,/g,'');
         pending = { soldProductName: vendor, amount, date: '', agent: '' };
         out.push(pending);
@@ -717,14 +692,18 @@ F N	10-30-2025 3:53 pm
         pending = null;
       }
     }
-    return out.map(o => ({ ...o, dateSold: o.date }));
+
+    return out.map(o => ({
+      ...o,
+      dateSold: o.date
+    }));
   }
 
   const BACKFILL_SALES = parseBackfill(BACKFILL_TEXT);
 
   // ---------- Data load ----------
   async function loadAll() {
-    const [rules, roster, calls, sold, ytdList, ytdTotalJson, par] = await Promise.all([
+    const [rules, roster, calls, soldRaw, ytdList, ytdTotalJson, par] = await Promise.all([
       fetchJSON(ENDPOINTS.rules),
       fetchJSON(ENDPOINTS.roster),
       fetchJSON(ENDPOINTS.callsByAgent),
@@ -734,38 +713,30 @@ F N	10-30-2025 3:53 pm
       fetchJSON(ENDPOINTS.par)
     ]);
 
-    const soldSafe = sold || { team: { totalSales: 0, totalAV12X: 0 }, perAgent: [], allSales: [] };
-    if (!Array.isArray(soldSafe.perAgent)) soldSafe.perAgent = [];
-
+    const sold = soldRaw || {};
     const resolvePhoto = buildHeadshotResolver(roster || []);
 
-    // merge live + backfill → then roll to 45d
-    const liveAllSales = Array.isArray(sold?.allSales) ? sold.allSales : [];
+    const liveAllSales = Array.isArray(sold.allSales) ? sold.allSales : [];
     const mergedAllSales = [...liveAllSales, ...BACKFILL_SALES];
 
-    // ROLLING 45d FILTER HERE
-    const cutoff = Date.now() - 45 * 24 * 3600 * 1000;
-    const rolledAllSales = mergedAllSales.filter(s => {
-      const t = Date.parse(s.dateSold || s.date || '');
-      return Number.isFinite(t) && t >= cutoff;
-    });
+    // Rolling 45d vendor base
+    const vendorRows = summarizeVendors(mergedAllSales);
 
-    const vendorRows = summarizeVendors(rolledAllSales);
+    // Weekly stats from same merged sales
+    const week = computeWeeklyStats(mergedAllSales);
 
-    // seed seen IDs from rolled data
-    for (const s of rolledAllSales) {
+    // seed splash IDs from current 45d universe
+    for (const s of mergedAllSales) {
       seenLeadIds.add(saleId(s));
     }
 
     return {
       rules: rules || { rules: [] },
       roster: roster || [],
-      calls: calls || { team: { calls: 0 }, perAgent: [] },
-      sold: {
-        ...soldSafe,
-        allSales: rolledAllSales   // important: board reads from this
-      },
+      calls: calls || { team: { calls: 0 } },
+      soldAll: mergedAllSales,
       vendorRows,
+      week,
       ytdList: ytdList || [],
       ytdTotal: (ytdTotalJson && ytdTotalJson.ytd_av_total) || 0,
       par: par || { pace_target: 0, agents: [] },
@@ -773,14 +744,14 @@ F N	10-30-2025 3:53 pm
     };
   }
 
-  // --------- Board rotation (30s each) — NOW includes Agent of the Week
+  // --------- Board rotation
   function startBoardRotation(data) {
     const order = [
-      () => renderRosterBoard(data),
       () => renderYtdBoard(data),
-      () => renderWeeklyActivity(data),
-      () => renderVendorsBoard(data),
       () => renderParBoard(data),
+      () => renderVendorsBoard(data),
+      () => renderRosterBoard(data),
+      () => renderWeeklyActivity(),
       () => renderAgentOfWeekAuto(data)
     ];
     let i = 0;
@@ -789,7 +760,7 @@ F N	10-30-2025 3:53 pm
     setInterval(() => { i++; paint(); }, 30_000);
   }
 
-  // --------- Live sale polling (still 45d window)
+  // --------- Live sale polling (keeps 45d + week & vendors in sync, no extra UX)
   function startLiveSalePolling(initialData) {
     const POLL_MS = 12_000;
     const cutoffWindow = 45 * 24 * 3600 * 1000;
@@ -799,39 +770,32 @@ F N	10-30-2025 3:53 pm
       if (!sold) return;
 
       const liveAllSales = Array.isArray(sold.allSales) ? sold.allSales : [];
-      const nowCutoff = Date.now() - cutoffWindow;
+      const now = Date.now();
+      const merged = [...liveAllSales, ...BACKFILL_SALES].filter(s => {
+        const t = parseApiDate(s.dateSold || s.date);
+        return Number.isFinite(t) && (now - t) <= cutoffWindow;
+      });
 
       let newSalesFound = false;
-      const rolled = [];
-
-      for (const s of liveAllSales) {
-        const t = Date.parse(s.dateSold || s.date || '');
-        if (!Number.isFinite(t) || t < nowCutoff) continue;
-        rolled.push(s);
-
+      for (const s of merged) {
         const id = saleId(s);
         if (!seenLeadIds.has(id)) {
           seenLeadIds.add(id);
           newSalesFound = true;
           showSplash({
-            name: s.agent || 'Agent',
-            amount: s.amount || 0,
+            name: canonicalName(s.agent || s.owner || 'Agent'),
+            amount: s.amount || s.av12x || 0,
             soldProductName: s.soldProductName || ''
           });
         }
       }
 
-      // merge with backfill again so 45d continues forward
-      const merged = [...rolled, ...BACKFILL_SALES].filter(s => {
-        const t = Date.parse(s.dateSold || s.date || '');
-        return Number.isFinite(t) && t >= nowCutoff;
-      });
-
-      const vendorRows = summarizeVendors(merged);
-
       if (newSalesFound) {
-        renderCards({ calls: initialData.calls, sold: { ...sold, allSales: merged } });
-        renderVendorsBoard({ vendorRows });
+        const week = computeWeeklyStats(merged);
+        const vendorRows = summarizeVendors(merged);
+        initialData.week = week;
+        initialData.vendorRows = vendorRows;
+        renderCards({ calls: initialData.calls, week });
       }
     };
 
@@ -842,28 +806,26 @@ F N	10-30-2025 3:53 pm
   (async () => {
     try {
       const data = await loadAll();
-      renderCards(data);
+      renderCards({ calls: data.calls, week: data.week });
       startRuleRotation(data.rules);
       startBoardRotation(data);
       startLiveSalePolling(data);
     } catch (err) {
       console.error(err);
       setBanner('THE FEW — EVERYONE WANTS TO EAT BUT FEW WILL HUNT', 'Error loading data.');
-      if (bodyEl) bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
+      if (bodyEl) {
+        bodyEl.innerHTML = `<tr><td style="padding:18px;color:#5c6c82;">Could not load dashboard data.</td></tr>`;
+      }
     }
   })();
 })();
 
 // ---------- OE Countdown ----------
-// you said: “I want it to count down to the deadline of OE, which is Dec 15th, 11:59PM EST.”
 (function () {
   const timerEl = document.querySelector('#oeTimer');
   if (!timerEl) return;
-
-  // Dec 15, 2025 11:59:59 PM America/New_York
-  const deadline = new Date('2025-12-15T23:59:59-05:00');
+  const deadline = new Date('2025-12-15T23:59:59-05:00'); // Dec 15, 2025 11:59:59 PM EST
   const pad = n => String(n).padStart(2, '0');
-
   function updateCountdown() {
     const now = new Date();
     const diff = deadline - now;
@@ -878,6 +840,5 @@ F N	10-30-2025 3:53 pm
     timerEl.textContent = `${d}d ${pad(h)}h ${pad(m)}m ${pad(s)}s`;
     requestAnimationFrame(() => setTimeout(updateCountdown, 250));
   }
-
   updateCountdown();
 })();
