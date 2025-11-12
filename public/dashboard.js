@@ -33,32 +33,32 @@
   const fmtMoney = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
   const safe = (v, d) => (v === undefined || v === null ? d : v);
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-+  // ---- ET time helpers + sales-week window (Fri 00:00 → Thu 23:59:59, America/New_York)
-+  const nowET = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-+  const toETms = (d) => {
-+    if (!d) return NaN;
-+    const t = new Date(d);
-+    if (isNaN(t)) return NaN;
-+    // Normalize the parsed timestamp into ET, then get epoch ms
-+    return new Date(t.toLocaleString('en-US', { timeZone: 'America/New_York' })).getTime();
-+  };
-+  function getSalesWeekRangeET(ref = nowET()) {
-+    // midnight ET for reference day
-+    const refMid = new Date(ref);
-+    refMid.setHours(0,0,0,0);
-+    const dow = refMid.getDay(); // 0=Sun … 6=Sat
-+    // distance back to Friday of the current sales week
-+    const daysBackToFriday = (dow + 2) % 7; // Fri(5)->0, Thu(4)->6, Sun(0)->2, etc.
-+    const start = new Date(refMid.getTime() - daysBackToFriday * 24 * 3600 * 1000);
-+    const end   = new Date(start.getTime() + 6 * 24 * 3600 * 1000 + (24*3600*1000 - 1)); // Thu 23:59:59.999
-+    return { startMs: start.getTime(), endMs: end.getTime(), start, end };
-+  }
-+  function isInCurrentSalesWeekET(dateStr) {
-+    const ms = toETms(dateStr);
-+    if (!Number.isFinite(ms)) return false;
-+    const { startMs, endMs } = getSalesWeekRangeET();
-+    return ms >= startMs && ms <= endMs;
-+  }
+// ---- ET time helpers + sales-week window (Fri 00:00 → Thu 23:59:59, America/New_York)
+const nowET = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+const toETms = (d) => {
+if (!d) return NaN;
+const t = new Date(d);
+if (isNaN(t)) return NaN;
+// Normalize the parsed timestamp into ET, then get epoch ms
+return new Date(t.toLocaleString('en-US', { timeZone: 'America/New_York' })).getTime();
+};
+function getSalesWeekRangeET(ref = nowET()) {
+// midnight ET for reference day
+const refMid = new Date(ref);
+refMid.setHours(0,0,0,0);
+const dow = refMid.getDay(); // 0=Sun … 6=Sat
+// distance back to Friday of the current sales week
+const daysBackToFriday = (dow + 2) % 7; // Fri(5)->0, Thu(4)->6, Sun(0)->2, etc.
+const start = new Date(refMid.getTime() - daysBackToFriday * 24 * 3600 * 1000);
+const end   = new Date(start.getTime() + 6 * 24 * 3600 * 1000 + (24*3600*1000 - 1)); // Thu 23:59:59.999
+return { startMs: start.getTime(), endMs: end.getTime(), start, end };
+}
+function isInCurrentSalesWeekET(dateStr) {
+const ms = toETms(dateStr);
+if (!Number.isFinite(ms)) return false;
+const { startMs, endMs } = getSalesWeekRangeET();
+return ms >= startMs && ms <= endMs;
+}
   const fetchJSON = async (url) => {
     try {
       const r = await fetch(url, { cache: 'no-store' });
@@ -356,22 +356,22 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     WEEKLY_ROSTER_CACHE = new Map();
     return WEEKLY_ROSTER_CACHE;
   }
-+  // --------- Cards (strict Fri→Thu ET window)
-+  function renderCards({ calls, sold }) {
-+    const callsVal = safe(calls?.team?.calls, 0); // leave calls as-is unless you want the same ET filter applied to calls endpoints
-+
-+    const all = Array.isArray(sold?.allSales) ? sold.allSales : [];
-+    let avVal = 0, dealsVal = 0;
-+    for (const s of all) {
-+      const when = s.dateSold || s.date || '';
-+      if (!isInCurrentSalesWeekET(when)) continue;
-+      avVal   += (+s.amount || +s.av12x || +s.av12X || 0);
-+      dealsVal+= 1;
-+    }
-+    if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
-+    if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
-+    if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
-+  }
+  // --------- Cards (strict Fri→Thu ET window)
+  function renderCards({ calls, sold }) {
+    const callsVal = safe(calls?.team?.calls, 0); // leave calls as-is unless you want the same ET filter applied to calls endpoints
+
+    const all = Array.isArray(sold?.allSales) ? sold.allSales : [];
+    let avVal = 0, dealsVal = 0;
+    for (const s of all) {
+      const when = s.dateSold || s.date || '';
+      if (!isInCurrentSalesWeekET(when)) continue;
+      avVal   += (+s.amount || +s.av12x || +s.av12X || 0);
+      dealsVal+= 1;
+   }
+    if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
+    if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
+    if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
+  }
   // --- WEEKLY ACTIVITY (calls_week_override.json)
   async function renderWeeklyActivity() {
     const headEl = document.querySelector('#thead');
