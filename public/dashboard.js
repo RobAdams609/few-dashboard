@@ -401,81 +401,126 @@
     return WEEKLY_ROSTER_CACHE;
   }
 
-  async function renderWeeklyActivity() {
-    setView('Weekly Activity');
+ async function renderWeeklyActivity() {
+  setView('Weekly Activity');
 
-    if (headEl) {
-      headEl.innerHTML = `
+  // Header: Agent | Submitted AV | Sold | Leads | Conv% | Dials | Talk min | Log min
+  if (headEl) {
+    headEl.innerHTML = `
+      <tr>
+        <th>Agent</th>
+        <th class="right">Submitted AV</th>
+        <th class="right">Sold</th>
+        <th class="right">Leads</th>
+        <th class="right">Conv%</th>
+        <th class="right">Dials</th>
+        <th class="right">Talk&nbsp;min</th>
+        <th class="right">Log&nbsp;min</th>
+      </tr>
+    `;
+  }
+
+  // Load override JSON (manual weekly activity)
+  const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
+  const json = res && res.ok ? await res.json() : null;
+
+  if (!json || typeof json !== 'object') {
+    if (bodyEl) {
+      bodyEl.innerHTML = `
         <tr>
-          <th>Agent</th>
-          <th class="right">Leads</th>
-          <th class="right">Sold</th>
-          <th class="right">Conv%</th>
-          <th class="right">Calls</th>
-          <th class="right">Talk&nbsp;min</th>
-          <th class="right">Log&nbsp;min</th>
+          <td colspan="8" style="padding:18px;color:#5c6c82;">
+            No weekly activity override loaded.
+          </td>
         </tr>
       `;
     }
-
-    const res = await fetch('/calls_week_override.json', { cache: 'no-store' }).catch(() => null);
-    const json = res && res.ok ? await res.json() : null;
-
-    if (!json || typeof json !== 'object') {
-      if (bodyEl) {
-        bodyEl.innerHTML = `<tr><td colspan="7" style="padding:18px;color:#5c6c82;">No weekly activity override loaded.</td></tr>`;
-      }
-      return;
-    }
-
-    const rosterMap = await getRosterByEmail();
-    const rows = [];
-
-    for (const [email, stats] of Object.entries(json)) {
-      const em = (email || '').toLowerCase();
-      const rosterEntry = rosterMap.get(em);
-      const baseName = rosterEntry?.name || (stats.name || (email || '').split('@')[0].replace(/\./g,' '));
-      const name = canonicalName(baseName);
-      if (name === '__EXCLUDED__') continue;
-
-      const leads = +stats.leads || 0;
-      const sold = +stats.sold || 0;
-      const calls = +stats.calls || 0;
-      const talkMin = +stats.talkMin || 0;
-      const loggedMin = +stats.loggedMin || 0;
-      const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
-
-      let photoUrl = null;
-      if (rosterEntry && rosterEntry.photo) {
-        const s = String(rosterEntry.photo);
-        photoUrl = (s.startsWith('http') || s.startsWith('/')) ? s : `/headshots/${s}`;
-      }
-
-      rows.push({ name, leads, sold, calls, talkMin, loggedMin, conv, photoUrl });
-    }
-
-    rows.sort((a,b)=> b.sold - a.sold || b.leads - a.leads);
-
-    if (bodyEl) {
-      bodyEl.innerHTML = rows.map(r => {
-        const initials = (r.name || '').split(/\s+/).map(w => (w[0] || '').toUpperCase()).join('');
-        const avatar = r.photoUrl
-          ? `<img src="${r.photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
-          : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initials || '?'}</div>`;
-        return `
-          <tr>
-            <td class="agent" style="display:flex;align-items:center">${avatar}<span>${r.name}</span></td>
-            <td class="right">${r.leads}</td>
-            <td class="right">${r.sold}</td>
-            <td class="right">${r.conv}%</td>
-            <td class="right">${r.calls}</td>
-            <td class="right">${r.talkMin}</td>
-            <td class="right">${r.loggedMin}</td>
-          </tr>
-        `;
-      }).join('');
-    }
+    return;
   }
+
+  const rosterMap = await getRosterByEmail();
+  const rows = [];
+
+  for (const [email, stats] of Object.entries(json)) {
+    const em = (email || '').toLowerCase();
+    const rosterEntry = rosterMap.get(em);
+
+    const baseName =
+      (rosterEntry && rosterEntry.name) ||
+      stats.name ||
+      (email || '').split('@')[0].replace(/\./g, ' ');
+
+    const name = canonicalName(baseName);
+    if (name === '__EXCLUDED__') continue;
+
+    const leads     = Number(stats.leads     || 0);
+    const sold      = Number(stats.sold      || 0);
+    const calls     = Number(stats.calls     || 0);
+    const talkMin   = Number(stats.talkMin   || 0);
+    const loggedMin = Number(stats.loggedMin || 0);
+
+    // AV handling:
+    // - If av12x is provided in JSON, treat as already annual.
+    // - Else if av is provided, treat as monthly and x12 to annual.
+    const av12xField = Number(stats.av12x || 0);
+    const avField    = Number(stats.av    || 0);
+    const submittedAV = av12xField || (avField * 12);
+
+    const conv = leads ? +(sold * 100 / leads).toFixed(1) : 0;
+
+    let photoUrl = null;
+    if (rosterEntry && rosterEntry.photo) {
+      const p = String(rosterEntry.photo);
+      photoUrl = (p.startsWith('http') || p.startsWith('/')) ? p : `/headshots/${p}`;
+    }
+
+    rows.push({
+      name,
+      submittedAV,
+      sold,
+      leads,
+      conv,
+      calls,
+      talkMin,
+      loggedMin,
+      photoUrl
+    });
+  }
+
+  // Sort primarily by Submitted AV desc, then Sold desc, then Leads desc
+  rows.sort((a, b) =>
+    (b.submittedAV || 0) - (a.submittedAV || 0) ||
+    b.sold - a.sold ||
+    b.leads - a.leads
+  );
+
+  if (bodyEl) {
+    bodyEl.innerHTML = rows.map(r => {
+      const initials = (r.name || '')
+        .split(/\s+/)
+        .map(w => (w[0] || '').toUpperCase())
+        .join('');
+
+      const avatar = r.photoUrl
+        ? `<img src="${r.photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15);" />`
+        : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;font-size:12px;font-weight:700;color:#89a2c6;border:1px solid rgba(255,255,255,.15);">${initials}</div>`;
+
+      return `
+        <tr>
+          <td class="agent" style="display:flex;align-items:center;">
+            ${avatar}<span>${r.name}</span>
+          </td>
+          <td class="right">${fmtMoney(r.submittedAV || 0)}</td>
+          <td class="right">${r.sold}</td>
+          <td class="right">${r.leads}</td>
+          <td class="right">${r.conv}%</td>
+          <td class="right">${r.calls}</td>
+          <td class="right">${r.talkMin}</td>
+          <td class="right">${r.loggedMin}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+}
 
   // --- Agent of the Week (from weekly stats)
   async function renderAgentOfWeekAuto(data) {
