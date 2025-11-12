@@ -356,22 +356,7 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     WEEKLY_ROSTER_CACHE = new Map();
     return WEEKLY_ROSTER_CACHE;
   }
-  // --------- Cards (strict Fri→Thu ET window)
-  function renderCards({ calls, sold }) {
-    const callsVal = safe(calls?.team?.calls, 0); // leave calls as-is unless you want the same ET filter applied to calls endpoints
-
-    const all = Array.isArray(sold?.allSales) ? sold.allSales : [];
-    let avVal = 0, dealsVal = 0;
-    for (const s of all) {
-      const when = s.dateSold || s.date || '';
-      if (!isInCurrentSalesWeekET(when)) continue;
-      avVal   += (+s.amount || +s.av12x || +s.av12X || 0);
-      dealsVal+= 1;
-   }
-    if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
-    if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
-    if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
-  }
+  
   // --- WEEKLY ACTIVITY (calls_week_override.json)
   async function renderWeeklyActivity() {
     const headEl = document.querySelector('#thead');
