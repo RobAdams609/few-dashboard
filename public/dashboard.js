@@ -33,7 +33,32 @@
   const fmtMoney = (n) => `$${Math.round(Number(n) || 0).toLocaleString()}`;
   const safe = (v, d) => (v === undefined || v === null ? d : v);
   const norm = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-
++  // ---- ET time helpers + sales-week window (Fri 00:00 → Thu 23:59:59, America/New_York)
++  const nowET = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
++  const toETms = (d) => {
++    if (!d) return NaN;
++    const t = new Date(d);
++    if (isNaN(t)) return NaN;
++    // Normalize the parsed timestamp into ET, then get epoch ms
++    return new Date(t.toLocaleString('en-US', { timeZone: 'America/New_York' })).getTime();
++  };
++  function getSalesWeekRangeET(ref = nowET()) {
++    // midnight ET for reference day
++    const refMid = new Date(ref);
++    refMid.setHours(0,0,0,0);
++    const dow = refMid.getDay(); // 0=Sun … 6=Sat
++    // distance back to Friday of the current sales week
++    const daysBackToFriday = (dow + 2) % 7; // Fri(5)->0, Thu(4)->6, Sun(0)->2, etc.
++    const start = new Date(refMid.getTime() - daysBackToFriday * 24 * 3600 * 1000);
++    const end   = new Date(start.getTime() + 6 * 24 * 3600 * 1000 + (24*3600*1000 - 1)); // Thu 23:59:59.999
++    return { startMs: start.getTime(), endMs: end.getTime(), start, end };
++  }
++  function isInCurrentSalesWeekET(dateStr) {
++    const ms = toETms(dateStr);
++    if (!Number.isFinite(ms)) return false;
++    const { startMs, endMs } = getSalesWeekRangeET();
++    return ms >= startMs && ms <= endMs;
++  }
   const fetchJSON = async (url) => {
     try {
       const r = await fetch(url, { cache: 'no-store' });
@@ -331,7 +356,22 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     WEEKLY_ROSTER_CACHE = new Map();
     return WEEKLY_ROSTER_CACHE;
   }
-
++  // --------- Cards (strict Fri→Thu ET window)
++  function renderCards({ calls, sold }) {
++    const callsVal = safe(calls?.team?.calls, 0); // leave calls as-is unless you want the same ET filter applied to calls endpoints
++
++    const all = Array.isArray(sold?.allSales) ? sold.allSales : [];
++    let avVal = 0, dealsVal = 0;
++    for (const s of all) {
++      const when = s.dateSold || s.date || '';
++      if (!isInCurrentSalesWeekET(when)) continue;
++      avVal   += (+s.amount || +s.av12x || +s.av12X || 0);
++      dealsVal+= 1;
++    }
++    if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
++    if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
++    if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
++  }
   // --- WEEKLY ACTIVITY (calls_week_override.json)
   async function renderWeeklyActivity() {
     const headEl = document.querySelector('#thead');
@@ -433,14 +473,27 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     }
   }
 
-// --- AGENT OF THE WEEK (AUTO from API + direct YTD pull)
+// --- AGENT OF THE WEEK (AUTO, Fri→Thu ET slice from allSales + YTD pull)
 async function renderAgentOfWeekAuto(data) {
   setView('Agent of the Week');
 
   const sold = data?.sold || {};
-  const perAgent = Array.isArray(sold.perAgent) ? sold.perAgent : [];
+  const all  = Array.isArray(sold.allSales) ? sold.allSales : [];
 
-  // no weekly data → show empty
+  // build weekly (Fri→Thu ET) aggregates from allSales
+  const agg = new Map(); // name -> { av, deals }
+  for (const s of all) {
+    const when = s.dateSold || s.date || '';
+    if (!isInCurrentSalesWeekET(when)) continue;
+    const name = canonicalName(s.agent || s.name || '');
+    if (!name) continue;
+    const row = agg.get(name) || { av:0, deals:0 };
+    row.av    += (+s.amount || +s.av12x || +s.av12X || 0);
+    row.deals += 1;
+    agg.set(name, row);
+  }
+
+  const perAgent = [...agg.entries()].map(([name, v]) => ({ name, av: v.av, deals: v.deals }));
   if (!perAgent.length) {
     if (document.querySelector('#thead')) {
       document.querySelector('#thead').innerHTML = `<tr><th>Agent of the Week</th></tr>`;
@@ -454,13 +507,10 @@ async function renderAgentOfWeekAuto(data) {
   // 1) pick top weekly by AV
   let top = null;
   for (const row of perAgent) {
-    const nameRaw = row.name || row.agent || '';
-    const name = canonicalName(nameRaw);
-    const av = Number(row.av12x || row.av12X || row.amount || 0);
-    const deals = Number(row.sales || row.deals || 0);
-    if (!top || av > top.av) {
-      top = { name, av, deals };
-    }
+    const name  = row.name;
+    const av    = Number(row.av || 0);
+    const deals = Number(row.deals || 0);
+    if (!top || av > top.av) top = { name, av, deals };
   }
   if (!top) {
     if (document.querySelector('#thead')) {
@@ -472,46 +522,32 @@ async function renderAgentOfWeekAuto(data) {
     return;
   }
 
-  // 2) get YTD from three places, in this order:
-  //    a) in-memory (data.ytdList)
-  //    b) live fetch /ytd_av.json (array)
-  //    c) live fetch /ytd_av.json (wrapped object)
+  // 2) YTD lookup
   const wantName = norm(top.name);
   let ytdVal = 0;
 
-  // a) in-memory
   if (Array.isArray(data.ytdList)) {
     const hit = data.ytdList.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
     if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
   }
 
-  // b/c) if still 0 → try fetch
   if (!ytdVal) {
     try {
       const r = await fetch('/ytd_av.json', { cache: 'no-store' });
       if (r.ok) {
         const json = await r.json();
-
-        // case 1: array
         if (Array.isArray(json)) {
           const hit = json.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
           if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
         } else if (json && typeof json === 'object') {
-          // case 2: object that has a list/agents field
-          const arr = Array.isArray(json.list)
-            ? json.list
-            : Array.isArray(json.agents)
-              ? json.agents
-              : [];
+          const arr = Array.isArray(json.list) ? json.list : (Array.isArray(json.agents) ? json.agents : []);
           if (arr.length) {
             const hit = arr.find(x => norm(x.name) === wantName || norm(canonicalName(x.name)) === wantName);
             if (hit) ytdVal = Number(hit.av || hit.ytd_av || 0);
           }
         }
       }
-    } catch (_) {
-      // ignore
-    }
+    } catch (_e) { /* ignore */ }
   }
 
   // 3) photo
