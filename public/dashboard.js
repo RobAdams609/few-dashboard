@@ -230,36 +230,22 @@ const canonicalName = (name) => NAME_ALIASES.get(norm(name)) || name;
     s.leadId || s.id || `${s.agent}-${s.dateSold || s.date}-${s.soldProductName}-${s.amount}`
   );
 
-  // --------- Cards
+    // --------- Cards (strict Fri→Thu ET window)
   function renderCards({ calls, sold }) {
-    const callsVal = safe(calls?.team?.calls, 0);
+    const callsVal = safe(calls?.team?.calls, 0); // leave calls as-is unless you want the same ET filter applied to calls endpoints
 
-    let avVal = safe(sold?.team?.totalAV12X ?? sold?.team?.totalAv12x, 0);
-    if (!avVal && Array.isArray(sold?.perAgent)) {
-      avVal = sold.perAgent.reduce((a,p)=> a + (+p.av12x || +p.av12X || +p.amount || 0), 0);
-    }
-
-    let dealsVal = safe(sold?.team?.totalSales, 0);
-    if (!dealsVal && Array.isArray(sold?.perAgent)) {
-      dealsVal = sold.perAgent.reduce((a,p)=> a + (+p.sales || 0), 0);
+    const all = Array.isArray(sold?.allSales) ? sold.allSales : [];
+    let avVal = 0, dealsVal = 0;
+    for (const s of all) {
+      const when = s.dateSold || s.date || '';
+      if (!isInCurrentSalesWeekET(when)) continue;
+      avVal   += (+s.amount || +s.av12x || +s.av12X || 0);
+      dealsVal+= 1;
     }
 
     if (cards.calls) cards.calls.textContent = (callsVal || 0).toLocaleString();
     if (cards.av)    cards.av.textContent    = fmtMoney(avVal);
     if (cards.deals) cards.deals.textContent = (dealsVal || 0).toLocaleString();
-  }
-
-  function agentRowHTML({ name, right1, right2, photoUrl, initial }) {
-    const avatar = photoUrl
-      ? `<img src="${photoUrl}" alt="" style="width:28px;height:28px;border-radius:50%;object-fit:cover;margin-right:10px;border:1px solid rgba(255,255,255,.15)" />`
-      : `<div style="width:28px;height:28px;border-radius:50%;background:#1f2a3a;display:flex;align-items:center;justify-content:center;margin-right:10px;border:1px solid rgba(255,255,255,.15);font-size:12px;font-weight:700;color:#89a2c6">${initial || '?'}</div>`;
-    return `
-      <tr>
-        <td class="agent" style="display:flex;align-items:center">${avatar}<span>${name}</span></td>
-        <td class="right">${right1}</td>
-        ${right2 !== undefined ? `<td class="right">${right2}</td>` : ''}
-      </tr>
-    `;
   }
 
   // --------- Vendors aggregation (rolling 45d)
